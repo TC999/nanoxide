@@ -1,0 +1,14 @@
+[package]
+name = "rnano"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+crossterm = "0.28"
+unicode-width = "0.2"
+unicode-segmentation = "1.12"
+regex = "1.11"
+glob = "0.3"
+clap = "4.5"
+dirs = "5.0"
+tempfile = "3.13"
