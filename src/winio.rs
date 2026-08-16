@@ -313,12 +313,12 @@ fn draw_titlebar_line(stdout: &mut io::Stdout, cols: usize) {
 /// 绘制状态栏行。
 fn draw_statusbar_line(stdout: &mut io::Stdout, cols: usize) {
     with_global(|g| {
-        let msg = match g.lastmessage {
-            MessageType::Vacuum => String::new(),
-            _ => "(Info) ".to_string(),
-        };
-        if msg.len() > cols {
-            let _ = write!(stdout, "{}", &msg[..cols]);
+        let msg = &g.statusbar_msg;
+        if msg.is_empty() {
+            let _ = write!(stdout, "{:width$}", "", width = cols);
+        } else if msg.len() > cols {
+            let clipped: String = msg.chars().take(cols).collect();
+            let _ = write!(stdout, "{}", clipped);
         } else {
             let _ = write!(stdout, "{}{:width$}", msg, "", width = cols - msg.len());
         }
@@ -395,6 +395,7 @@ fn draw_bottombars_lines(stdout: &mut io::Stdout, cols: usize, lines: usize) {
 pub fn statusbar(msg: &str) {
     with_global_mut(|g| {
         g.lastmessage = MessageType::Info;
+        g.statusbar_msg = msg.to_string();
     });
     let mut stdout = io::stdout();
     let lines = with_global(|g| g.LINES);
@@ -408,6 +409,7 @@ pub fn statusbar(msg: &str) {
 pub fn statusline(typ: MessageType, msg: &str) {
     with_global_mut(|g| {
         g.lastmessage = typ;
+        g.statusbar_msg = msg.to_string();
     });
     let mut stdout = io::stdout();
     let lines = with_global(|g| g.LINES);
@@ -426,6 +428,7 @@ pub fn mvwaddstr(_win: bool, _row: i32, _col: i32, _text: &str) {
 pub fn wipe_statusbar() {
     with_global_mut(|g| {
         g.lastmessage = MessageType::Vacuum;
+        g.statusbar_msg.clear();
     });
     let mut stdout = io::stdout();
     let lines = with_global(|g| g.LINES);

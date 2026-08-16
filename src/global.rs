@@ -327,8 +327,7 @@ pub fn first_sc_for(menu: i32, func: FunctionId) -> Option<KeyRef> {
             current = s_ref.next.clone();
         }
         None
-    });
-    None
+    })
 }
 
 const ALT_BACKSPACE: i32 = 0x40A;

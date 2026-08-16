@@ -74,3 +74,50 @@ fn render_uses_current_buffer_data() {
     // 缓冲区应反映新输入
     assert_eq!(data, "Xoriginal");
 }
+
+/// 不带文件名、缓冲区为空时显示欢迎消息（对应 nano.c 的 statusbar 欢迎提示）。
+#[test]
+fn welcome_message_on_empty_buffer() {
+    use nano_rs::definitions::*;
+    nano_rs::global::global_init();
+    nano_rs::global::shortcut_init();
+    with_global_mut(|g| {
+        g.COLS = 80;
+        g.LINES = 24;
+        g.editwinrows = 20;
+        g.currmenu = MMAIN;
+    });
+
+    // Ctrl+G（帮助）在 MMAIN 的首快捷键必须是 0x07
+    let help_key = nano_rs::global::first_sc_for(MMAIN, FunctionId::DoHelp)
+        .map(|k| k.borrow().keycode)
+        .unwrap_or(-1);
+    assert_eq!(help_key, 0x07, "帮助键应为 Ctrl+G（0x07）");
+
+    // 模拟 main 不带文件名：open_buffer("") → 空缓冲区、无文件名 → 显示欢迎消息
+    nano_rs::files::open_buffer("");
+    assert!(nano_rs::nano::show_welcome_message());
+}
+
+/// 缓冲区有内容或带文件名时不应显示欢迎消息。
+#[test]
+fn no_welcome_message_with_content_or_name() {
+    use nano_rs::definitions::*;
+    nano_rs::global::global_init();
+    nano_rs::global::shortcut_init();
+    with_global_mut(|g| {
+        g.COLS = 80;
+        g.LINES = 24;
+        g.editwinrows = 20;
+        g.currmenu = MMAIN;
+    });
+
+    // 带文件名（即使文件不存在，新文件分支也有名字）→ 不显示
+    nano_rs::files::open_buffer("named_file.txt");
+    assert!(!nano_rs::nano::show_welcome_message());
+
+    // 无文件名但有内容 → 不显示
+    nano_rs::files::open_buffer("");
+    nano_rs::text::inject(b"hello", 5);
+    assert!(!nano_rs::nano::show_welcome_message());
+}

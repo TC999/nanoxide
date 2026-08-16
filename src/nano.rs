@@ -67,6 +67,9 @@ pub fn main() {
     // 10. 准备显示
     files::prepare_for_display();
 
+    // 10.5 不带文件名且缓冲区为空时显示欢迎消息（对应 nano.c 的 statusbar 欢迎提示）
+    show_welcome_message();
+
     // 11. 标记正在运行
     with_global_mut(|g| g.we_are_running = true);
 
@@ -80,6 +83,33 @@ pub fn main() {
     history::save_history();
     winio::terminal_restore();
     with_global_mut(|g| g.we_are_running = false);
+}
+
+/// 不带文件名且缓冲区为空时，在状态栏显示欢迎消息。
+/// 条件与 nano.c 的 main() 一致：无文件名、缓冲区为空、
+/// 未禁用帮助、且 Ctrl+G（帮助键）未被重绑定。
+pub fn show_welcome_message() -> bool {
+    let (filename_empty, totsize_zero) = with_global(|g| match &g.openfile {
+        Some(o) => {
+            let of = o.borrow();
+            (
+                of.filename
+                    .as_deref()
+                    .map(|s| s.is_empty())
+                    .unwrap_or(true),
+                of.totsize == 0,
+            )
+        }
+        None => (true, true),
+    });
+    let not_rebound = global::first_sc_for(MMAIN, FunctionId::DoHelp)
+        .map(|k| k.borrow().keycode == 0x07)
+        .unwrap_or(false);
+    let show = filename_empty && totsize_zero && !ISSET(NO_HELP) && not_rebound;
+    if show {
+        winio::statusbar("[ Welcome to nano.  For basic help, type Ctrl+G. ]");
+    }
+    show
 }
 
 /// 解析命令行参数。

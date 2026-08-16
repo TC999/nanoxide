@@ -617,6 +617,8 @@ pub struct GlobalState {
     pub focusing: bool,
     pub control_C_was_pressed: bool,
     pub lastmessage: MessageType,
+    /// 状态栏当前显示的消息文本（供重绘时保留，对应 C 中 curses 窗口的内容）。
+    pub statusbar_msg: String,
     pub pletion_line: Option<LineRef>,
     pub answer: Option<String>,
     pub last_search: Option<String>,
@@ -709,7 +711,8 @@ impl GlobalState {
             ran_a_tool: false, foretext: None, final_status: 0,
             inhelp: false, title: None, refresh_needed: false,
             focusing: true, control_C_was_pressed: false,
-            lastmessage: MessageType::Vacuum, pletion_line: None,
+            lastmessage: MessageType::Vacuum, statusbar_msg: String::new(),
+            pletion_line: None,
             answer: None, last_search: None, didfind: 0, present_path: None,
             on_a_vt: false, shifted_metas: false, meta_key: false,
             shift_held: false, mute_modifiers: false,
