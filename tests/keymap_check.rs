@@ -151,3 +151,20 @@ fn enter_key_translates_to_cr() {
     assert_eq!(nano_rs::winio::translate_keycode(ev), 13);
 }
 
+
+/// 提示菜单中 Backspace/Delete 键应映射为删除（对应 C 的 MMOST Bsp/Del）。
+#[test]
+fn prompt_backspace_delete_keys() {
+    use nano_rs::definitions::*;
+    nano_rs::global::global_init();
+    nano_rs::global::shortcut_init();
+
+    let b = nano_rs::global::find_shortcut(KEY_BACKSPACE, MWRITEFILE).map(|k| k.borrow().func);
+    assert_eq!(b, Some(FunctionId::DoBackspace), "Backspace 键应映射为删除");
+
+    let d = nano_rs::global::find_shortcut(KEY_DC, MWRITEFILE).map(|k| k.borrow().func);
+    assert_eq!(d, Some(FunctionId::DoDelete), "Delete 键应映射为删除");
+
+    let cd = nano_rs::global::find_shortcut(4, MWRITEFILE).map(|k| k.borrow().func);
+    assert_eq!(cd, Some(FunctionId::DoDelete), "^D 应映射为删除");
+}

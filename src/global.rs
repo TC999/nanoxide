@@ -289,6 +289,8 @@ pub fn shortcut_init() {
     add_to_funcs(FunctionId::DoBackspace, MMAIN, "Backspace", "backspace_gist", true);
     add_to_funcs(FunctionId::DoEnter, MMAIN, "Enter", "enter_gist", true);
     add_to_funcs(FunctionId::DoTab, MMAIN, "Tab", "tab_gist", true);
+    /* 其余菜单的快捷键（提示/浏览器等，对应 C 的 shortcut_init 后半部分）。 */
+    shortcut_init_rest();
 }
 // ======================== 按键解释（对应 global.c） ========================
 
@@ -354,6 +356,10 @@ pub fn shortcut_init_rest() {
     add_to_sclist(mmi, "^K", 11, FunctionId::DoCut, 0);
     add_to_sclist(mmi, "^U", 21, FunctionId::DoPaste, 0);
     add_to_sclist(mmi, "^H", 8, FunctionId::DoBackspace, 0);
+    add_to_sclist(mmi, "^D", 4, FunctionId::DoDelete, 0);
+    add_to_sclist(mmi, "Bsp", KEY_BACKSPACE, FunctionId::DoBackspace, 0);
+    add_to_sclist(mmi, "Sh-Del", SHIFT_DELETE, FunctionId::DoBackspace, 0);
+    add_to_sclist(mmi, "Del", KEY_DC, FunctionId::DoDelete, 0);
     add_to_sclist(mmi, "^I", 9, FunctionId::DoTab, 0);
 
     // 浏览器菜单

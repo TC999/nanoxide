@@ -174,3 +174,25 @@ fn absorb_enter_does_not_block() {
     nano_rs::prompt::absorb_character(13, Some(FunctionId::DoEnter));
     assert_eq!(nano_rs::prompt::get_answer(), "test.txt");
 }
+
+/// 提示中 Backspace 应删除光标前字符、Delete 删除光标处字符。
+#[test]
+fn statusbar_backspace_and_delete_remove_chars() {
+    nano_rs::global::global_init();
+    with_global_mut(|g| {
+        g.COLS = 80;
+        g.LINES = 24;
+        g.currmenu = MWRITEFILE;
+        g.answer = Some("abc.txt".to_string());
+        g.typing_x = 7;
+    });
+    nano_rs::prompt::handle_editing(FunctionId::DoBackspace);
+    assert_eq!(nano_rs::prompt::get_answer(), "abc.tx", "退格应删除光标前字符");
+
+    with_global_mut(|g| {
+        g.answer = Some("abc.txt".to_string());
+        g.typing_x = 1;
+    });
+    nano_rs::prompt::handle_editing(FunctionId::DoDelete);
+    assert_eq!(nano_rs::prompt::get_answer(), "ac.txt", "Delete 应删除光标处字符");
+}
