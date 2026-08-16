@@ -3,90 +3,22 @@
  * 版权 (C) 1999-2026 Free Software Foundation, Inc.
  **************************************************************************/
 
-//! 程序入口、命令行参数解析、终端初始化与编辑器主循环。
+//! 命令行参数解析、编辑器主循环（对应 nano.c 的主函数逻辑，
+//! 实际入口在 main.rs 中组装初始化顺序）。
 //! 转换说明：使用 `with_global` 安全访问全局状态。
 
 use crate::definitions::*;
 use crate::global;
 use crate::files;
-use crate::history;
 use crate::search;
 use crate::text;
 use crate::winio;
-use crate::utils;
 use crate::winio::ERR;
 use crate::movement;
 use crate::cut;
-use crate::rcfile;
-use crate::color;
 use crate::help;
 use std::cell::RefCell;
 use std::rc::Rc;
-
-/// 主函数入口。
-pub fn main() {
-    // 1. 初始化全局状态
-    global::global_init();
-
-    // 2. 解析命令行参数
-    let args: Vec<String> = std::env::args().collect();
-    parse_args(&args);
-
-    // 3. 获取用户主目录
-    utils::get_homedir();
-
-    // 4. 初始化终端
-    winio::initscr();
-
-    // 5. 初始化颜色
-    color::set_interface_colorpairs();
-
-    // 6. 读取 rc 文件
-    rcfile::do_rcfiles();
-
-    // 7. 初始化快捷键
-    global::shortcut_init();
-
-    // 8. 加载历史记录
-    history::history_init();
-    history::load_history();
-
-    // 9. 打开文件
-    let filename = parse_args(&args);
-    match filename {
-        Some(f) => {
-            let opened = files::open_buffer(&f);
-            if !opened {
-                // 读取失败时也创建空缓冲区，保证编辑器始终有可编辑目标
-                files::open_buffer("");
-            }
-        }
-        None => {
-            // 创建空缓冲区
-            files::open_buffer("");
-        }
-    }
-
-    // 10. 准备显示
-    files::prepare_for_display();
-
-    // 10.5 不带文件名且缓冲区为空时显示欢迎消息（对应 nano.c 的 statusbar 欢迎提示）
-    show_welcome_message();
-
-    // 11. 标记正在运行
-    with_global_mut(|g| g.we_are_running = true);
-
-    // 12. 首次刷新
-    winio::edit_refresh();
-
-    // 13. 主事件循环
-    main_loop();
-
-    // 14. 退出清理
-    history::save_history();
-    winio::terminal_restore();
-    with_global_mut(|g| g.we_are_running = false);
-}
 
 /// 不带文件名且缓冲区为空时，在状态栏显示欢迎消息。
 /// 条件与 nano.c 的 main() 一致：无文件名、缓冲区为空、
@@ -271,7 +203,7 @@ fn print_usage() {
 }
 
 /// 主事件循环。
-fn main_loop() {
+pub fn main_loop() {
     with_global_mut(|g| g.we_are_running = true);
 
     while with_global(|g| g.we_are_running) {
