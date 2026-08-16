@@ -211,7 +211,6 @@ pub fn wrap_help_text_into_buffer() {
             length = text::break_line(&bytes[ptr..], ((if cols < 40 { 22 } else { cols - 18 }) - sidebar as usize) as isize, true) as usize;
         }
 
-        let _ = std::fs::write("diag_wrap.txt", format!("f loop ptr={} len={} total={}\n", ptr, length, bytes.len()));
         let shim = if bytes.get(ptr + length.saturating_sub(1)).copied().unwrap_or(0) == b' ' { 0 } else { 1 };
         /* C: snprintf(oneline, length + shim, "%s", ptr) 最多写 length + shim - 1 字符。 */
         let copylen = (length + shim).saturating_sub(1).min(bytes.len() - ptr);
