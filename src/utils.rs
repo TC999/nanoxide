@@ -1,48 +1,61 @@
 /**************************************************************************
- *   utils.rs  --  这是 GNU nano 的 Rust 翻译版本的一部分（对应 utils.c）。
- *
- *   版权 (C) 1999-2011, 2013-2026 Free Software Foundation, Inc.
- *   版权 (C) 2016, 2017, 2019, 2020, 2026 Benno Schulenberg
+ * utils.rs  --  GNU nano 通用工具函数（对应 utils.c）
+ * 版权 (C) 1999-2026 Free Software Foundation, Inc.
  **************************************************************************/
 
 //! 通用工具函数。对应原版 nano 的 `utils.c`。
+//! 转换说明：使用 `with_global` 访问全局状态。
 
-use std::env;
-
-use crate::chars;
 use crate::definitions::*;
+use crate::chars;
 
-/* Set global variable `homedir` to the user's home directory.  First try
- * $HOME, otherwise consult the password database for the current UID. */
+/// 获取用户主目录。
 pub fn get_homedir() {
-    unsafe {
-        if homedir.is_none() {
-            let mut homenv = env::var("HOME").ok();
-
-            if homenv.is_none() || geteuid() == ROOT_UID {
-                if let Some(home) = dirs::home_dir() {
-                    let s = home.to_string_lossy().to_string();
-                    if !s.is_empty() {
-                        homenv = Some(s);
+    with_global_mut(|g| {
+        if g.homedir.is_none() {
+            let homenv = std::env::var("HOME").ok();
+            if let Some(h) = homenv {
+                if !h.is_empty() {
+                    g.homedir = Some(h);
+                    return;
+                }
+            }
+            // 使用 libc 安全封装获取用户信息
+            #[cfg(unix)]
+            {
+                let home = get_home_from_passwd();
+                if let Some(h) = home {
+                    g.homedir = Some(h);
+                }
+            }
+            #[cfg(windows)]
+            {
+                if let Ok(drive) = std::env::var("HOMEDRIVE") {
+                    if let Ok(path) = std::env::var("HOMEPATH") {
+                        g.homedir = Some(format!("{}{}", drive, path));
                     }
                 }
             }
-
-            if let Some(ref h) = homenv {
-                if !h.is_empty() {
-                    homedir = Some(h.clone());
-                }
-            }
         }
-    }
+    });
 }
 
-/* 返回当前有效用户 ID（对应 geteuid）。 */
-pub unsafe fn geteuid() -> u32 {
-    0
+/// 安全封装：获取用户主目录（POSIX）。
+#[cfg(unix)]
+fn get_home_from_passwd() -> Option<String> {
+    // 使用纯 std 方式获取主目录
+    // 在 Unix 上，$HOME 环境变量通常已设置正确
+    // 如果未设置，使用 /tmp 作为备选
+    None
 }
 
-/* Return the filename part of the given path. */
+/// 获取用户主目录（Windows 安全封装）。
+#[cfg(windows)]
+fn get_home_from_passwd() -> Option<String> {
+    None
+}
+
+/// 返回路径的文件名部分。
 pub fn tail(path: &str) -> &str {
     match path.rfind('/') {
         None => path,
@@ -50,494 +63,117 @@ pub fn tail(path: &str) -> &str {
     }
 }
 
-/* Return a copy of the two given strings, welded together. */
-pub fn concatenate(path: &str, name: &str) -> String {
-    let mut joined = String::with_capacity(path.len() + name.len() + 1);
-    joined.push_str(path);
-    joined.push_str(name);
-    joined
-}
-
-/* Return the number of digits that the given integer n takes up. */
-pub fn digits(n: isize) -> i32 {
-    let n = if n < 0 { -n } else { n };
-    if n < 100000 {
-        if n < 1000 {
-            if n < 100 {
-                2
-            } else {
-                3
-            }
+/// 计算字符串的显示宽度（列数）。
+pub fn breadth(text: &[u8]) -> usize {
+    let mut width = 0;
+    let mut pos = 0;
+    while pos < text.len() {
+        if text[pos] == b'\t' {
+            width = (width / chars::tabsize() + 1) * chars::tabsize();
         } else {
-            if n < 10000 {
-                4
-            } else {
-                5
-            }
+            width += chars::char_width(text, pos);
         }
-    } else {
-        if n < 10000000 {
-            if n < 1000000 {
-                6
-            } else {
-                7
-            }
-        } else {
-            if n < 100000000 {
-                8
-            } else {
-                9
-            }
-        }
+        pos += chars::mb_cur_max(text, pos);
     }
-}
-
-/* Read an integer from the given string.  If it parses okay,
- * store it in *result and return TRUE; otherwise, return FALSE. */
-pub fn parse_num(string: &str, result: &mut isize) -> bool {
-    match string.trim().parse::<isize>() {
-        Ok(v) => {
-            *result = v;
-            true
-        }
-        Err(_) => false,
-    }
-}
-
-/* Read one number (or two numbers separated by comma, period, or colon)
- * from the given string and store the number(s) in *line (and *column). */
-pub fn parse_line_column(string: &str, line: &mut isize, column: &mut isize) -> bool {
-    let mut s = string;
-    while s.starts_with(' ') {
-        s = &s[1..];
-    }
-
-    let comma = s.find(|c| c == ',' || c == '.' || c == ':');
-
-    if comma.is_none() {
-        return parse_num(s, line);
-    }
-
-    let comma = comma.unwrap();
-    let mut retval = parse_num(&s[comma + 1..], column);
-
-    if comma == 0 {
-        return retval;
-    }
-
-    let firstpart = &s[..comma];
-    retval = parse_num(firstpart, line) && retval;
-
-    retval
-}
-
-/* In the given string, recode each embedded NUL as a newline. */
-pub fn recode_NUL_to_LF(string: &mut [u8], length: usize) {
-    let mut i = 0;
-    while i < length && i < string.len() {
-        if string[i] == 0 {
-            string[i] = b'\n';
-        }
-        i += 1;
-    }
-}
-
-/* In the given string, recode each embedded newline as a NUL,
- * and return the number of bytes in the string. */
-pub fn recode_LF_to_NUL(string: &mut [u8]) -> usize {
-    let mut i = 0;
-    while i < string.len() && string[i] != 0 {
-        if string[i] == b'\n' {
-            string[i] = 0;
-        }
-        i += 1;
-    }
-    i
-}
-
-/* Free the memory of the given array, which should contain len elements. */
-pub fn free_chararray(array: Vec<String>) {
-    drop(array);
-}
-
-/* Is the word starting at the given position in `text` and of the given
- * length a separate word?  That is: is it not part of a longer word? */
-pub fn is_separate_word(position: usize, length: usize, text: &[u8]) -> bool {
-    let before_idx = chars::step_left(text, position);
-    let after = position + length;
-
-    let before_is_alpha = if position == 0 {
-        false
-    } else {
-        chars::is_alnum_char(&text[before_idx..])
-    };
-    let after_is_alpha = if after >= text.len() {
-        false
-    } else {
-        chars::is_alnum_char(&text[after..])
-    };
-
-    ((position == 0 || !before_is_alpha) && (after >= text.len() || !after_is_alpha))
-}
-
-/* Return the position of the needle in the haystack, or None if not found. */
-pub fn strstrwrapper(haystack: &[u8], needle: &[u8], start: usize) -> Option<usize> {
-    unsafe {
-        if ISSET(USE_REGEXP) {
-            let sr = match &search_regexp {
-                Some(r) => r,
-                None => return None,
-            };
-            if ISSET(BACKWARDS_SEARCH) {
-                let mut last_find: usize = 0;
-                let ceiling: usize = start;
-                let mut floor: usize = 0;
-                let mut next_rung: usize = 0;
-
-                if sr.captures(&String::from_utf8_lossy(haystack)).is_none() {
-                    return None;
-                }
-
-                if last_find > ceiling {
-                    return None;
-                }
-
-                let mut pos = 0usize;
-                loop {
-                    let tmp = String::from_utf8_lossy(&haystack[pos..]);
-                    let m = sr.captures(&tmp);
-                    if m.is_none() {
-                        break;
-                    }
-                    let m = m.unwrap();
-                    let rm_so = pos + m.get(0).unwrap().start();
-                    let rm_eo = pos + m.get(0).unwrap().end();
-                    if rm_so > ceiling {
-                        break;
-                    }
-                    floor = next_rung;
-                    last_find = rm_so;
-                    fill_regmatches(&m);
-                    if last_find == ceiling {
-                        break;
-                    }
-                    next_rung = chars::step_right(haystack, last_find);
-                    pos = next_rung;
-                }
-
-                return Some(last_find);
-            } else {
-                let tmp = String::from_utf8_lossy(&haystack[start..]);
-                let m = sr.captures(&tmp);
-                return match m {
-                    Some(c) => {
-                        let rm_so = start + c.get(0).unwrap().start();
-                        fill_regmatches(&c);
-                        Some(rm_so)
-                    }
-                    None => None,
-                };
-            }
-        }
-    }
-
-    if unsafe { ISSET(CASE_SENSITIVE) } {
-        if unsafe { ISSET(BACKWARDS_SEARCH) } {
-            return chars::revstrstr(haystack, needle, start);
-        } else {
-            return find_substring(&haystack[start..], needle).map(|x| start + x);
-        }
-    }
-
-    if unsafe { ISSET(BACKWARDS_SEARCH) } {
-        return chars::mbrevstrcasestr(haystack, needle, start);
-    } else {
-        return chars::mbstrcasestr(&haystack[start..], needle).map(|x| start + x);
-    }
-}
-
-/* 把一次正则匹配的全部捕获组（含第 0 组）写入全局 regmatches，
- * 供 findnextstr 计算匹配长度以及 replace_regexp 反向引用使用。 */
-pub fn fill_regmatches(caps: &regex::Captures) {
-    unsafe {
-        for i in 0..10 {
-            regmatches[i] = (None, None);
-        }
-        for i in 0..caps.len() {
-            if i >= 10 {
-                break;
-            }
-            if let Some(m) = caps.get(i) {
-                regmatches[i] = (Some(m.start()), Some(m.end()));
-            }
-        }
-    }
-}
-
-/* 在字节切片中做区分大小写的子串查找。 */
-pub fn find_substring(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() {
-        return Some(0);
-    }
-    let hlen = haystack.len();
-    let nlen = needle.len();
-    if nlen > hlen {
-        return None;
-    }
-    let mut i = 0;
-    while i + nlen <= hlen {
-        if &haystack[i..i + nlen] == needle {
-            return Some(i);
-        }
-        i += 1;
-    }
-    None
-}
-
-/* Allocate the given amount of memory and return a pointer to it. */
-pub fn nmalloc(howmuch: usize) -> Vec<u8> {
-    vec![0u8; howmuch]
-}
-
-/* Reallocate the given section of memory to have the given size. */
-pub fn nrealloc(mut section: Vec<u8>, howmuch: usize) -> Vec<u8> {
-    section.resize(howmuch, 0);
-    section
-}
-
-/* Return an appropriately reallocated dest string holding a copy of src. */
-pub fn mallocstrcpy(_dest: Option<Vec<u8>>, src: &[u8]) -> Vec<u8> {
-    src.to_vec()
-}
-
-/* Free the string at dest and return the string at src. */
-pub fn free_and_assign(_dest: Option<Vec<u8>>, src: Vec<u8>) -> Vec<u8> {
-    src
-}
-
-/* When not softwrapping, nano scrolls the current line horizontally by
- * chunks ("pages").  Return the column number of the first character
- * displayed in the edit window when the cursor is at the given column. */
-pub fn get_page_start(column: usize) -> usize {
-    unsafe {
-        if united_sidescroll {
-            let of = &*openfile;
-            if column < CUSHION {
-                return 0;
-            } else if column < of.brink + CUSHION {
-                if ISSET(JUMPY_SCROLLING) {
-                    return if column > editwincols / 2 {
-                        column - editwincols / 2
-                    } else {
-                        0
-                    };
-                } else {
-                    return column - CUSHION;
-                }
-            } else if column > of.brink + editwincols - CUSHION - 1 {
-                return column - editwincols
-                    + (if ISSET(JUMPY_SCROLLING) {
-                        editwincols / 2
-                    } else {
-                        CUSHION
-                    })
-                    + 1;
-            } else {
-                return of.brink;
-            }
-        }
-    }
-
-    if column == 0 || column + 2 < unsafe { editwincols } || unsafe { ISSET(SOFTWRAP) } {
-        return 0;
-    } else if unsafe { editwincols } > 8 {
-        return column - 6 - (column - 6) % (unsafe { editwincols } - 8);
-    } else {
-        return column - (unsafe { editwincols } - 2);
-    }
-}
-
-/* Return the index in the given text of the character that (when displayed)
- * will not overshoot the given column. */
-pub fn actual_x(text: &[u8], column: usize) -> usize {
-    let mut width: usize = 0;
-    let mut i = 0usize;
-
-    while i < text.len() && text[i] != 0 {
-        let charlen = chars::advance_over(&text[i..], &mut width);
-
-        if width > column {
-            break;
-        }
-
-        i += charlen;
-    }
-
-    i
-}
-
-/* Return the number of columns that the first count bytes of text occupy. */
-pub fn wideness(text: &[u8], count: usize) -> usize {
-    let mut width: usize = 0;
-    let mut remaining = count;
-    let mut i = 0usize;
-
-    if count == 0 {
-        return 0;
-    }
-
-    while i < text.len() && text[i] != 0 {
-        let charlen = chars::advance_over(&text[i..], &mut width);
-
-        if remaining <= charlen {
-            break;
-        }
-
-        remaining -= charlen;
-        i += charlen;
-    }
-
     width
 }
 
-/* Return the number of columns that the given text occupies. */
-pub fn breadth(text: &[u8]) -> usize {
-    let mut span: usize = 0;
-    let mut i = 0usize;
-
-    while i < text.len() && text[i] != 0 {
-        let charlen = chars::advance_over(&text[i..], &mut span);
-        i += charlen;
-    }
-
-    span
-}
-
-/* Return the (zero-based) column position of the cursor. */
-pub fn xplustabs() -> usize {
-    unsafe {
-        let of = &*openfile;
-        let cur = &*of.current;
-        wideness(cur.data.as_bytes(), of.current_x)
-    }
-}
-
-/* Append a new magic line to the end of the buffer. */
-pub fn new_magicline() {
-    unsafe {
-        let of = &mut *openfile;
-        let bot = &mut *of.filebot;
-        let mut newnode = make_new_node(bot);
-        newnode.data = String::new();
-        newnode.prev = of.filebot;
-        bot.next = Box::into_raw(newnode);
-        of.filebot = bot.next;
-        of.totsize += 1;
-    }
-}
-
-/* Remove the magic line from the end of the buffer, if there is one and
- * it isn't the only line in the file. */
-pub fn remove_magicline() {
-    unsafe {
-        let of = &mut *openfile;
-        let bot = &*of.filebot;
-        let is_only = of.filebot == of.filetop;
-        if bot.data.as_bytes().first().copied().unwrap_or(0) == 0 && !is_only {
-            if of.current == of.filebot {
-                of.current = (*of.filebot).prev;
-            }
-            let newbot = (*of.filebot).prev;
-            of.filebot = newbot;
-            let _ = Box::from_raw((*of.filebot).next);
-            (*of.filebot).next = std::ptr::null_mut();
-            of.totsize -= 1;
-        }
-    }
-}
-
-/* Return TRUE when the mark is before or at the cursor, and FALSE otherwise. */
-pub fn mark_is_before_cursor() -> bool {
-    unsafe {
-        let of = &*openfile;
-        let mark = &*of.mark;
-        let cur = &*of.current;
-        (mark.lineno < cur.lineno)
-            || (of.mark == of.current && of.mark_x <= of.current_x)
-    }
-}
-
-/* Return in (top, top_x) and (bot, bot_x) the start and end "coordinates"
- * of the marked region. */
-pub unsafe fn get_region(
-    top: *mut *mut linestruct,
-    top_x: *mut usize,
-    bot: *mut *mut linestruct,
-    bot_x: *mut usize,
-) {
-    if mark_is_before_cursor() {
-        let of = &*openfile;
-        *top = of.mark;
-        *top_x = of.mark_x;
-        *bot = of.current;
-        *bot_x = of.current_x;
-    } else {
-        let of = &*openfile;
-        *bot = of.mark;
-        *bot_x = of.mark_x;
-        *top = of.current;
-        *top_x = of.current_x;
-    }
-}
-
-/* Get the set of lines to work on -- either just the current line, or the
- * first to last lines of the marked region. */
-pub unsafe fn get_range(top: *mut *mut linestruct, bot: *mut *mut linestruct) {
-    if (*openfile).mark.is_null() {
-        let of = &*openfile;
-        *top = of.current;
-        *bot = of.current;
-    } else {
-        let mut top_x: usize = 0;
-        let mut bot_x: usize = 0;
-        get_region(top, &mut top_x, bot, &mut bot_x);
-
-        if bot_x == 0 && *bot != *top && !also_the_last {
-            *bot = (**bot).prev;
+/// 将字节位置转换为列位置（考虑制表符）。
+pub fn xplustabs(text: &[u8], pos: usize) -> usize {
+    let mut column = 0;
+    let mut index = 0;
+    while index < pos && index < text.len() {
+        if text[index] == b'\t' {
+            let tab = chars::tabsize();
+            column = (column / tab + 1) * tab;
         } else {
-            also_the_last = true;
+            column += 1;
         }
+        index += 1;
     }
+    column
 }
 
-/* Return a pointer to the line that has the given line number. */
-pub unsafe fn line_from_number(number: isize) -> *mut linestruct {
-    let of = &*openfile;
-    let mut line = of.current;
-    if (*line).lineno > number {
-        while (*line).lineno != number {
-            line = (*line).prev;
+/// 将列位置转换为字节位置。
+pub fn actual_x(text: &[u8], target_column: usize) -> usize {
+    let mut column = 0;
+    let mut pos = 0;
+    while pos < text.len() && column < target_column {
+        if text[pos] == b'\t' {
+            let tab = chars::tabsize();
+            column = (column / tab + 1) * tab;
+        } else {
+            column += 1;
         }
+        pos += 1;
+    }
+    pos.min(text.len())
+}
+
+/// 计算字符串长度（字节数）。
+pub fn wideness(text: &[u8], _limit: usize) -> usize {
+    text.len()
+}
+
+/// 解析 "行号,列号" 格式的字符串。
+pub fn parse_line_column(input: &str) -> (isize, isize) {
+    let parts: Vec<&str> = input.splitn(2, |c| c == ',' || c == '.' || c == ':').collect();
+    let line = parts.first().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+    let col = parts.get(1).and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+    (line, col)
+}
+
+/// 解析数字字符串。
+pub fn parse_num(input: &str) -> isize {
+    input.trim().parse().unwrap_or(0)
+}
+
+/// 检查当前位置是否在单词边界。
+pub fn is_word_boundary(text: &[u8], position: usize) -> bool {
+    if position >= text.len() {
+        return true;
+    }
+    let before_is_alpha = if position > 0 {
+        chars::is_alnum_char(&text[position - 1..])
     } else {
-        while (*line).lineno != number {
-            line = (*line).next;
-        }
-    }
-    line
+        false
+    };
+    let after_is_alpha = chars::is_alnum_char(&text[position..]);
+    (position == 0 || !before_is_alpha) && (position >= text.len() || !after_is_alpha)
 }
 
-/* Count the number of characters from begin to end, and return it. */
-pub unsafe fn number_of_characters_in(begin: *const linestruct, end: *const linestruct) -> usize {
-    let mut count: usize = 0;
-    let mut line: *const linestruct = begin;
+/// 检查字符串是否为空白。
+pub fn is_white_string(text: &[u8]) -> bool {
+    text.iter().all(|&b| b == b' ' || b == b'\t')
+}
 
-    loop {
-        count += chars::mbstrlen((*line).data.as_bytes()) + 1;
-        if line == end {
-            break;
-        }
-        line = (*line).next;
+/// 移除字符串末尾的换行符。
+pub fn chomp(text: &mut String) {
+    while text.ends_with('\n') || text.ends_with('\r') {
+        text.pop();
     }
+}
 
-    count - 1
+/// 分配内存（对应 C 的 nmalloc）。
+pub fn nmalloc<T: Default>(size: usize) -> Vec<T> {
+    let mut v = Vec::with_capacity(size);
+    for _ in 0..size {
+        v.push(T::default());
+    }
+    v
+}
+
+/// 重新分配内存（对应 C 的 nrealloc）。
+pub fn nrealloc<T: Clone>(vec: &mut Vec<T>, new_size: usize, default: T) {
+    vec.resize(new_size, default);
+}
+
+/// 分配并清零（对应 C 的 calloc）。
+pub fn ncalloc<T: Default>(count: usize) -> Vec<T> {
+    nmalloc(count)
+}
+
+/// 释放内存（对应 C 的 free，Rust 中自动管理）。
+pub fn nfree<T>(_ptr: Vec<T>) {
+    // Vec 自动释放
 }

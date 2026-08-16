@@ -25,3 +25,6 @@ rustc-ice-*.txt
 
 # Original C source code
 nano 
+
+# AI 终端
+.reasonix

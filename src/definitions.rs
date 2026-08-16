@@ -1,123 +1,58 @@
 /**************************************************************************
- *   definitions.rs  --  这是 GNU nano 的 Rust 翻译版本的一部分。
- *
- *   版权 (C) 1999-2011, 2013-2026 Free Software Foundation, Inc.
- *   版权 (C) 2014-2017, 2020-2022, 2024 Benno Schulenberg
- *
- *   本程序是自由软件：你可以根据 GNU 通用公共许可证（第 3 版或更新版本）
- *   重新分发和/或修改它。
+ * definitions.rs  --  GNU nano Rust 翻译版核心定义
+ * 版权 (C) 1999-2026 Free Software Foundation, Inc.
+ * 本程序是自由软件：可根据 GPLv3+ 重新分发/修改。
  **************************************************************************/
 
-//! 此模块对应原版 nano 的 `definitions.h`，包含所有的结构体、枚举、
-//! 常量定义以及全局类型。其余模块均依赖本模块。
-//!
-//! 链表字段一律使用裸指针 `*mut`，以忠实对应原版 C 代码中的指针语义。
+//! 对应原版 definitions.h：常量、结构体、枚举及安全全局状态。
+//! 转换说明：
+//! - 裸指针 → `Rc<RefCell<T>>`（安全引用计数）
+//! - `static mut` → `LazyLock<RefCell<GlobalState>>`
+//! - 正则表达式 → `MatchPattern`（简单通配符匹配）
+//! - 函数指针 → `FunctionId` 枚举
 
-use regex::Regex;
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
+use std::sync::LazyLock;
 
-/// 根用户的 UID。
+// ======================== 常量 ========================
+
 pub const ROOT_UID: u32 = 0;
-
-/// 路径名的最大长度（若系统中未定义则取默认值）。
 pub const PATH_MAX: usize = 4096;
-
-/* 用于标记字符串的函数宏（在 Rust 中简化为恒等函数）。 */
-/// 标记稍后会被 gettext() 调用的字符串（此处不做任何转换）。
-#[allow(non_snake_case)]
-pub fn N_(string: &'static str) -> &'static str {
-    string
-}
-
-/* 翻译宏：此处不做任何转换，直接返回原字符串。 */
-#[macro_export]
-macro_rules! gettext {
-    ($s:expr) => {
-        $s
-    };
-}
-
-/* 标志位的宏：在一个小数组中按位索引。 */
-/// 标志数组每个元素的类型。
-pub type flagword = u32;
-
-/// 在标志数组中取出对应 `flag` 的数组元素。
-#[inline]
-pub fn FLAGS(flags_arr: &[flagword], flag: usize) -> flagword {
-    flags_arr[flag / (std::mem::size_of::<flagword>() * 8)]
-}
-/// 计算 `flag` 对应的位掩码。
-#[inline]
-pub fn FLAGMASK(flag: usize) -> flagword {
-    (1u32) << (flag % (std::mem::size_of::<flagword>() * 8))
-}
-
-/// 搜索方向：向后 / 向前。
-pub const BACKWARD: bool = false;
-pub const FORWARD: bool = true;
-
-/// 是否带有 "all" 选项的确认对话框。
-pub const YESORNO: bool = false;
-pub const YESORALLORNO: bool = true;
-
-/// 确认对话框的返回值。
-pub const YES: i32 = 1;
-pub const ALL: i32 = 2;
-pub const NO: i32 = 0;
-pub const CANCEL: i32 = -1;
-
-/// 是否可见。
-pub const BLIND: bool = false;
-pub const VISIBLE: bool = true;
-
-/// 搜索/替换模式。
-pub const JUSTFIND: i32 = 0;
-pub const REPLACING: i32 = 1;
-pub const INREGION: i32 = 2;
-
-/// 是否显示提示说明。
-pub const NONOTES: bool = false;
-
-/// 历史记录去重选项。
-pub const PRUNE_DUPLICATE: bool = true;
-pub const IGNORE_DUPLICATES: bool = false;
-
-/* 在 UTF-8 下一个合法字符最多占用四个字节。 */
 pub const MAXCHARLEN: usize = 4;
-
-/// 制表符默认的空格宽度。
 pub const WIDTH_OF_TAB: usize = 8;
-
-/// 从行尾起多少列开始换行。
 pub const COLUMNS_FROM_EOL: usize = 8;
-
-/// 光标应远离边缘的列数。
 pub const CUSHION: usize = 3;
-
-/// 当某个语法未指定注释字符时使用的默认注释字符。
 pub const GENERAL_COMMENT_CHARACTER: &str = "#";
-
-/// 保存的搜索/替换历史字符串的最大数量。
 pub const MAX_SEARCH_HISTORY: usize = 100;
-
-/// 没有最高位被置位的最大 size_t 数值。
 pub const HIGHEST_POSITIVE: usize = usize::MAX >> 1;
-
-/* 启用颜色时的特殊值。 */
 pub const THE_DEFAULT: i32 = -1;
 pub const BAD_COLOR: i32 = -2;
-
-/* 多行正则对某一行作用方式的标志。 */
 pub const NOTHING: i32 = 1 << 1;
 pub const STARTSHERE: i32 = 1 << 2;
 pub const WHOLELINE: i32 = 1 << 3;
 pub const ENDSHERE: i32 = 1 << 4;
 pub const JUSTONTHIS: i32 = 1 << 5;
-
-/* 基本控制码。 */
 pub const ESC_CODE: u8 = 0x1B;
 pub const DEL_CODE: u8 = 0x7F;
+pub const BACKWARD: bool = false;
+pub const FORWARD: bool = true;
+pub const YESORNO: bool = false;
+pub const YESORALLORNO: bool = true;
+pub const YES: i32 = 1;
+pub const ALL: i32 = 2;
+pub const NO: i32 = 0;
+pub const CANCEL: i32 = -1;
+pub const BLIND: bool = false;
+pub const VISIBLE: bool = true;
+pub const JUSTFIND: i32 = 0;
+pub const REPLACING: i32 = 1;
+pub const INREGION: i32 = 2;
+pub const NONOTES: bool = false;
+pub const PRUNE_DUPLICATE: bool = true;
+pub const IGNORE_DUPLICATES: bool = false;
 
-/* 超出 ncurses KEY_MAX 的"修饰"方向键代码。 */
+// 修饰键码
 pub const CONTROL_LEFT: i32 = 0x401;
 pub const CONTROL_RIGHT: i32 = 0x402;
 pub const CONTROL_UP: i32 = 0x403;
@@ -154,34 +89,20 @@ pub const SHIFT_PAGEUP: i32 = 0x457;
 pub const SHIFT_PAGEDOWN: i32 = 0x458;
 pub const SHIFT_DELETE: i32 = 0x45D;
 pub const SHIFT_TAB: i32 = 0x45F;
-
 pub const FOCUS_IN: i32 = 0x491;
 pub const FOCUS_OUT: i32 = 0x499;
-
-/* 用于表示括号粘贴开始与结束的自定义键码。 */
 pub const START_OF_PASTE: i32 = 0x4B5;
 pub const END_OF_PASTE: i32 = 0x4BE;
-
-/* 字符串绑定被部分植入、或存在不成对的左花括号、或字符串绑定中的函数
- * 需要执行、或指定的函数名无效时的特殊键码。 */
 pub const MORE_PLANTS: i32 = 0x4EA;
 pub const MISSING_BRACE: i32 = 0x4EB;
 pub const PLANTED_A_COMMAND: i32 = 0x4EC;
 pub const NO_SUCH_FUNCTION: i32 = 0x4EF;
-
-/* Ctrl + 小键盘中央键的特殊键码。 */
 pub const KEY_CENTER: i32 = 0x4F0;
-
-/* 收到 SIGWINCH（窗口大小改变）时的特殊键码。 */
 pub const THE_WINDOW_RESIZED: i32 = 0x4F7;
-
-/* 某个按键产生未知转义序列时的特殊键码。 */
 pub const FOREIGN_SEQUENCE: i32 = 0x4FC;
-
-/* 挂起后用于插入输入流的特殊键码。 */
 pub const KEY_FRESH: i32 = 0x4FE;
 
-/* 来自 ncurses 的键码常量（用于快捷键绑定）。 */
+// ncurses 键码
 pub const KEY_ENTER: i32 = 0x157;
 pub const KEY_MOUSE: i32 = 0x4BB;
 pub const KEY_BACKSPACE: i32 = 0x107;
@@ -198,8 +119,6 @@ pub const KEY_DOWN: i32 = 0x102;
 pub const KEY_F0: i32 = 0x101;
 pub const KEY_CANCEL: i32 = 0x158;
 pub const KEY_SIC: i32 = 0x14C;
-
-/* 软换行/数字键盘/修改键相关的 ncurses 键码（按其数值顺序占位）。 */
 pub const KEY_BTAB: i32 = 0x161;
 pub const KEY_BEG: i32 = 0x171;
 pub const KEY_SBEG: i32 = 0x172;
@@ -210,7 +129,7 @@ pub const KEY_C1: i32 = 0x17B;
 pub const KEY_C3: i32 = 0x17D;
 pub const KEY_SDC: i32 = 0x163;
 pub const KEY_SHOME: i32 = 0x166;
-pub const KEY_SEND: i32 = 0x168 + 1;
+pub const KEY_SEND: i32 = 0x169;
 pub const KEY_SLEFT: i32 = 0x184;
 pub const KEY_SRIGHT: i32 = 0x182;
 pub const KEY_SR: i32 = 0x18A;
@@ -229,7 +148,7 @@ pub const KEY_C2: i32 = 0x17C;
 pub const KEY_SIC2: i32 = 0x164;
 pub const KEY_SHELLO: i32 = 0x174;
 
-/* 撤销功能的一些额外标志。 */
+// 撤销标志
 pub const WAS_BACKSPACE_AT_EOF: i32 = 1 << 1;
 pub const WAS_WHOLE_LINE: i32 = 1 << 2;
 pub const INCLUDED_LAST_LINE: i32 = 1 << 3;
@@ -237,7 +156,7 @@ pub const MARK_WAS_SET: i32 = 1 << 4;
 pub const CURSOR_WAS_AT_HEAD: i32 = 1 << 5;
 pub const HAD_ANCHOR_AT_START: i32 = 1 << 6;
 
-/* 不同菜单的标识符。 */
+// 菜单标识符
 pub const MMAIN: i32 = 1 << 0;
 pub const MWHEREIS: i32 = 1 << 1;
 pub const MREPLACE: i32 = 1 << 2;
@@ -254,80 +173,11 @@ pub const MGOTODIR: i32 = 1 << 12;
 pub const MYESNO: i32 = 1 << 13;
 pub const MLINTER: i32 = 1 << 14;
 pub const MFINDINHELP: i32 = 1 << 15;
-/* 除 Help、Browser 和 YesNo 之外所有菜单的缩写。 */
 pub const MMOST: i32 = MMAIN | MWHEREIS | MREPLACE | MREPLACEWITH | MGOTOLINE | MWRITEFILE
     | MINSERTFILE | MEXECUTE | MWHEREISFILE | MGOTODIR | MFINDINHELP | MSPELL | MLINTER;
 pub const MSOME: i32 = MMOST | MBROWSER;
 
-/* 枚举类型。 */
-
-/// 文件格式类型。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum format_type {
-    UNSPECIFIED,
-    NIX_FILE,
-    DOS_FILE,
-}
-
-/// 消息类型。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum message_type {
-    VACUUM,
-    HUSH,
-    REMARK,
-    INFO,
-    NOTICE,
-    AHEM,
-    MILD,
-    ALERT,
-}
-
-/// 写入文件的类型。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum writing_type {
-    OVERWRITE,
-    APPEND,
-    PREPEND,
-    SPECIAL,
-}
-
-/// 更新类型。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum update_type {
-    CENTERING,
-    FLOWING,
-    STATIONARY,
-}
-
-/// 撤销操作的类型。ADD...REPLACE 必须排在最前面。
-#[repr(i32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum undo_type {
-    ADD,
-    ENTER,
-    BACK,
-    DEL,
-    JOIN,
-    REPLACE,
-    SPLIT_BEGIN,
-    SPLIT_END,
-    INDENT,
-    UNINDENT,
-    COMMENT,
-    UNCOMMENT,
-    PREFLIGHT,
-    ZAP,
-    CUT,
-    CUT_TO_EOF,
-    COPY,
-    PASTE,
-    INSERT,
-    COUPLE_BEGIN,
-    COUPLE_END,
-    OTHER,
-}
-
-/* 界面中可以被不同着色的元素。 */
+// 界面元素
 pub const TITLE_BAR: usize = 0;
 pub const LINE_NUMBER: usize = 1;
 pub const GUIDE_STRIPE: usize = 2;
@@ -342,7 +192,7 @@ pub const KEY_COMBO: usize = 10;
 pub const FUNCTION_TAG: usize = 11;
 pub const NUMBER_OF_ELEMENTS: usize = 12;
 
-/* 标志数组中所用的枚举。参见 FLAGMASK 的定义。 */
+// 标志位枚举
 pub const DONTUSE: usize = 0;
 pub const CASE_SENSITIVE: usize = 1;
 pub const CONSTANT_SHOW: usize = 2;
@@ -396,266 +246,440 @@ pub const ZERO: usize = 49;
 pub const MODERN_BINDINGS: usize = 50;
 pub const SOLO_SIDESCROLL: usize = 51;
 
-/* 结构体类型。 */
+// ======================== 类型别名 ========================
 
-/// 颜色组合。
-pub struct colortype {
-    pub id: i16,
-    pub fg: i16,
-    pub bg: i16,
-    pub pairnum: i16,
-    pub attributes: i32,
-    pub start: Option<Box<Regex>>,
-    pub end: Option<Box<Regex>>,
-    pub next: *mut colortype,
+pub type Flagword = u32;
+
+// 安全引用类型
+pub type ColorRef = Rc<RefCell<ColorType>>;
+pub type RegexListRef = Rc<RefCell<RegexListType>>;
+pub type AugmentRef = Rc<RefCell<AugmentStruct>>;
+pub type SyntaxRef = Rc<RefCell<SyntaxType>>;
+pub type LintRef = Rc<RefCell<LintStruct>>;
+pub type LineRef = Rc<RefCell<LineStruct>>;
+pub type GroupRef = Rc<RefCell<GroupStruct>>;
+pub type UndoRef = Rc<RefCell<UndoStruct>>;
+pub type PositionRef = Rc<RefCell<PositionStruct>>;
+pub type OpenFileRef = Rc<RefCell<OpenFileStruct>>;
+pub type KeyRef = Rc<RefCell<KeyStruct>>;
+pub type FuncRef = Rc<RefCell<FuncStruct>>;
+pub type CompletionRef = Rc<RefCell<CompletionStruct>>;
+pub type LineWeak = Weak<RefCell<LineStruct>>;
+pub type OpenFileWeak = Weak<RefCell<OpenFileStruct>>;
+
+// ======================== 简单模式匹配（替代 regex） ========================
+
+/// 简单的模式匹配，替代 POSIX regex。
+/// 支持基本的 glob 通配符：* 和 ?
+#[derive(Debug, Clone)]
+pub struct MatchPattern {
+    pattern: String,
+    is_glob: bool,
 }
 
-/// 正则列表节点。
-pub struct regexlisttype {
-    pub one_rgx: Option<Box<Regex>>,
-    pub next: *mut regexlisttype,
+impl MatchPattern {
+    pub fn from_glob(pattern: &str) -> Self {
+        MatchPattern { pattern: pattern.to_string(), is_glob: true }
+    }
+    pub fn from_literal(pattern: &str) -> Self {
+        MatchPattern { pattern: pattern.to_string(), is_glob: false }
+    }
+    pub fn matches(&self, text: &str) -> bool {
+        if self.is_glob { simple_glob_match(&self.pattern, text) }
+        else { text.contains(&self.pattern) }
+    }
+    pub fn find_match(&self, text: &str) -> Option<(usize, usize)> {
+        if self.is_glob {
+            if simple_glob_match(&self.pattern, text) { Some((0, text.len())) } else { None }
+        } else {
+            text.find(&self.pattern).map(|pos| (pos, pos + self.pattern.len()))
+        }
+    }
 }
 
-/// extendsyntax 命令的增强记录。
-pub struct augmentstruct {
+fn simple_glob_match(pattern: &str, text: &str) -> bool {
+    simple_glob_recursive(pattern.as_bytes(), text.as_bytes(), 0, 0)
+}
+
+fn simple_glob_recursive(pat: &[u8], text: &[u8], pi: usize, ti: usize) -> bool {
+    if pi >= pat.len() { return ti >= text.len(); }
+    match pat[pi] {
+        b'*' => {
+            if simple_glob_recursive(pat, text, pi + 1, ti) { return true; }
+            if ti < text.len() { return simple_glob_recursive(pat, text, pi, ti + 1); }
+            false
+        }
+        b'?' => {
+            if ti < text.len() { simple_glob_recursive(pat, text, pi + 1, ti + 1) }
+            else { false }
+        }
+        _ => {
+            if ti < text.len() && pat[pi] == text[ti] { simple_glob_recursive(pat, text, pi + 1, ti + 1) }
+            else { false }
+        }
+    }
+}
+
+// ======================== 枚举类型 ========================
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatType { Unspecified, NixFile, DosFile }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageType { Vacuum, Hush, Remark, Info, Notice, Ahem, Mild, Alert }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WritingType { Overwrite, Append, Prepend, Special }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateType { Centering, Flowing, Stationary }
+
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UndoType {
+    Add, Enter, Back, Del, Join, Replace, SplitBegin, SplitEnd,
+    Indent, Unindent, Comment, Uncomment, Preflight,
+    Zap, Cut, CutToEof, Copy, Paste, Insert, CoupleBegin, CoupleEnd, Other,
+}
+
+/// 函数 ID 枚举，替代 unsafe 函数指针。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FunctionId {
+    None, DoCancel, DoExit, DoHelp, DoLeft, DoRight, DoUp, DoDown,
+    DoHome, DoEnd, DoPageUp, DoPageDown, DoDelete, DoBackspace,
+    DoEnter, DoTab, DoCut, DoCopy, DoPaste, DoCutToEof,
+    DoSearchForward, DoSearchBackward, DoFindNext, DoFindPrevious,
+    DoReplace, DoGoToLine, DoWriteOut, DoInsertFile, DoExecute,
+    DoSpell, DoLinter, DoFormatter, DoIndent, DoUnindent,
+    DoComment, DoUncomment, DoUndo, DoRedo, DoRefresh,
+    DoSuspend, DoToggle, DoToggleCaseSensitive, DoToggleRegexp,
+    DoToggleBackwards, DoToggleNoHelp, DoToggleConstantShow,
+    DoToggleAutoIndent, DoToggleCutFromCursor, DoToggleSoftWrap,
+    DoToggleLineNumbers, DoToggleWhiteSpace, DoToggleTabsToSpaces,
+    DoToggleMouse, DoToggleViewMode, DoToggleNoWrap, DoToggleSmarthome,
+    DoToggleBoldText, DoMakeItUnix, DoScrollUp, DoScrollDown,
+    DoPrevBlock, DoNextBlock, DoParaBegin, DoParaEnd,
+    DoFirstLine, DoLastLine, DoNextWord, DoPrevWord,
+    DoMark, DoAnchor, DoGotoDir, DoBrowserUp, DoBrowserDown,
+    DoBrowserEnter, DoWhereIsFile, DoFindInHelp, DoFullRefresh,
+    DoImplantStub, DoRecordMacro, DoRunMacro, DoJustify,
+    DoFindBracket, DoReportLocation, DoToggleModern,
+    Other(u32),
+}
+
+// ======================== 结构体类型 ========================
+
+#[derive(Debug, Clone)]
+pub struct ColorType {
+    pub id: i16, pub fg: i16, pub bg: i16, pub pairnum: i16, pub attributes: i32,
+    pub start: Option<MatchPattern>, pub end: Option<MatchPattern>,
+    pub next: Option<ColorRef>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RegexListType {
+    pub one_rgx: Option<MatchPattern>, pub next: Option<RegexListRef>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AugmentStruct {
+    pub filename: Option<String>, pub lineno: isize, pub data: Option<String>,
+    pub next: Option<AugmentRef>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SyntaxType {
+    pub name: Option<String>, pub filename: Option<String>, pub lineno: usize,
+    pub augmentations: Option<AugmentRef>,
+    pub extensions: Option<RegexListRef>, pub headers: Option<RegexListRef>,
+    pub magics: Option<RegexListRef>,
+    pub linter: Option<String>, pub formatter: Option<String>,
+    pub tabstring: Option<String>, pub comment: Option<String>,
+    pub color: Option<ColorRef>, pub multiscore: i16, pub next: Option<SyntaxRef>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LintStruct {
+    pub lineno: isize, pub colno: isize,
+    pub msg: Option<String>, pub filename: Option<String>,
+    pub next: Option<LintRef>, pub prev: Option<LintRef>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LineStruct {
+    pub data: String, pub lineno: isize,
+    pub next: Option<LineRef>, pub prev: Option<LineWeak>,
+    pub multidata: Option<Vec<i16>>, pub has_anchor: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct GroupStruct {
+    pub top_line: isize, pub bottom_line: isize,
+    pub indentations: Vec<Option<String>>, pub next: Option<GroupRef>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UndoStruct {
+    pub type_: UndoType, pub xflags: i32,
+    pub head_lineno: isize, pub head_x: usize,
+    pub strdata: Option<String>, pub wassize: usize, pub newsize: usize,
+    pub grouping: Option<GroupRef>, pub cutbuffer: Option<LineRef>,
+    pub tail_lineno: isize, pub tail_x: usize, pub next: Option<UndoRef>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PositionStruct {
+    pub filename: Option<String>, pub linenumber: isize, pub columnnumber: isize,
+    pub anchors: Option<String>, pub next: Option<PositionRef>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OpenFileStruct {
     pub filename: Option<String>,
-    pub lineno: isize,
-    pub data: Option<String>,
-    pub next: *mut augmentstruct,
-}
-
-/// 语法类型。
-pub struct syntaxtype {
-    pub name: Option<String>,
-    pub filename: Option<String>,
-    pub lineno: usize,
-    pub augmentations: *mut augmentstruct,
-    pub extensions: *mut regexlisttype,
-    pub headers: *mut regexlisttype,
-    pub magics: *mut regexlisttype,
-    pub linter: Option<String>,
-    pub formatter: Option<String>,
-    pub tabstring: Option<String>,
-    pub comment: Option<String>,
-    pub color: *mut colortype,
-    pub multiscore: i16,
-    pub next: *mut syntaxtype,
-}
-
-/// lint 错误信息。
-pub struct lintstruct {
-    pub lineno: isize,
-    pub colno: isize,
-    pub msg: Option<String>,
-    pub filename: Option<String>,
-    pub next: *mut lintstruct,
-    pub prev: *mut lintstruct,
-}
-
-/// 行结构。
-pub struct linestruct {
-    pub data: String,
-    pub lineno: isize,
-    pub next: *mut linestruct,
-    pub prev: *mut linestruct,
-    pub multidata: Option<Vec<i16>>,
-    pub has_anchor: bool,
-}
-
-/// 行组结构（用于缩进/反缩进等成组操作）。
-pub struct groupstruct {
-    pub top_line: isize,
-    pub bottom_line: isize,
-    pub indentations: Vec<Option<String>>,
-    pub next: *mut groupstruct,
-}
-
-/// 撤销结构。
-pub struct undostruct {
-    pub type_: undo_type,
-    pub xflags: i32,
-    pub head_lineno: isize,
-    pub head_x: usize,
-    pub strdata: Option<String>,
-    pub wassize: usize,
-    pub newsize: usize,
-    pub grouping: *mut groupstruct,
-    pub cutbuffer: *mut linestruct,
-    pub tail_lineno: isize,
-    pub tail_x: usize,
-    pub next: *mut undostruct,
-}
-
-/// 位置记录（用于保存/恢复光标位置）。
-pub struct positionstruct {
-    pub filename: Option<String>,
-    pub linenumber: isize,
-    pub columnnumber: isize,
-    pub anchors: Option<String>,
-    pub next: *mut positionstruct,
-}
-
-/// 已打开文件的结构。
-pub struct openfilestruct {
-    pub filename: Option<String>,
-    pub filetop: *mut linestruct,
-    pub filebot: *mut linestruct,
-    pub edittop: *mut linestruct,
-    pub current: *mut linestruct,
-    pub totsize: usize,
-    pub firstcolumn: usize,
-    pub current_x: usize,
-    pub placewewant: usize,
-    pub brink: usize,
-    pub cursor_row: isize,
+    pub filetop: Option<LineRef>, pub filebot: Option<LineRef>,
+    pub edittop: Option<LineRef>, pub current: Option<LineRef>,
+    pub totsize: usize, pub firstcolumn: usize, pub current_x: usize,
+    pub placewewant: usize, pub brink: usize, pub cursor_row: isize,
     pub statinfo: Option<Box<std::fs::Metadata>>,
-    pub spillage_line: *mut linestruct,
-    pub mark: *mut linestruct,
-    pub mark_x: usize,
-    pub softmark: bool,
-    pub fmt: format_type,
-    pub lock_filename: Option<String>,
-    pub undotop: *mut undostruct,
-    pub current_undo: *mut undostruct,
-    pub last_saved: *mut undostruct,
-    pub last_action: undo_type,
-    pub modified: bool,
-    pub syntax: *mut syntaxtype,
+    pub spillage_line: Option<LineRef>,
+    pub mark: Option<LineRef>, pub mark_x: usize, pub softmark: bool,
+    pub fmt: FormatType, pub lock_filename: Option<String>,
+    pub undotop: Option<UndoRef>, pub current_undo: Option<UndoRef>,
+    pub last_saved: Option<UndoRef>, pub last_action: UndoType,
+    pub modified: bool, pub syntax: Option<SyntaxRef>,
     pub errormessage: Option<String>,
-    pub next: *mut openfilestruct,
-    pub prev: *mut openfilestruct,
+    pub next: Option<OpenFileRef>, pub prev: Option<OpenFileWeak>,
 }
 
-/// rcfile 选项。
-pub struct rcoption {
-    pub name: &'static str,
-    pub flag: i64,
+#[derive(Debug, Clone)]
+pub struct RcOption {
+    pub name: &'static str, pub flag: i64,
 }
 
-/// 键结构。
-pub struct keystruct {
-    pub keystr: &'static str,
-    pub keycode: i32,
-    pub menus: i32,
-    pub func: Option<unsafe fn()>,
-    pub toggle: i32,
-    pub ordinal: i32,
-    pub expansion: Option<String>,
-    pub next: *mut keystruct,
+#[derive(Debug, Clone)]
+pub struct KeyStruct {
+    pub keystr: String, pub keycode: i32, pub menus: i32,
+    pub func: FunctionId, pub toggle: i32, pub ordinal: i32,
+    pub expansion: Option<String>, pub next: Option<KeyRef>,
 }
 
-/// 函数结构。
-pub struct funcstruct {
-    pub func: Option<unsafe fn()>,
-    pub tag: &'static str,
-    pub phrase: &'static str,
-    pub blank_after: bool,
-    pub menus: i32,
-    pub next: *mut funcstruct,
+#[derive(Debug, Clone)]
+pub struct FuncStruct {
+    pub func: FunctionId, pub tag: &'static str, pub phrase: &'static str,
+    pub blank_after: bool, pub menus: i32, pub next: Option<FuncRef>,
 }
 
-/// 单词补全结构。
-pub struct completionstruct {
-    pub word: Option<String>,
-    pub next: *mut completionstruct,
+#[derive(Debug, Clone)]
+pub struct CompletionStruct {
+    pub word: Option<String>, pub next: Option<CompletionRef>,
 }
 
-/* ===== 共享全局状态与基础辅助（供各翻译模块复用） ===== */
+// ======================== 安全全局状态 ========================
 
-/// 用户主目录。
-pub static mut homedir: Option<String> = None;
-
-/// 标志数组（按位索引），长度足以容纳所有标志枚举。
-pub static mut flags: [flagword; 2] = [0; 2];
-
-/// 已打开文件链表的当前文件指针。
-pub static mut openfile: *mut openfilestruct = std::ptr::null_mut();
-
-/// 搜索用的正则表达式（已编译）。
-pub static mut search_regexp: Option<Box<Regex>> = None;
-pub static mut regexp_nsub: usize = 0;
-
-/// 正则搜索匹配结果（最多 10 组，rm_so/rm_eo 为 Option<usize>）。
-pub static mut regmatches: [(Option<usize>, Option<usize>); 10] = [(None, None); 10];
-
-/// 是否将区域末尾的整行也纳入处理。
-pub static mut also_the_last: bool = false;
-
-/// 编辑窗口的列数。
-pub static mut editwincols: usize = 0;
-
-/// 是否采用统一的侧向滚动行为。
-pub static mut united_sidescroll: bool = false;
-
-/// 取标志数组中 `flag` 是否被置位。
-#[inline]
-pub fn ISSET(flag: usize) -> bool {
-    unsafe { (FLAGS(&flags, flag) & FLAGMASK(flag)) != 0 }
+/// 全局标志位容器。
+pub struct GlobalFlags {
+    flags: [Flagword; 4],
 }
 
-/// 置位某个标志。
-#[inline]
-pub fn SET(flag: usize) {
-    unsafe {
-        let idx = flag / (std::mem::size_of::<flagword>() * 8);
-        flags[idx] |= FLAGMASK(flag);
+impl GlobalFlags {
+    pub fn new() -> Self { GlobalFlags { flags: [0; 4] } }
+    pub fn isset(&self, flag: usize) -> bool {
+        (FLAGS(&self.flags, flag) & FLAGMASK(flag)) != 0
+    }
+    pub fn set(&mut self, flag: usize) {
+        let idx = flag / (std::mem::size_of::<Flagword>() * 8);
+        self.flags[idx] |= FLAGMASK(flag);
+    }
+    pub fn unset(&mut self, flag: usize) {
+        let idx = flag / (std::mem::size_of::<Flagword>() * 8);
+        self.flags[idx] &= !FLAGMASK(flag);
+    }
+    pub fn toggle(&mut self, flag: usize) {
+        let idx = flag / (std::mem::size_of::<Flagword>() * 8);
+        self.flags[idx] ^= FLAGMASK(flag);
     }
 }
 
-/// 清除某个标志。
 #[inline]
-pub fn UNSET(flag: usize) {
-    unsafe {
-        let idx = flag / (std::mem::size_of::<flagword>() * 8);
-        flags[idx] &= !FLAGMASK(flag);
+pub fn FLAGS(flags_arr: &[Flagword], flag: usize) -> Flagword {
+    flags_arr[flag / (std::mem::size_of::<Flagword>() * 8)]
+}
+#[inline]
+pub fn FLAGMASK(flag: usize) -> Flagword {
+    (1u32) << (flag % (std::mem::size_of::<Flagword>() * 8))
+}
+
+/// 便捷函数，使用全局状态。
+pub fn ISSET(flag: usize) -> bool { GLOBAL.with(|g| g.borrow().flags.isset(flag)) }
+pub fn SET(flag: usize) { GLOBAL.with(|g| g.borrow_mut().flags.set(flag)) }
+pub fn UNSET(flag: usize) { GLOBAL.with(|g| g.borrow_mut().flags.unset(flag)) }
+pub fn TOGGLE(flag: usize) { GLOBAL.with(|g| g.borrow_mut().flags.toggle(flag)) }
+
+/// 全局状态结构体。
+pub struct GlobalState {
+    pub flags: GlobalFlags,
+    pub openfile: Option<OpenFileRef>,
+    pub homedir: Option<String>,
+    pub editwincols: usize,
+    pub united_sidescroll: bool,
+    pub also_the_last: bool,
+    pub search_regexp: Option<MatchPattern>,
+    pub regexp_nsub: usize,
+    pub regmatches: Vec<(Option<usize>, Option<usize>)>,
+    pub we_are_running: bool,
+    pub more_than_one: bool,
+    pub report_size: bool,
+    pub ran_a_tool: bool,
+    pub foretext: Option<String>,
+    pub final_status: i32,
+    pub inhelp: bool,
+    pub title: Option<String>,
+    pub refresh_needed: bool,
+    pub focusing: bool,
+    pub control_C_was_pressed: bool,
+    pub lastmessage: MessageType,
+    pub pletion_line: Option<LineRef>,
+    pub answer: Option<String>,
+    pub last_search: Option<String>,
+    pub didfind: i32,
+    pub present_path: Option<String>,
+    pub on_a_vt: bool,
+    pub shifted_metas: bool,
+    pub meta_key: bool,
+    pub shift_held: bool,
+    pub mute_modifiers: bool,
+    pub using_utf8: bool,
+    pub word_chars: Option<String>,
+    pub as_an_at: bool,
+    pub tabsize: usize,
+    pub quotereg: Option<MatchPattern>,
+    // 窗口/键盘变量
+    pub currmenu: i32,
+    pub topwin: bool, pub midwin: bool, pub footwin: bool,
+    pub editwinrows: i32,
+    pub margin: i32,
+    pub matchbrackets: Option<String>,
+    pub perturbed: bool,
+    pub recook: bool,
+    pub searchbot: Option<LineRef>,
+    pub spotlighted: bool,
+    pub light_from_col: usize,
+    pub light_to_col: usize,
+    pub search_history: Vec<String>,
+    pub replace_history: Vec<String>,
+    pub sidebar: bool,
+    pub interface_color_pair: Vec<i32>,
+    pub allfuncs: Option<FuncRef>,
+    pub shortcuts: Option<KeyRef>,
+    pub syntaxes: Option<SyntaxRef>,
+    pub commandname: Option<String>,
+    pub planted_shortcut: Option<KeyRef>,
+    // 窗口尺寸
+    pub COLS: usize,
+    pub LINES: usize,
+    pub fill: isize,
+    pub wrap_at: usize,
+}
+
+impl GlobalState {
+    pub fn new() -> Self {
+        GlobalState {
+            flags: GlobalFlags::new(), openfile: None, homedir: None,
+            editwincols: 0, united_sidescroll: false, also_the_last: false,
+            search_regexp: None, regexp_nsub: 0,
+            regmatches: vec![(None, None); 10],
+            we_are_running: false, more_than_one: false, report_size: true,
+            ran_a_tool: false, foretext: None, final_status: 0,
+            inhelp: false, title: None, refresh_needed: false,
+            focusing: true, control_C_was_pressed: false,
+            lastmessage: MessageType::Vacuum, pletion_line: None,
+            answer: None, last_search: None, didfind: 0, present_path: None,
+            on_a_vt: false, shifted_metas: false, meta_key: false,
+            shift_held: false, mute_modifiers: false,
+            using_utf8: true, word_chars: None, as_an_at: false, tabsize: 8,
+            quotereg: None,
+            currmenu: MMAIN, topwin: false, midwin: false, footwin: false,
+            editwinrows: 0, margin: 0, matchbrackets: None,
+            perturbed: false, recook: false, searchbot: None,
+            spotlighted: false, light_from_col: 0, light_to_col: 0,
+            search_history: Vec::new(), replace_history: Vec::new(),
+            sidebar: false,
+            interface_color_pair: vec![0; NUMBER_OF_ELEMENTS],
+            allfuncs: None, shortcuts: None, syntaxes: None,
+            commandname: None, planted_shortcut: None,
+            COLS: 80, LINES: 24, fill: -1, wrap_at: 0,
+        }
     }
 }
 
-/// 翻转某个标志。
-#[inline]
-pub fn TOGGLE(flag: usize) {
-    unsafe {
-        let idx = flag / (std::mem::size_of::<flagword>() * 8);
-        flags[idx] ^= FLAGMASK(flag);
-    }
+/// 全局状态单例（线程安全，单线程使用）。
+thread_local! {
+    pub static GLOBAL: RefCell<GlobalState> = RefCell::new(GlobalState::new());
 }
 
-/// 致命错误退出（内存耗尽等）。
+/// 访问全局状态的便捷宏。
+#[macro_export]
+macro_rules! global {
+    ($field:ident) => {
+        $crate::definitions::GLOBAL.with(|g| g.borrow().$field.clone())
+    };
+    ($field:ident, $val:expr) => {
+        $crate::definitions::GLOBAL.with(|g| g.borrow_mut().$field = $val.into())
+    };
+}
+
+/// 对全局状态执行闭包的便捷函数。
+pub fn with_global<F, R>(f: F) -> R where F: FnOnce(&GlobalState) -> R {
+    GLOBAL.with(|g| f(&*g.borrow()))
+}
+
+pub fn with_global_mut<F, R>(f: F) -> R where F: FnOnce(&mut GlobalState) -> R {
+    GLOBAL.with(|g| f(&mut *g.borrow_mut()))
+}
+
+// ======================== 辅助函数 ========================
+
+/// 致命错误退出。
 pub fn die(message: &str) -> ! {
     eprintln!("{}", message);
     std::process::exit(1);
 }
 
-/// 复制一份字符串（对应 C 的 copy_of / measured_copy）。
+/// 复制字符串。
 pub fn copy_of(string: &str) -> String {
     string.to_string()
 }
 
-/// 分配并复制 src 的前 count 个字节（对应 measured_copy）。
+/// 分配并复制 src 的前 count 个字节。
 pub fn measured_copy(string: &[u8], count: usize) -> Vec<u8> {
     let mut v = Vec::with_capacity(count + 1);
-    v.extend_from_slice(&string[..count.min(string.len())]);
+    let end = count.min(string.len());
+    v.extend_from_slice(&string[..end]);
     v.push(0);
     v
 }
 
-/// 创建一个新行节点（链表接线由调用方完成）。
-pub fn make_new_node(given: &linestruct) -> Box<linestruct> {
-    Box::new(linestruct {
+/// 创建新行节点。
+pub fn make_new_node(given: &LineStruct) -> LineRef {
+    Rc::new(RefCell::new(LineStruct {
         data: String::new(),
         lineno: given.lineno + 1,
-        next: std::ptr::null_mut(),
-        prev: std::ptr::null_mut(),
+        next: None,
+        prev: None,
         multidata: None,
         has_anchor: false,
-    })
+    }))
 }
 
-/// 删除给定节点（从链表中摘除并释放，接线由调用方处理）。
-pub fn delete_node(_node: Box<linestruct>) {
-    /* 在 Rust 中，摘除逻辑由调用方处理链表指针，此处仅消费 Box 以释放。 */
+/// 删除节点（调用方负责从链表中摘除）。
+pub fn delete_node(_node: LineRef) {
+    // 当最后一个引用消失时，Rc 自动释放
 }
 
-/* 版本号与构建信息（对应 C 的 VERSION / REVISION）。 */
+/// 宏：标记稍后翻译的字符串。
+#[allow(non_snake_case)]
+pub fn N_(string: &'static str) -> &'static str { string }
+
+/// 版本信息。
 pub const VERSION: &str = "8.5";
 pub const REVISION: &str = "";

@@ -1,5 +1,6 @@
-#![allow(static_mut_refs)]
-#![allow(dangerous_implicit_autorefs)]
+// lib.rs - GNU nano Rust 翻译版模块声明
+#![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
 
 pub mod definitions;
 pub mod chars;
@@ -7,7 +8,7 @@ pub mod utils;
 pub mod global;
 pub mod history;
 pub mod files;
-pub mod r#move;
+pub mod movement;
 pub mod text;
 pub mod search;
 pub mod cut;
