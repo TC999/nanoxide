@@ -473,23 +473,30 @@ pub fn blank_edit() {
 }
 
 /// 放置光标（对应 `place_the_cursor`）。
+/// 行位置按 `current.lineno - edittop.lineno` 计算（与 C 一致），
+/// 并更新 `cursor_row`。
 pub fn place_the_cursor() {
-    with_global(|g| {
+    let editwinrows = with_global(|g| g.editwinrows);
+    with_global_mut(|g| {
         let openfile = g.openfile.clone();
         if let Some(of) = openfile {
-            let of_ref = of.borrow();
-            let cursor_row = (of_ref.cursor_row + 1) as u16;
-            /* 光标列用显示列宽计算（而非字节偏移）。 */
-            let cur = of_ref.current.clone();
-            let cursor_col = match cur {
-                Some(c) => {
-                    let data = c.borrow().data.clone();
-                    crate::utils::wideness(data.as_bytes(), of_ref.current_x) as u16
-                }
-                None => of_ref.current_x as u16,
+            let mut of_ref = of.borrow_mut();
+            let row = {
+                let cur = of_ref.current.clone().unwrap();
+                let edittop = of_ref.edittop.clone().unwrap();
+                let cur_lineno = cur.borrow().lineno;
+                let edit_lineno = edittop.borrow().lineno;
+                cur_lineno - edit_lineno
             };
-            let mut stdout = io::stdout();
-            let _ = execute!(stdout, cursor::MoveTo(cursor_col, cursor_row));
+            of_ref.cursor_row = row;
+            if row < editwinrows as isize {
+                /* 光标列用显示列宽计算（而非字节偏移）。 */
+                let cur = of_ref.current.clone().unwrap();
+                let data = cur.borrow().data.clone();
+                let column = crate::utils::wideness(data.as_bytes(), of_ref.current_x);
+                let mut stdout = io::stdout();
+                let _ = execute!(stdout, cursor::MoveTo(column as u16, (row + 1) as u16));
+            }
         }
     });
 }
