@@ -23,28 +23,29 @@ use std::collections::HashSet;
 // ======================== 全局状态访问 ========================
 
 /// 是否使用 UTF-8（对应 C 全局 `using_utf8`）。
+/// 使用独立 thread_local，避免持有 `GLOBAL` 借用时冲突。
 pub fn using_utf8() -> bool {
-    with_global(|g| g.using_utf8)
+    using_utf8_independent()
 }
 
 /// 设置 UTF-8 状态。
 pub fn set_using_utf8(val: bool) {
-    with_global_mut(|g| g.using_utf8 = val);
+    set_using_utf8_independent(val);
 }
 
 /// 获取单词字符集（对应 C 全局 `word_chars`）。
 pub fn word_chars() -> Option<String> {
-    with_global(|g| g.word_chars.clone())
+    word_chars_independent()
 }
 
 /// 获取 `as_an_at` 标志。
 pub fn as_an_at() -> bool {
-    with_global(|g| g.as_an_at)
+    as_an_at_independent()
 }
 
 /// 获取制表符宽度（对应 C 全局 `tabsize`）。
 pub fn tabsize() -> usize {
-    with_global(|g| g.tabsize)
+    tabsize_independent()
 }
 
 /// 越界读取返回 0，模拟 C 的 NUL 结尾字符串。

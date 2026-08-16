@@ -63,7 +63,9 @@ pub fn to_last_line() {
     } else {
         of_ref.current.as_ref().map(|c| c.borrow().data.len()).unwrap_or(0)
     };
-    of_ref.placewewant = utils::xplustabs();
+    /* xplustabs 内联：避免在持有 openfile 借用时访问它。 */
+    let cur = of_ref.current.clone().unwrap();
+    of_ref.placewewant = utils::wideness(cur.borrow().data.as_bytes(), of_ref.current_x);
 
     /* 把屏幕最后一行设为光标的行目标。 */
     let rows = editwinrows_value();
@@ -638,7 +640,8 @@ pub fn do_home() {
     }
 
     if moved_off_chunk {
-        of.borrow_mut().placewewant = utils::xplustabs();
+        let pww = utils::xplustabs();
+        of.borrow_mut().placewewant = pww;
     }
 
     /* 若改变块可能离屏；否则在标记开启或"页"改变时更新当前行。 */
@@ -692,7 +695,8 @@ pub fn do_end() {
     }
 
     if moved_off_chunk {
-        of.borrow_mut().placewewant = utils::xplustabs();
+        let pww = utils::xplustabs();
+        of.borrow_mut().placewewant = pww;
     }
 
     if ISSET(SOFTWRAP) && moved_off_chunk {
@@ -731,7 +735,7 @@ pub fn do_up() {
 
     let (cursor_row, jumpy) = with_global(|g| {
         let of = g.openfile.as_ref().unwrap().borrow();
-        (of.cursor_row, g.flags.isset(JUMPY_SCROLLING))
+        (of.cursor_row, ISSET(JUMPY_SCROLLING))
     });
     let tabsize = tabsize_value();
     let editwincols = editwincols_value();
@@ -766,7 +770,7 @@ pub fn do_down() {
 
     let (cursor_row, jumpy) = with_global(|g| {
         let of = g.openfile.as_ref().unwrap().borrow();
-        (of.cursor_row, g.flags.isset(JUMPY_SCROLLING))
+        (of.cursor_row, ISSET(JUMPY_SCROLLING))
     });
     let rows = editwinrows_value();
     let tabsize = tabsize_value();
@@ -941,7 +945,8 @@ pub fn do_scroll_left() {
 
         if of.current_x > frame_x {
             of.current_x = frame_x;
-            of.placewewant = utils::xplustabs();
+            let cur = of.current.clone().unwrap();
+            of.placewewant = utils::wideness(cur.borrow().data.as_bytes(), of.current_x);
         }
         g.refresh_needed = true;
     });
@@ -993,7 +998,8 @@ pub fn do_scroll_right() {
 
         if of.current_x < frame_x {
             of.current_x = frame_x;
-            of.placewewant = utils::xplustabs();
+            let cur = of.current.clone().unwrap();
+            of.placewewant = utils::wideness(cur.borrow().data.as_bytes(), of.current_x);
         }
         g.refresh_needed = true;
     });

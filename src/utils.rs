@@ -331,7 +331,7 @@ pub fn get_page_start(column: usize) -> usize {
                 if column < CUSHION {
                     0
                 } else if column < brink + CUSHION {
-                    if g.flags.isset(JUMPY_SCROLLING) {
+                    if ISSET(JUMPY_SCROLLING) {
                         if column > ew / 2 {
                             column - ew / 2
                         } else {
@@ -341,14 +341,14 @@ pub fn get_page_start(column: usize) -> usize {
                         column - CUSHION
                     }
                 } else if column > brink + ew - CUSHION - 1 {
-                    column - ew + (if g.flags.isset(JUMPY_SCROLLING) { ew / 2 } else { CUSHION }) + 1
+                    column - ew + (if ISSET(JUMPY_SCROLLING) { ew / 2 } else { CUSHION }) + 1
                 } else {
                     brink
                 }
             } else {
                 0
             }
-        } else if column == 0 || column + 2 < g.editwincols || g.flags.isset(SOFTWRAP) {
+        } else if column == 0 || column + 2 < g.editwincols || ISSET(SOFTWRAP) {
             0
         } else if g.editwincols > 8 {
             column - 6 - (column - 6) % (g.editwincols - 8)
@@ -599,7 +599,11 @@ pub fn number_of_characters_in(begin: &LineRef, end: &LineRef) -> usize {
             break;
         }
         let next = { let r = line.borrow(); r.next.clone() };
-        line = next.unwrap();
+        match next {
+            Some(n) => line = n,
+            /* 对应 C 的 `line != end->next` 循环：到达 NULL 即停止。 */
+            None => break,
+        }
     }
 
     /* 不计最后一个换行。 */

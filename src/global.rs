@@ -14,7 +14,9 @@ use std::cell::RefCell;
 pub fn global_init() {
     with_global_mut(|g| {
         g.using_utf8 = true;
+        set_using_utf8_independent(true);
         g.tabsize = 8;
+        set_tabsize_independent(8);
         g.currmenu = MMAIN;
         g.COLS = 80;
         g.LINES = 24;

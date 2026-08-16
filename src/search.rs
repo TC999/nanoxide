@@ -23,7 +23,7 @@ fn openfile_ref() -> OpenFileRef {
 /// 初始化正则表达式（模式匹配）。
 pub fn regexp_init(pattern: &str) -> bool {
     with_global_mut(|g| {
-        let case_sensitive = g.flags.isset(CASE_SENSITIVE);
+        let case_sensitive = ISSET(CASE_SENSITIVE);
         let pat = if pattern.contains('*') || pattern.contains('?') {
             MatchPattern::from_glob(pattern)
         } else {
@@ -58,7 +58,7 @@ pub fn find_next_match(needle: &str, start_line: Option<LineRef>, start_x: usize
                 loop {
                     let data = line.borrow().data.clone();
                     if !needle.is_empty() {
-                        if let Some(found) = if g.flags.isset(CASE_SENSITIVE) {
+                        if let Some(found) = if ISSET(CASE_SENSITIVE) {
                             data[..pos].rfind(needle)
                         } else {
                             let lower = data[..pos].to_lowercase();
@@ -83,7 +83,7 @@ pub fn find_next_match(needle: &str, start_line: Option<LineRef>, start_x: usize
                 loop {
                     let data = line.borrow().data.clone();
                     if !needle.is_empty() {
-                        if let Some(found) = if g.flags.isset(CASE_SENSITIVE) {
+                        if let Some(found) = if ISSET(CASE_SENSITIVE) {
                             data[pos..].find(needle)
                         } else {
                             let lower = data[pos..].to_lowercase();
@@ -125,7 +125,7 @@ pub fn replace_all(needle: &str, replacement: &str) -> usize {
                 let mut data = c.borrow_mut();
                 if !needle.is_empty() {
                     let mut pos = 0;
-                    while let Some(found) = if g.flags.isset(CASE_SENSITIVE) {
+                    while let Some(found) = if ISSET(CASE_SENSITIVE) {
                         data.data[pos..].find(needle)
                     } else {
                         let lower = data.data[pos..].to_lowercase();
@@ -166,7 +166,7 @@ pub fn find_next_match_highlight(needle: &str, from_line: Option<LineRef>) -> Op
             loop {
                 let data = line.borrow().data.clone();
                 if !needle.is_empty() {
-                    let found = if g.flags.isset(CASE_SENSITIVE) {
+                    let found = if ISSET(CASE_SENSITIVE) {
                         data.find(needle)
                     } else {
                         data.to_lowercase().find(&needle.to_lowercase())
@@ -216,7 +216,7 @@ pub fn goto_line_and_column(mut line: isize, mut column: isize, hugfloor: bool) 
             let et_lineno = et.borrow().lineno;
             let cur_lineno = cur.borrow().lineno;
             if line > et_lineno + g.editwinrows as isize
-                || (g.flags.isset(SOFTWRAP) && line > cur_lineno)
+                || (ISSET(SOFTWRAP) && line > cur_lineno)
             {
                 g.recook |= g.perturbed;
             }
@@ -252,7 +252,7 @@ pub fn goto_line_and_column(mut line: isize, mut column: isize, hugfloor: bool) 
         of.current_x = utils::actual_x(data.as_bytes(), column as usize - 1);
         of.placewewant = column as usize - 1;
 
-        if g.flags.isset(SOFTWRAP) && of.placewewant / g.editwincols
+        if ISSET(SOFTWRAP) && of.placewewant / g.editwincols
             > line_breadth as usize / g.editwincols
         {
             of.placewewant = line_breadth as usize;
@@ -303,30 +303,40 @@ pub fn goto_line_and_column(mut line: isize, mut column: isize, hugfloor: bool) 
 
 /// 转到指定的行与 x 位置（对应 `goto_line_posx`）。
 pub fn goto_line_posx(linenumber: isize, pos_x: usize) {
-    with_global_mut(|g| {
-        let of = g.openfile.as_ref().expect("no open file").clone();
-        let mut of = of.borrow_mut();
+    let of = openfile_ref();
 
-        let edittop_lineno = of.edittop.as_ref().map(|e| e.borrow().lineno).unwrap_or(0);
-        let current_lineno = of.current.as_ref().map(|c| c.borrow().lineno).unwrap_or(0);
-        if linenumber > edittop_lineno + g.editwinrows as isize
-            || (g.flags.isset(SOFTWRAP) && linenumber > current_lineno)
-        {
-            g.recook |= g.perturbed;
-        }
+    let (edittop_lineno, current_lineno) = {
+        let r = of.borrow();
+        (
+            r.edittop.as_ref().map(|e| e.borrow().lineno).unwrap_or(0),
+            r.current.as_ref().map(|c| c.borrow().lineno).unwrap_or(0),
+        )
+    };
+    let editwinrows = with_global(|g| g.editwinrows);
+    if linenumber > edittop_lineno + editwinrows as isize
+        || (ISSET(SOFTWRAP) && linenumber > current_lineno)
+    {
+        with_global_mut(|g| g.recook |= g.perturbed);
+    }
 
-        let filebot = of.filebot.clone().unwrap();
-        let fb_lineno = filebot.borrow().lineno;
-        if linenumber < fb_lineno {
-            of.current = Some(crate::utils::line_from_number(linenumber));
-        } else {
-            of.current = Some(filebot);
-        }
+    let filebot = { let r = of.borrow(); r.filebot.clone().unwrap() };
+    let fb_lineno = filebot.borrow().lineno;
+    let new_current = if linenumber < fb_lineno {
+        crate::utils::line_from_number(linenumber)
+    } else {
+        filebot
+    };
 
-        of.current_x = pos_x;
-        of.placewewant = crate::utils::xplustabs();
-        g.refresh_needed = true;
-    });
+    {
+        let mut r = of.borrow_mut();
+        r.current = Some(new_current);
+        r.current_x = pos_x;
+        /* xplustabs 内联：避免在持有 openfile 借用时访问它。 */
+        let cur = r.current.clone().unwrap();
+        r.placewewant = crate::utils::wideness(cur.borrow().data.as_bytes(), pos_x);
+    }
+
+    with_global_mut(|g| g.refresh_needed = true);
 }
 
 // ======================== 搜索核心（对应 search.c） ========================
@@ -616,9 +626,10 @@ pub fn findnextstr(
         let marked = with_global(|g| g.openfile.as_ref().map(|of| of.borrow().mark.is_some()).unwrap_or(false));
         let softmark = with_global(|g| g.openfile.as_ref().map(|of| of.borrow().softmark).unwrap_or(false));
         if !marked || softmark {
+            let light_from_col = utils::xplustabs();
             with_global_mut(|g| {
                 g.spotlighted = true;
-                g.light_from_col = utils::xplustabs();
+                g.light_from_col = light_from_col;
                 g.light_to_col = utils::wideness(data.as_bytes(), found_x + found_len);
                 let (united, ew) = (g.united_sidescroll, g.editwincols);
                 if united && g.light_to_col < ew - CUSHION {
@@ -834,9 +845,10 @@ fn do_replace_loop(needle: &str, real_current: &LineRef, real_current_x: &mut us
         }
 
         if !replaceall {
+            let light_from_col = utils::xplustabs();
             with_global_mut(|g| {
                 g.spotlighted = true;
-                g.light_from_col = utils::xplustabs();
+                g.light_from_col = light_from_col;
                 let of = g.openfile.as_ref().unwrap().borrow();
                 let cur = of.current.clone().unwrap();
                 g.light_to_col = utils::wideness(cur.borrow().data.as_bytes(), of.current_x + match_len);
@@ -912,6 +924,7 @@ fn do_replace_loop(needle: &str, real_current: &LineRef, real_current_x: &mut us
             with_global_mut(|g| g.refresh_needed = false);
             nano::set_modified();
             with_global_mut(|g| g.as_an_at = true);
+        set_as_an_at_independent(true);
             numreplaced += 1;
         }
     }

@@ -22,105 +22,149 @@ use crate::utils;
 use crate::winio;
 use std::rc::Rc;
 
+/// 获取当前打开的缓冲区引用（克隆 Rc，释放全局借用）。
+fn openfile_ref() -> OpenFileRef {
+    with_global(|g| g.openfile.as_ref().expect("no open file").clone())
+}
+
 /// 删除当前字符，并为给定动作添加或更新一个 undo 项
 /// （对应 `expunge`）。
 pub fn expunge(action: UndoType) {
-    with_global_mut(|g| {
-        let of = g.openfile.as_ref().expect("no open file").clone();
-        let mut of = of.borrow_mut();
-        let current = of.current.clone().unwrap();
+    let of = openfile_ref();
+    let current = { let r = of.borrow(); r.current.clone().unwrap() };
 
-        of.placewewant = utils::xplustabs();
+    /* 读取需要的当前状态（短借用）。 */
+    let (current_x, last_action, undo_head_lineno, totsize) = {
+        let r = of.borrow();
+        (
+            r.current_x,
+            r.last_action,
+            r.current_undo.as_ref().map(|u| u.borrow().head_lineno).unwrap_or(-1),
+            r.totsize,
+        )
+    };
+    let _ = totsize;
 
+    let data = current.borrow().data.clone();
+    let bytes = data.as_bytes();
+
+    /* 位于行尾且不在缓冲区末尾：把本行与下一行连接。 */
+    let at_eol = bytes.get(current_x).copied().unwrap_or(0) == 0;
+    let joining: Option<LineRef> = if at_eol {
+        let r = current.borrow();
+        r.next.clone()
+    } else {
+        None
+    };
+
+    if !at_eol {
         /* 在行中间时，删除当前字符。 */
-        let data = current.borrow().data.clone();
-        let bytes = data.as_bytes();
-        if bytes.get(of.current_x).copied().unwrap_or(0) != 0 {
-            let charlen = chars::char_length(&bytes[of.current_x..]);
-            let line_len = bytes.len() - of.current_x;
-            let old_amount = if ISSET(SOFTWRAP) {
-                winio::extra_chunks_in(&current)
-            } else {
-                0
-            };
+        let charlen = chars::char_length(&bytes[current_x..]);
+        let old_amount = if ISSET(SOFTWRAP) {
+            winio::extra_chunks_in(&current)
+        } else {
+            0
+        };
 
-            /* 若动作类型改变或光标移到另一行，创建新 undo 项，否则更新。 */
-            if action != of.last_action
-                || current.borrow().lineno != of.current_undo.as_ref().map(|u| u.borrow().head_lineno).unwrap_or(-1)
-            {
-                drop(data);
-                crate::text::add_undo(action, None);
-            } else {
-                crate::text::update_undo(action);
-            }
-
-            /* 将行的其余部分"移入"，覆盖当前字符。 */
-            let mut ndata = current.borrow().data.clone().into_bytes();
-            ndata.drain(of.current_x..of.current_x + charlen);
-            current.borrow_mut().data = String::from_utf8_lossy(&ndata).into_owned();
-
-            /* 软换行时块数改变需要刷新；平移时接近视口边缘也需刷新。 */
-            if ISSET(SOFTWRAP) && winio::extra_chunks_in(&current) != old_amount {
-                g.refresh_needed = true;
-            } else if g.united_sidescroll && of.placewewant < of.brink + CUSHION {
-                g.refresh_needed = true;
-            }
-
-            /* 调整光标之后同一行的标记。 */
-            if of.mark.as_ref().map(|m| Rc::ptr_eq(m, &current)).unwrap_or(false)
-                && of.mark_x > of.current_x
-            {
-                of.mark_x -= charlen;
-            }
-        } else if of.filebot.as_ref().map(|b| !Rc::ptr_eq(b, &current)).unwrap_or(false) {
-            /* 不在行尾且不在缓冲区末尾：把本行与下一行连接。 */
-            let joining = { let r = current.borrow(); r.next.clone() }.unwrap();
-
-            /* 若有魔法行且位于其前：不吞掉它。 */
-            let is_filebot = of.filebot.as_ref().map(|b| Rc::ptr_eq(b, &joining)).unwrap_or(false);
-            if is_filebot && of.current_x != 0 && !ISSET(NO_NEWLINES) {
-                if action == UndoType::Back {
-                    crate::text::add_undo(UndoType::Back, None);
-                }
-                return;
-            }
-
+        /* 若动作类型改变或光标移到另一行，创建新 undo 项，否则更新。 */
+        if action != last_action || current.borrow().lineno != undo_head_lineno {
             crate::text::add_undo(action, None);
+        } else {
+            crate::text::update_undo(action);
+        }
 
-            /* 调整位于将被"吞掉"的行上的标记。 */
-            if of.mark.as_ref().map(|m| Rc::ptr_eq(m, &joining)).unwrap_or(false) {
-                of.mark = Some(current.clone());
-                of.mark_x += of.current_x;
+        /* 将行的其余部分"移入"，覆盖当前字符。 */
+        {
+            let mut ndata = current.borrow().data.clone().into_bytes();
+            ndata.drain(current_x..current_x + charlen);
+            current.borrow_mut().data = String::from_utf8_lossy(&ndata).into_owned();
+        }
+
+        /* 软换行时块数改变需要刷新；平移时接近视口边缘也需刷新。 */
+        let mut need_refresh = false;
+        if ISSET(SOFTWRAP) && winio::extra_chunks_in(&current) != old_amount {
+            need_refresh = true;
+        }
+        let placewewant = of.borrow().placewewant;
+        let brink = of.borrow().brink;
+        let united = with_global(|g| g.united_sidescroll);
+        if !need_refresh && united && placewewant < brink + CUSHION {
+            need_refresh = true;
+        }
+        if need_refresh {
+            with_global_mut(|g| g.refresh_needed = true);
+        }
+
+        /* 调整光标之后同一行的标记。 */
+        {
+            let mut r = of.borrow_mut();
+            if r.mark.as_ref().map(|m| Rc::ptr_eq(m, &current)).unwrap_or(false)
+                && r.mark_x > r.current_x
+            {
+                r.mark_x -= charlen;
             }
+            r.totsize -= 1;
+            if let Some(u) = &r.current_undo {
+                u.borrow_mut().newsize = r.totsize;
+            }
+        }
+    } else if let Some(joining) = joining {
+        let is_filebot = {
+            let r = of.borrow();
+            r.filebot.as_ref().map(|b| Rc::ptr_eq(b, &joining)).unwrap_or(false)
+        };
 
-            let cur_has_anchor = current.borrow().has_anchor;
-            let join_has_anchor = joining.borrow().has_anchor;
-            current.borrow_mut().has_anchor = cur_has_anchor || join_has_anchor;
+        /* 若有魔法行且位于其前：不吞掉它。 */
+        if is_filebot && current_x != 0 && !ISSET(NO_NEWLINES) {
+            if action == UndoType::Back {
+                crate::text::add_undo(UndoType::Back, None);
+            }
+            return;
+        }
 
-            /* 将下一行的内容添加到当前行的内容。 */
+        crate::text::add_undo(action, None);
+
+        /* 调整位于将被"吞掉"的行上的标记。 */
+        {
+            let mut r = of.borrow_mut();
+            if r.mark.as_ref().map(|m| Rc::ptr_eq(m, &joining)).unwrap_or(false) {
+                r.mark = Some(current.clone());
+                r.mark_x += r.current_x;
+            }
+        }
+
+        let cur_has_anchor = current.borrow().has_anchor;
+        let join_has_anchor = joining.borrow().has_anchor;
+        current.borrow_mut().has_anchor = cur_has_anchor || join_has_anchor;
+
+        /* 将下一行的内容添加到当前行的内容。 */
+        {
             let mut cdata = current.borrow().data.clone();
             let jdata = joining.borrow().data.clone();
             cdata.push_str(&jdata);
             current.borrow_mut().data = cdata;
-
-            nano::unlink_node(&joining);
-
-            /* 连接了两行，需要重新编号并刷新屏幕。 */
-            nano::renumber_from(&current);
-            g.refresh_needed = true;
-        } else {
-            /* 位于文件末尾：无事可做。 */
-            return;
         }
 
-        /* 调整文件大小，并记住它以便可能的重做。 */
-        of.totsize -= 1;
-        if let Some(u) = &of.current_undo {
-            u.borrow_mut().newsize = of.totsize;
+        nano::unlink_node(&joining);
+
+        /* 连接了两行，需要重新编号并刷新屏幕。 */
+        nano::renumber_from(&current);
+        with_global_mut(|g| g.refresh_needed = true);
+
+        /* 调整文件大小。 */
+        {
+            let mut r = of.borrow_mut();
+            r.totsize -= 1;
+            if let Some(u) = &r.current_undo {
+                u.borrow_mut().newsize = r.totsize;
+            }
         }
-        drop(of);
-        nano::set_modified();
-    });
+    } else {
+        /* 位于文件末尾：无事可做。 */
+        return;
+    }
+
+    nano::set_modified();
 }
 
 /// 删除光标下的字符及之后的零宽字符；
@@ -128,7 +172,7 @@ pub fn expunge(action: UndoType) {
 pub fn do_delete() {
     if with_global(|g| g.openfile.as_ref().map(|of| {
         let of = of.borrow();
-        of.mark.is_some() && g.flags.isset(LET_THEM_ZAP)
+        of.mark.is_some() && ISSET(LET_THEM_ZAP)
     }).unwrap_or(false)) {
         zap_text();
     } else {
@@ -159,7 +203,7 @@ pub fn do_delete() {
 pub fn do_backspace() {
     if with_global(|g| g.openfile.as_ref().map(|of| {
         let of = of.borrow();
-        of.mark.is_some() && g.flags.isset(LET_THEM_ZAP)
+        of.mark.is_some() && ISSET(LET_THEM_ZAP)
     }).unwrap_or(false)) {
         zap_text();
     } else {
@@ -484,10 +528,13 @@ pub fn extract_segment(top: &LineRef, top_x: usize, bot: &LineRef, bot_x: usize)
     }
 
     /* 从缓冲区大小中减去被取出文本的大小。 */
+    let taken_size = utils::number_of_characters_in(&taken, &last);
+    let totsize = with_global(|g| {
+        g.openfile.as_ref().map(|of| of.borrow().totsize).unwrap_or(0)
+    });
     with_global_mut(|g| {
         if let Some(of) = &g.openfile {
-            let mut of = of.borrow_mut();
-            of.totsize = of.totsize.saturating_sub(utils::number_of_characters_in(&taken, &last));
+            of.borrow_mut().totsize = totsize.saturating_sub(taken_size);
         }
     });
 
@@ -500,22 +547,28 @@ pub fn extract_segment(top: &LineRef, top_x: usize, bot: &LineRef, bot_x: usize)
             g.cutbottom = Some(last.clone());
         });
     } else {
-        with_global_mut(|g| {
+        let (cutbottom, inherited_anchor, taken_anchor, taken_next) = with_global(|g| {
             let cutbottom = g.cutbottom.clone().unwrap();
+            let inherited_anchor = g.inherited_anchor;
+            let taken_anchor = taken.borrow().has_anchor;
+            let taken_next = { let r = taken.borrow(); r.next.clone() };
+            (cutbottom, inherited_anchor, taken_anchor, taken_next)
+        });
+
+        /* 把 taken 的文本合并到 cutbottom。 */
+        {
             let taken_data = taken.borrow().data.clone();
             let mut cb = cutbottom.borrow().data.clone();
             cb.push_str(&taken_data);
             cutbottom.borrow_mut().data = cb;
-
-            let inherited_anchor = g.inherited_anchor;
-            let taken_anchor = taken.borrow().has_anchor;
             cutbottom.borrow_mut().has_anchor = taken_anchor && !inherited_anchor;
-            g.inherited_anchor = inherited_anchor || taken_anchor;
-
-            let taken_next = { let r = taken.borrow(); r.next.clone() };
             cutbottom.borrow_mut().next = taken_next.clone();
-            nano::delete_node(&taken);
+        }
 
+        nano::delete_node(&taken);
+
+        with_global_mut(|g| {
+            g.inherited_anchor = inherited_anchor || taken_anchor;
             if let Some(tn) = taken_next {
                 tn.borrow_mut().prev = Some(Rc::downgrade(&cutbottom));
                 g.cutbottom = Some(last.clone());
@@ -523,8 +576,8 @@ pub fn extract_segment(top: &LineRef, top_x: usize, bot: &LineRef, bot_x: usize)
         });
     }
 
-    with_global_mut(|g| {
-        let of = g.openfile.as_ref().expect("no open file").clone();
+    let of = openfile_ref();
+    {
         let mut of = of.borrow_mut();
         of.current_x = top_x;
 
@@ -541,26 +594,30 @@ pub fn extract_segment(top: &LineRef, top_x: usize, bot: &LineRef, bot_x: usize)
         if is_filebot {
             of.filebot = of.current.clone();
         }
+    }
 
-        let current = of.current.clone().unwrap();
-        nano::renumber_from(&current);
+    /* 闭包外调用（避免持有 GLOBAL 借用）。 */
+    let current = { let r = of.borrow(); r.current.clone().unwrap() };
+    nano::renumber_from(&current);
 
-        /* 视口起点在被取区域内时，调整视口。 */
-        if edittop_inside {
-            winio::adjust_viewport(UpdateType::Stationary);
-            g.refresh_needed = true;
-        }
+    /* 视口起点在被取区域内时，调整视口。 */
+    if edittop_inside {
+        winio::adjust_viewport(UpdateType::Stationary);
+        with_global_mut(|g| g.refresh_needed = true);
+    }
 
-        /* 若文本不以换行结尾而应当有换行，则添加一个。 */
-        if !ISSET(NO_NEWLINES) {
-            let filebot_empty = of.filebot.as_ref().map(|b| {
+    /* 若文本不以换行结尾而应当有换行，则添加一个。 */
+    if !ISSET(NO_NEWLINES) {
+        let filebot_empty = {
+            let r = of.borrow();
+            r.filebot.as_ref().map(|b| {
                 b.borrow().data.as_bytes().first().copied().unwrap_or(0) == 0
-            }).unwrap_or(false);
-            if !filebot_empty {
-                utils::new_magicline();
-            }
+            }).unwrap_or(false)
+        };
+        if !filebot_empty {
+            utils::new_magicline();
         }
-    });
+    }
 }
 
 /// 将 topline 开始的缓冲区融合到当前文件缓冲区的当前光标位置
@@ -687,20 +744,20 @@ pub fn ingraft_buffer(topline: &LineRef) {
     nano::renumber_from(&line);
 
     /* 若文本不以换行结尾而应当有换行，则添加一个。 */
-    with_global_mut(|g| {
-        if let Some(of) = &g.openfile {
-            let mut of = of.borrow_mut();
-            if !ISSET(NO_NEWLINES) {
-                let filebot_empty = of.filebot.as_ref().map(|b| {
-                    b.borrow().data.as_bytes().first().copied().unwrap_or(0) == 0
-                }).unwrap_or(false);
-                if !filebot_empty {
-                    drop(of);
-                    utils::new_magicline();
-                }
-            }
+    let need_magicline = {
+        let of = openfile_ref();
+        let r = of.borrow();
+        if !ISSET(NO_NEWLINES) {
+            r.filebot.as_ref().map(|b| {
+                b.borrow().data.as_bytes().first().copied().unwrap_or(0) != 0
+            }).unwrap_or(false)
+        } else {
+            false
         }
-    });
+    };
+    if need_magicline {
+        utils::new_magicline();
+    }
 }
 
 /// 将给定缓冲区的副本融合到当前文件缓冲区（对应 `copy_from_buffer`）。
@@ -719,7 +776,7 @@ pub fn copy_from_buffer(somebuffer: &LineRef) {
         if let Some(of) = &g.openfile {
             let of = of.borrow();
             let current_lineno = of.current.as_ref().map(|c| c.borrow().lineno).unwrap_or(0);
-            if current_lineno > threshold || g.flags.isset(SOFTWRAP) {
+            if current_lineno > threshold || ISSET(SOFTWRAP) {
                 g.recook = true;
             } else {
                 g.perturbed = true;
@@ -732,10 +789,10 @@ pub fn copy_from_buffer(somebuffer: &LineRef) {
 pub fn cut_marked_region() {
     let (top, top_x, bot, bot_x) = utils::get_region();
     extract_segment(&top, top_x, &bot, bot_x);
+    let pww = utils::xplustabs();
     with_global_mut(|g| {
         if let Some(of) = &g.openfile {
-            let mut of = of.borrow_mut();
-            of.placewewant = utils::xplustabs();
+            of.borrow_mut().placewewant = pww;
         }
     });
 }
@@ -745,79 +802,81 @@ pub fn cut_marked_region() {
 /// append 为 TRUE（zap 时）总是把剪切内容追加到 cutbuffer
 /// （对应 `do_snip`）。
 pub fn do_snip(marked: bool, until_eof: bool, append: bool) {
-    with_global_mut(|g| {
-        if let Some(of) = &g.openfile {
-            let mut of = of.borrow_mut();
-            if of.last_action != UndoType::Copy {
-                g.keep_cutbuffer = false;
-            }
+    let of = openfile_ref();
 
-            /* 若剪切不连续，或剪切区域，则清空剪贴板。 */
-            if (marked || until_eof || !g.keep_cutbuffer) && !append {
-                nano::free_lines(g.cutbuffer.clone());
-                g.cutbuffer = None;
-            }
+    /* 若剪切不连续，或剪切区域，则清空剪贴板。 */
+    let last_action = { let r = of.borrow(); r.last_action };
+    if last_action != UndoType::Copy {
+        with_global_mut(|g| g.keep_cutbuffer = false);
+    }
+    let keep_cutbuffer = with_global(|g| g.keep_cutbuffer);
+    if (marked || until_eof || !keep_cutbuffer) && !append {
+        nano::free_lines(with_global(|g| g.cutbuffer.clone()));
+        with_global_mut(|g| g.cutbuffer = None);
+    }
 
-            /* 现在把相关文本移入 cutbuffer。 */
-            let current = of.current.clone().unwrap();
-            if until_eof {
-                let filebot = of.filebot.clone().unwrap();
-                let filebot_len = filebot.borrow().data.len();
-                let cur_x = of.current_x;
-                drop(of);
-                extract_segment(&current, cur_x, &filebot, filebot_len);
-            } else if of.mark.is_some() {
-                drop(of);
-                cut_marked_region();
+    /* 现在把相关文本移入 cutbuffer。 */
+    let current = { let r = of.borrow(); r.current.clone().unwrap() };
+    if until_eof {
+        let (filebot, filebot_len, cur_x) = {
+            let r = of.borrow();
+            let fb = r.filebot.clone().unwrap();
+            let len = fb.borrow().data.len();
+            (fb, len, r.current_x)
+        };
+        extract_segment(&current, cur_x, &filebot, filebot_len);
+    } else if { let r = of.borrow(); r.mark.is_some() } {
+        cut_marked_region();
+        with_global_mut(|g2| {
+            if let Some(of2) = &g2.openfile {
+                of2.borrow_mut().mark = None;
+            }
+        });
+    } else if ISSET(CUT_FROM_CURSOR) {
+        /* 不在行尾时，把该行剩余部分移入 cutbuffer；
+         * 否则不在缓冲区末尾时，只把"行分隔符"移入。 */
+        let cur_x = { let r = of.borrow(); r.current_x };
+        let data = current.borrow().data.clone();
+        let at_eol = data.as_bytes().get(cur_x).copied().unwrap_or(0) == 0;
+        if !at_eol {
+            let len = data.len();
+            extract_segment(&current, cur_x, &current, len);
+        } else {
+            let is_filebot = {
+                let r = of.borrow();
+                r.filebot.as_ref().map(|b| Rc::ptr_eq(b, &current)).unwrap_or(false)
+            };
+            if !is_filebot {
+                let next = { let r = current.borrow(); r.next.clone() }.unwrap();
+                extract_segment(&current, cur_x, &next, 0);
+                let pww = utils::xplustabs();
                 with_global_mut(|g2| {
                     if let Some(of2) = &g2.openfile {
-                        of2.borrow_mut().mark = None;
-                    }
-                });
-            } else if ISSET(CUT_FROM_CURSOR) {
-                /* 不在行尾时，把该行剩余部分移入 cutbuffer；
-                 * 否则不在缓冲区末尾时，只把"行分隔符"移入。 */
-                let cur_x = of.current_x;
-                let data = current.borrow().data.clone();
-                let at_eol = data.as_bytes().get(cur_x).copied().unwrap_or(0) == 0;
-                if !at_eol {
-                    let len = data.len();
-                    drop(of);
-                    extract_segment(&current, cur_x, &current, len);
-                } else {
-                    let is_filebot = of.filebot.as_ref().map(|b| Rc::ptr_eq(b, &current)).unwrap_or(false);
-                    if !is_filebot {
-                        let next = { let r = current.borrow(); r.next.clone() }.unwrap();
-                        drop(of);
-                        extract_segment(&current, cur_x, &next, 0);
-                        with_global_mut(|g2| {
-                            if let Some(of2) = &g2.openfile {
-                                of2.borrow_mut().placewewant = utils::xplustabs();
-                            }
-                        });
-                    }
-                }
-            } else {
-                /* 不在缓冲区末尾时，把一整行移入 cutbuffer；
-                 * 否则把行尾之前的全部文本移入。 */
-                let is_filebot = of.filebot.as_ref().map(|b| Rc::ptr_eq(b, &current)).unwrap_or(false);
-                if !is_filebot {
-                    let next = { let r = current.borrow(); r.next.clone() }.unwrap();
-                    drop(of);
-                    extract_segment(&current, 0, &next, 0);
-                } else {
-                    let len = current.borrow().data.len();
-                    drop(of);
-                    extract_segment(&current, 0, &current, len);
-                }
-                with_global_mut(|g2| {
-                    if let Some(of2) = &g2.openfile {
-                        of2.borrow_mut().placewewant = 0;
+                        of2.borrow_mut().placewewant = pww;
                     }
                 });
             }
         }
-    });
+    } else {
+        /* 不在缓冲区末尾时，把一整行移入 cutbuffer；
+         * 否则把行尾之前的全部文本移入。 */
+        let is_filebot = {
+            let r = of.borrow();
+            r.filebot.as_ref().map(|b| Rc::ptr_eq(b, &current)).unwrap_or(false)
+        };
+        if !is_filebot {
+            let next = { let r = current.borrow(); r.next.clone() }.unwrap();
+            extract_segment(&current, 0, &next, 0);
+        } else {
+            let len = current.borrow().data.len();
+            extract_segment(&current, 0, &current, len);
+        }
+        with_global_mut(|g2| {
+            if let Some(of2) = &g2.openfile {
+                of2.borrow_mut().placewewant = 0;
+            }
+        });
+    }
 
     /* 行操作之后，后续操作应添加到 cutbuffer。 */
     with_global_mut(|g| g.keep_cutbuffer = !marked && !until_eof);
@@ -1062,16 +1121,17 @@ pub fn copy_text() {
             g.cutbottom = Some(cb);
         });
     } else if sans_newline {
-        with_global_mut(|g| {
+        let (cutbottom, cb_prev) = with_global(|g| {
             let cutbottom = g.cutbottom.clone().unwrap();
             let cb_prev = { let r = cutbottom.borrow(); r.prev.clone() };
-            addition.borrow_mut().prev = cb_prev.clone();
-            if let Some(p) = cb_prev.as_ref().and_then(|w| w.upgrade()) {
-                p.borrow_mut().next = Some(addition.clone());
-            }
-            nano::delete_node(&cutbottom);
-            g.cutbottom = Some(addition.clone());
+            (cutbottom, cb_prev)
         });
+        addition.borrow_mut().prev = cb_prev.clone();
+        if let Some(p) = cb_prev.as_ref().and_then(|w| w.upgrade()) {
+            p.borrow_mut().next = Some(addition.clone());
+        }
+        nano::delete_node(&cutbottom);
+        with_global_mut(|g| g.cutbottom = Some(addition.clone()));
     } else if ISSET(CUT_FROM_CURSOR) {
         with_global_mut(|g| {
             let cutbottom = g.cutbottom.clone().unwrap();
@@ -1180,10 +1240,10 @@ pub fn paste_text() {
     }
 
     /* 把期望的 x 位置设为粘贴文本的结束处。 */
+    let pww = utils::xplustabs();
     with_global_mut(|g| {
         if let Some(of) = &g.openfile {
-            let mut of = of.borrow_mut();
-            of.placewewant = utils::xplustabs();
+            of.borrow_mut().placewewant = pww;
         }
     });
 
@@ -1194,39 +1254,49 @@ pub fn paste_text() {
 
 /// 判断粘贴的文本是否不足一屏（对应 winio.c 的 `less_than_a_screenful`）。
 pub fn less_than_a_screenful(was_lineno: isize, was_leftedge: usize) -> bool {
-    with_global(|g| {
+    let (current, cur_lineno, edittop, firstcolumn, editwinrows, softwrap) = with_global(|g| {
         let of = g.openfile.as_ref().expect("no open file").borrow();
         let current = of.current.clone().unwrap();
         let cur_lineno = current.borrow().lineno;
-        let rows = (g.editwinrows - 1 - shim_value_here(g)) as isize;
+        let edittop = of.edittop.clone().unwrap();
+        let firstcolumn = of.firstcolumn;
+        let editwinrows = g.editwinrows;
+        let softwrap = g.flags.isset(SOFTWRAP);
+        (current, cur_lineno, edittop, firstcolumn, editwinrows, softwrap)
+    });
+    let shim = if ISSET(ZERO) && with_global(|g| g.currmenu == MREPLACEWITH || g.currmenu == MYESNO) {
+        1
+    } else {
+        0
+    };
+    let rows = (editwinrows - 1 - shim) as isize;
 
-        if cur_lineno < was_lineno {
+    if cur_lineno < was_lineno {
+        return false;
+    }
+    if cur_lineno - was_lineno > rows {
+        return false;
+    }
+    if softwrap {
+        let mut line = edittop;
+        let mut leftedge = firstcolumn;
+        winio::go_forward_chunks(rows as i32, &mut line, &mut leftedge);
+        let line_lineno = line.borrow().lineno;
+        let mut cur = current;
+        let pww = utils::xplustabs();
+        if line_lineno < cur_lineno
+            || (line_lineno == cur_lineno && leftedge < winio::leftedge_for(pww, &cur))
+        {
             return false;
         }
-        if cur_lineno - was_lineno > rows {
-            return false;
-        }
-        if ISSET(SOFTWRAP) {
-            let mut line = of.edittop.clone().unwrap();
-            let mut leftedge = of.firstcolumn;
-            winio::go_forward_chunks(rows as i32, &mut line, &mut leftedge);
-            let line_lineno = line.borrow().lineno;
-            let mut cur = of.current.clone().unwrap();
-            if line_lineno < cur_lineno
-                || (line_lineno == cur_lineno
-                    && leftedge < winio::leftedge_for(utils::xplustabs(), &cur))
-            {
-                return false;
-            }
-            let _ = was_leftedge;
-        }
-        true
-    })
+        let _ = was_leftedge;
+    }
+    true
 }
 
 /// SHIM 宏值（用于底栏行数计算）。
 fn shim_value_here(g: &GlobalState) -> i32 {
-    if g.flags.isset(ZERO) && (g.currmenu == MREPLACEWITH || g.currmenu == MYESNO) {
+    if ISSET(ZERO) && (g.currmenu == MREPLACEWITH || g.currmenu == MYESNO) {
         1
     } else {
         0

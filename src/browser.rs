@@ -118,7 +118,7 @@ fn read_the_list(path: &str) {
     let piles = (cols as i32 + 2) / (gauge as i32 + 2);
 
     let (editwinrows, lines, zero) = with_global(|g| {
-        (g.editwinrows, g.LINES, g.flags.isset(ZERO))
+        (g.editwinrows, g.LINES, ISSET(ZERO))
     });
     let usable_rows = (editwinrows - if zero && lines > 1 { 1 } else { 0 }) as usize;
 
@@ -159,7 +159,7 @@ pub fn browser_refresh() {
     winio::titlebar(present_path.as_deref());
 
     let (cols, editwinrows, zero, lines) = with_global(|g| {
-        (g.COLS, g.editwinrows, g.flags.isset(ZERO), g.LINES)
+        (g.COLS, g.editwinrows, ISSET(ZERO), g.LINES)
     });
     let usable_rows = (editwinrows - if zero && lines > 1 { 1 } else { 0 }) as usize;
     let piles = get_piles() as usize;
@@ -449,7 +449,7 @@ pub fn browse(path: &str) -> Option<String> {
 
                 /* 列表本身或选中文件变化时显示列表。 */
                 let selected = get_selected();
-                let show_cursor = with_global(|g| g.flags.isset(SHOW_CURSOR));
+                let show_cursor = with_global(|g| ISSET(SHOW_CURSOR));
                 if old_selected != Some(selected) || show_cursor {
                     browser_refresh();
                 }

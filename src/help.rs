@@ -284,9 +284,8 @@ pub fn show_help() {
     let oldmenu = with_global(|g| g.currmenu);
 
     /* 保存 flag 设置。 */
-    let stash_flags = with_global(|g| g.flags.clone());
+    let stash_flags = with_global(|g| clone_flags());
     let was_tabsize = with_global(|g| g.tabsize);
-
     /* 确保帮助屏幕的快捷键列表能显示。 */
     let no_help_or_zero = ISSET(NO_HELP) || ISSET(ZERO);
     if no_help_or_zero {
@@ -303,6 +302,7 @@ pub fn show_help() {
 
     with_global_mut(|g| {
         g.tabsize = 8;
+        set_tabsize_independent(8);
     });
     winio::curs_set(0);
 
@@ -344,7 +344,7 @@ pub fn show_help() {
 
         /* 显示光标（搜索并找到内容时）。 */
         let didfind = with_global(|g| g.didfind);
-        let show_cursor = with_global(|g| g.flags.isset(SHOW_CURSOR));
+        let show_cursor = with_global(|g| ISSET(SHOW_CURSOR));
         let kbinput = winio::get_kbinput();
         with_global_mut(|g| g.didfind = 0);
 
@@ -408,8 +408,9 @@ pub fn show_help() {
 
     /* 恢复 flag 设置。 */
     with_global_mut(|g| {
-        g.flags = stash_flags;
+        restore_flags(stash_flags);
         g.tabsize = was_tabsize;
+        set_tabsize_independent(was_tabsize);
         g.title = None;
         g.inhelp = false;
         g.currmenu = oldmenu;

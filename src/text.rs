@@ -169,7 +169,8 @@ pub fn indent_a_line(line: &LineRef, indentation: &str) {
             }
             if of.current.as_ref().map(|c| Rc::ptr_eq(c, line)).unwrap_or(false) && of.current_x > 0 {
                 of.current_x += indent_len;
-                of.placewewant = utils::xplustabs();
+                let cur = of.current.clone().unwrap();
+                of.placewewant = utils::wideness(cur.borrow().data.as_bytes(), of.current_x);
             }
         }
     });
@@ -232,7 +233,8 @@ pub fn compensate_leftward(line: &LineRef, leftshift: usize) {
                 } else {
                     of.current_x -= leftshift;
                 }
-                of.placewewant = utils::xplustabs();
+                let cur = of.current.clone().unwrap();
+                of.placewewant = utils::wideness(cur.borrow().data.as_bytes(), of.current_x);
             }
         }
     });
@@ -459,7 +461,7 @@ pub fn comment_line(action: UndoType, line: &LineRef, comment_seq: &str) -> bool
                     of.current.as_ref().map(|c| Rc::ptr_eq(b, c)).unwrap_or(false)
                 }).unwrap_or(false)
             }).unwrap_or(false),
-            g.flags.isset(NO_NEWLINES),
+            ISSET(NO_NEWLINES),
         )
     });
     if !no_newlines && is_filebot {
@@ -469,10 +471,10 @@ pub fn comment_line(action: UndoType, line: &LineRef, comment_seq: &str) -> bool
     if action == UndoType::Comment {
         /* 为注释序列腾出空间，把文本右移并复制进去。 */
         let cs = comment_seq.as_bytes();
-        let post_seq = &cs[pre_len + 1..comment_seq_len];
         let mut data = line.borrow().data.clone().into_bytes();
         data.splice(0..0, cs[..pre_len].iter().cloned());
         if post_len > 0 {
+            let post_seq = &cs[pre_len + 1..comment_seq_len];
             data.extend_from_slice(&post_seq[..post_len]);
         }
         line.borrow_mut().data = String::from_utf8_lossy(&data).into_owned();
@@ -486,7 +488,8 @@ pub fn comment_line(action: UndoType, line: &LineRef, comment_seq: &str) -> bool
                 }
                 if of.current.as_ref().map(|c| Rc::ptr_eq(c, line)).unwrap_or(false) && of.current_x > 0 {
                     of.current_x += pre_len;
-                    of.placewewant = utils::xplustabs();
+                    let cur = of.current.clone().unwrap();
+                    of.placewewant = utils::wideness(cur.borrow().data.as_bytes(), of.current_x);
                 }
             }
         });
@@ -554,7 +557,7 @@ pub fn do_comment() {
                 }).unwrap_or(false)
             }).unwrap_or(false),
             false,
-            g.flags.isset(NO_NEWLINES),
+            ISSET(NO_NEWLINES),
         )
     });
     if Rc::ptr_eq(&top, &bot) && is_filebot && !no_newlines {
@@ -1070,9 +1073,12 @@ pub fn do_redo() {
         let is_next_current = {
             let of_ref = of.borrow();
             let next = u.borrow().next.clone();
-            next.as_ref().map(|n| {
-                of_ref.current_undo.as_ref().map(|cu| Rc::ptr_eq(n, cu)).unwrap_or(false)
-            }).unwrap_or(false)
+            match (&next, &of_ref.current_undo) {
+                /* C 语义：u->next == current_undo（NULL == NULL 也匹配）。 */
+                (None, None) => true,
+                (Some(n), Some(cu)) => Rc::ptr_eq(n, cu),
+                _ => false,
+            }
         };
         if is_next_current {
             break;
@@ -1676,7 +1682,7 @@ pub fn update_undo(action: UndoType) {
                             let of = g.openfile.as_ref().unwrap().borrow();
                             let cur = of.current.clone().unwrap();
                             let is_fb = of.filebot.as_ref().map(|b| Rc::ptr_eq(b, &cur)).unwrap_or(false);
-                            (is_fb, g.flags.isset(NO_NEWLINES))
+                            (is_fb, ISSET(NO_NEWLINES))
                         });
                         if is_filebot && no_newlines {
                             let bl = bottomline.borrow().data.len();
@@ -1792,7 +1798,9 @@ pub fn do_enter() {
         let mut of_ref = of.borrow_mut();
         of_ref.current = Some(newnode.clone());
         of_ref.current_x = extra;
-        of_ref.placewewant = utils::xplustabs();
+        /* xplustabs 内联：避免在持有 of 借用时访问 openfile。 */
+        let cur = of_ref.current.clone().unwrap();
+        of_ref.placewewant = utils::wideness(cur.borrow().data.as_bytes(), of_ref.current_x);
         of_ref.totsize += 1;
     }
     nano::set_modified();
@@ -2046,14 +2054,18 @@ pub fn do_wrap() {
         (is_edittop, of.firstcolumn > 0, cursor_x >= wrap_loc)
     });
     if edittop_is_line && firstcolumn_gt_0 && cursor_ge_wrap {
+        let (et0, fc0) = with_global(|g| {
+            let of = g.openfile.as_ref().unwrap().borrow();
+            (of.edittop.clone().unwrap(), of.firstcolumn)
+        });
+        let mut et = et0;
+        let mut fc = fc0;
+        winio::go_forward_chunks(1, &mut et, &mut fc);
         with_global_mut(|g| {
             if let Some(of) = &g.openfile {
-                let mut of = of.borrow_mut();
-                let mut et = of.edittop.clone().unwrap();
-                let mut fc = of.firstcolumn;
-                winio::go_forward_chunks(1, &mut et, &mut fc);
-                of.edittop = Some(et);
-                of.firstcolumn = fc;
+                let mut r = of.borrow_mut();
+                r.edittop = Some(et);
+                r.firstcolumn = fc;
             }
         });
     }
@@ -2118,10 +2130,10 @@ pub fn do_wrap() {
         });
     }
 
+    let pww = utils::xplustabs();
     with_global_mut(|g| {
         if let Some(of) = &g.openfile {
-            let mut of = of.borrow_mut();
-            of.placewewant = utils::xplustabs();
+            of.borrow_mut().placewewant = pww;
         }
     });
 
@@ -2344,10 +2356,10 @@ pub fn inject(burst: &[u8], count: usize) {
         do_wrap();
     }
 
+    let placewewant = utils::xplustabs();
     with_global_mut(|g| {
         if let Some(of) = &g.openfile {
-            let mut of = of.borrow_mut();
-            of.placewewant = utils::xplustabs();
+            of.borrow_mut().placewewant = placewewant;
         }
     });
 
@@ -2363,14 +2375,18 @@ pub fn inject(burst: &[u8], count: usize) {
 
     /* 软换行且当前行块数改变，或位于编辑窗口最后一行并移到新块。 */
     if ISSET(SOFTWRAP) {
-        let (chunks_changed, moved_to_new_chunk) = with_global(|g| {
+        let (current, placewewant, cursor_row, editwinrows) = with_global(|g| {
             let of = g.openfile.as_ref().unwrap().borrow();
-            let current = of.current.clone().unwrap();
-            let cc = winio::extra_chunks_in(&current) != old_amount;
-            let mtnc = of.cursor_row == (g.editwinrows - 1) as isize
-                && winio::chunk_for(of.placewewant, &current) > original_row;
-            (cc, mtnc)
+            (
+                of.current.clone().unwrap(),
+                of.placewewant,
+                of.cursor_row,
+                g.editwinrows,
+            )
         });
+        let chunks_changed = winio::extra_chunks_in(&current) != old_amount;
+        let moved_to_new_chunk = cursor_row == (editwinrows - 1) as isize
+            && winio::chunk_for(placewewant, &current) > original_row;
         if chunks_changed || moved_to_new_chunk {
             with_global_mut(|g| {
                 g.refresh_needed = true;

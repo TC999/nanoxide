@@ -150,6 +150,7 @@ fn parse_set_command(args: &str) {
                     "tabsize" => {
                         if let Ok(s) = val.parse::<usize>() {
                             with_global_mut(|g| g.tabsize = s);
+        set_tabsize_independent(s);
                         }
                     }
                     "fill" => {

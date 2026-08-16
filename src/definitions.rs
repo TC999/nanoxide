@@ -417,6 +417,28 @@ pub struct SyntaxType {
     pub color: Option<ColorRef>, pub multiscore: i16, pub next: Option<SyntaxRef>,
 }
 
+impl SyntaxType {
+    /// 创建默认的空语法结构。
+    pub fn new() -> Self {
+        SyntaxType {
+            name: None,
+            filename: None,
+            lineno: 0,
+            augmentations: None,
+            extensions: None,
+            headers: None,
+            magics: None,
+            linter: None,
+            formatter: None,
+            tabstring: None,
+            comment: None,
+            color: None,
+            multiscore: 0,
+            next: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LintStruct {
     pub lineno: isize, pub colno: isize,
@@ -537,7 +559,7 @@ pub struct GlobalFlags {
 }
 
 impl GlobalFlags {
-    pub fn new() -> Self { GlobalFlags { flags: [0; 4] } }
+    pub const fn new() -> Self { GlobalFlags { flags: [0; 4] } }
     pub fn isset(&self, flag: usize) -> bool {
         (FLAGS(&self.flags, flag) & FLAGMASK(flag)) != 0
     }
@@ -565,10 +587,10 @@ pub fn FLAGMASK(flag: usize) -> Flagword {
 }
 
 /// 便捷函数，使用全局状态。
-pub fn ISSET(flag: usize) -> bool { GLOBAL.with(|g| g.borrow().flags.isset(flag)) }
-pub fn SET(flag: usize) { GLOBAL.with(|g| g.borrow_mut().flags.set(flag)) }
-pub fn UNSET(flag: usize) { GLOBAL.with(|g| g.borrow_mut().flags.unset(flag)) }
-pub fn TOGGLE(flag: usize) { GLOBAL.with(|g| g.borrow_mut().flags.toggle(flag)) }
+pub fn ISSET(flag: usize) -> bool { is_flag_set(flag) }
+pub fn SET(flag: usize) { set_flag(flag) }
+pub fn UNSET(flag: usize) { unset_flag(flag) }
+pub fn TOGGLE(flag: usize) { toggle_flag(flag) }
 
 /// 全局状态结构体。
 pub struct GlobalState {
@@ -730,6 +752,96 @@ impl GlobalState {
 /// 全局状态单例（线程安全，单线程使用）。
 thread_local! {
     pub static GLOBAL: RefCell<GlobalState> = RefCell::new(GlobalState::new());
+}
+
+// ======================== 独立于 GLOBAL 借用的字符层全局 ========================
+// `chars` 模块的函数大量读取 `using_utf8`/`tabsize`/`word_chars`/`as_an_at`。
+// 若这些值放在 `GLOBAL`（RefCell<GlobalState>）中，则在持有 `GLOBAL` 借用时
+// 调用任何 `chars` 函数都会触发 "RefCell already borrowed"。
+// 因此把它们放入独立的 thread_local（Cell/RefCell），与 `GLOBAL` 相互独立，
+// 任何借用状态下都可安全访问。`GlobalState` 中的对应字段保留用于同步。
+
+thread_local! {
+    /// 是否使用 UTF-8（对应 C 全局 `using_utf8`）。
+    pub static UTF8_FLAG: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+    /// 制表符宽度（对应 C 全局 `tabsize`）。
+    pub static TABSIZE_VALUE: std::cell::Cell<usize> = const { std::cell::Cell::new(8) };
+    /// 单词字符集（对应 C 全局 `word_chars`）。
+    pub static WORD_CHARS_VALUE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// 是否把回车显示为 @（对应 C 全局 `as_an_at`）。
+    pub static AS_AN_AT_VALUE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// 全局 flag 位（对应 C 全局 `flags`）。
+    pub static FLAGS_VALUE: std::cell::RefCell<GlobalFlags> = const { std::cell::RefCell::new(GlobalFlags::new()) };
+}
+
+/// 读取 flag（独立于 GLOBAL 借用）。
+pub fn is_flag_set(flag: usize) -> bool {
+    FLAGS_VALUE.with(|f| f.borrow().isset(flag))
+}
+
+/// 设置 flag（独立于 GLOBAL 借用）。
+pub fn set_flag(flag: usize) {
+    FLAGS_VALUE.with(|f| f.borrow_mut().set(flag));
+}
+
+/// 清除 flag（独立于 GLOBAL 借用）。
+pub fn unset_flag(flag: usize) {
+    FLAGS_VALUE.with(|f| f.borrow_mut().unset(flag));
+}
+
+/// 切换 flag（独立于 GLOBAL 借用）。
+pub fn toggle_flag(flag: usize) {
+    FLAGS_VALUE.with(|f| f.borrow_mut().toggle(flag));
+}
+
+/// 克隆 flags（独立于 GLOBAL 借用）。
+pub fn clone_flags() -> GlobalFlags {
+    FLAGS_VALUE.with(|f| f.borrow().clone())
+}
+
+/// 恢复 flags（独立于 GLOBAL 借用）。
+pub fn restore_flags(flags: GlobalFlags) {
+    FLAGS_VALUE.with(|f| *f.borrow_mut() = flags);
+}
+
+/// 读取 using_utf8（独立于 GLOBAL 借用）。
+pub fn using_utf8_independent() -> bool {
+    UTF8_FLAG.with(|c| c.get())
+}
+
+/// 设置 using_utf8（独立于 GLOBAL 借用）。
+pub fn set_using_utf8_independent(val: bool) {
+    UTF8_FLAG.with(|c| c.set(val));
+}
+
+/// 读取 tabsize（独立于 GLOBAL 借用）。
+pub fn tabsize_independent() -> usize {
+    TABSIZE_VALUE.with(|c| c.get())
+}
+
+/// 设置 tabsize（独立于 GLOBAL 借用）。
+pub fn set_tabsize_independent(val: usize) {
+    TABSIZE_VALUE.with(|c| c.set(val));
+}
+
+/// 读取 word_chars（独立于 GLOBAL 借用）。
+pub fn word_chars_independent() -> Option<String> {
+    WORD_CHARS_VALUE.with(|c| c.borrow().clone())
+}
+
+/// 设置 word_chars（独立于 GLOBAL 借用）。
+pub fn set_word_chars_independent(val: Option<String>) {
+    WORD_CHARS_VALUE.with(|c| *c.borrow_mut() = val);
+}
+
+/// 读取 as_an_at（独立于 GLOBAL 借用）。
+pub fn as_an_at_independent() -> bool {
+    AS_AN_AT_VALUE.with(|c| c.get())
+}
+
+/// 设置 as_an_at（独立于 GLOBAL 借用）。
+pub fn set_as_an_at_independent(val: bool) {
+    AS_AN_AT_VALUE.with(|c| c.set(val));
 }
 
 /// 访问全局状态的便捷宏。

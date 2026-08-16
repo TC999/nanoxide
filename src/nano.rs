@@ -126,6 +126,7 @@ fn parse_args(args: &[String]) {
                     if i < args.len() {
                         if let Ok(s) = args[i].parse::<usize>() {
                             with_global_mut(|g| g.tabsize = s);
+                set_tabsize_independent(s);
                         }
                     }
                 }
@@ -254,7 +255,7 @@ fn main_loop() {
             if key > 0 && key < 256 && key != ESC_CODE as i32 {
                 let ch = char::from_u32(key as u32);
                 if let Some(c) = ch {
-                    if !with_global(|g| g.flags.isset(VIEW_MODE)) {
+                    if !with_global(|g| ISSET(VIEW_MODE)) {
                         text::insert_char(c);
                         winio::edit_refresh();
                     }
@@ -571,11 +572,14 @@ pub fn in_restricted_mode() -> bool {
 pub fn make_new_buffer() {
     let new_of = Rc::new(RefCell::new(OpenFileStruct::new()));
     let line = make_new_node(None);
-    new_of.borrow_mut().filetop = Some(line.clone());
-    new_of.borrow_mut().filebot = Some(line.clone());
-    new_of.borrow_mut().current = new_of.borrow().filetop.clone();
-    new_of.borrow_mut().edittop = new_of.borrow().filetop.clone();
-    new_of.borrow_mut().totsize = 1;
+    {
+        let mut of = new_of.borrow_mut();
+        of.filetop = Some(line.clone());
+        of.filebot = Some(line.clone());
+        of.current = of.filetop.clone();
+        of.edittop = of.filetop.clone();
+        of.totsize = 1;
+    }
 
     with_global_mut(|g| {
         let old = g.openfile.clone();

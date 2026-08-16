@@ -1,4 +1,4 @@
-﻿/**************************************************************************
+/**************************************************************************
  * winio.rs  --  GNU nano 终端 I/O 与显示（对应 winio.c）
  * 版权 (C) 1999-2026 Free Software Foundation, Inc.
  * 转换说明：使用 crossterm 替代 ncurses 进行终端操作。
@@ -584,7 +584,7 @@ fn editwincols_value() -> usize {
 /// SHIM 宏：在 ZERO 模式下、替换/确认菜单中把底栏算作一行。
 fn shim_value() -> i32 {
     with_global(|g| {
-        if g.flags.isset(ZERO) && (g.currmenu == MREPLACEWITH || g.currmenu == MYESNO) {
+        if ISSET(ZERO) && (g.currmenu == MREPLACEWITH || g.currmenu == MYESNO) {
             1
         } else {
             0
@@ -861,7 +861,7 @@ pub fn current_is_above_screen() -> bool {
         let cur_lineno = current.borrow().lineno;
         let edit_lineno = edittop.borrow().lineno;
 
-        if g.flags.isset(SOFTWRAP) {
+        if ISSET(SOFTWRAP) {
             cur_lineno < edit_lineno
                 || (cur_lineno == edit_lineno && utils::xplustabs() < of.firstcolumn)
         } else {
@@ -874,7 +874,7 @@ pub fn current_is_above_screen() -> bool {
 pub fn current_is_below_screen() -> bool {
     with_global(|g| {
         let shim = shim_value();
-        if g.flags.isset(SOFTWRAP) {
+        if ISSET(SOFTWRAP) {
             let mut line = g.openfile.as_ref().expect("no open file").borrow().edittop.clone().unwrap();
             let mut leftedge = g.openfile.as_ref().unwrap().borrow().firstcolumn;
             let rows = g.editwinrows - 1 - shim;
@@ -916,23 +916,38 @@ pub fn adjust_viewport(manner: UpdateType) {
         goal = with_global(|g| g.editwinrows) - 1 - shim_value();
     }
 
+    let (current, pww, softwrap) = with_global(|g| {
+        let r = g.openfile.as_ref().expect("no open file").borrow();
+        let cur = r.current.clone().unwrap();
+        let p = utils::wideness(cur.borrow().data.as_bytes(), r.current_x);
+        (cur, p, g.flags.isset(SOFTWRAP))
+    });
+
     with_global_mut(|g| {
         let of = g.openfile.as_ref().expect("no open file").clone();
         let mut of = of.borrow_mut();
         of.edittop = of.current.clone();
-        if g.flags.isset(SOFTWRAP) {
-            let current = of.current.clone().unwrap();
-            of.firstcolumn = leftedge_for(utils::xplustabs(), &current);
-        }
     });
 
+    if softwrap {
+        let fc = leftedge_for(pww, &current);
+        with_global_mut(|g| {
+            let of = g.openfile.as_ref().expect("no open file").clone();
+            of.borrow_mut().firstcolumn = fc;
+        });
+    }
+
     /* 从 current[current_x] 开始将 edittop 回退 goal 行。 */
+    let (edittop0, firstcolumn0) = with_global(|g| {
+        let r = g.openfile.as_ref().expect("no open file").borrow();
+        (r.edittop.clone().unwrap(), r.firstcolumn)
+    });
+    let mut edittop = edittop0;
+    let mut firstcolumn = firstcolumn0;
+    go_back_chunks(goal, &mut edittop, &mut firstcolumn);
     with_global_mut(|g| {
         let of = g.openfile.as_ref().expect("no open file").clone();
         let mut of = of.borrow_mut();
-        let mut edittop = of.edittop.clone().unwrap();
-        let mut firstcolumn = of.firstcolumn;
-        go_back_chunks(goal, &mut edittop, &mut firstcolumn);
         of.edittop = Some(edittop);
         of.firstcolumn = firstcolumn;
     });
