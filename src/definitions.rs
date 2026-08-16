@@ -295,10 +295,27 @@ impl MatchPattern {
             text.find(&self.pattern).map(|pos| (pos, pos + self.pattern.len()))
         }
     }
+    /// 字节串版本：在 `text` 中查找模式的第一个匹配，返回 (起点, 终点) 字节偏移。
+    /// （nano 的文本是字节级存储，可能含非法 UTF-8，故提供该版本。）
+    pub fn find_match_bytes(&self, text: &[u8]) -> Option<(usize, usize)> {
+        if self.is_glob {
+            if simple_glob_match_bytes(self.pattern.as_bytes(), text) { Some((0, text.len())) } else { None }
+        } else {
+            let pat = self.pattern.as_bytes();
+            if pat.is_empty() {
+                return Some((0, 0));
+            }
+            text.windows(pat.len()).position(|w| w == pat).map(|pos| (pos, pos + pat.len()))
+        }
+    }
 }
 
 fn simple_glob_match(pattern: &str, text: &str) -> bool {
     simple_glob_recursive(pattern.as_bytes(), text.as_bytes(), 0, 0)
+}
+
+fn simple_glob_match_bytes(pattern: &[u8], text: &[u8]) -> bool {
+    simple_glob_recursive(pattern, text, 0, 0)
 }
 
 fn simple_glob_recursive(pat: &[u8], text: &[u8], pi: usize, ti: usize) -> bool {
@@ -565,8 +582,20 @@ pub struct GlobalState {
     pub spotlighted: bool,
     pub light_from_col: usize,
     pub light_to_col: usize,
-    pub search_history: Vec<String>,
-    pub replace_history: Vec<String>,
+    pub search_history: Option<LineRef>,
+    pub searchtop: Option<LineRef>,
+    pub replace_history: Option<LineRef>,
+    pub replacetop: Option<LineRef>,
+    pub replacebot: Option<LineRef>,
+    pub execute_history: Option<LineRef>,
+    pub executetop: Option<LineRef>,
+    pub executebot: Option<LineRef>,
+    pub statedir: Option<String>,
+    pub registername: Option<String>,
+    pub latest_timestamp: i64,
+    pub positions_register: Option<PositionRef>,
+    pub history_changed: bool,
+    pub startup_problem: Option<String>,
     pub sidebar: bool,
     pub interface_color_pair: Vec<i32>,
     pub allfuncs: Option<FuncRef>,
@@ -602,7 +631,12 @@ impl GlobalState {
             editwinrows: 0, margin: 0, matchbrackets: None,
             perturbed: false, recook: false, searchbot: None,
             spotlighted: false, light_from_col: 0, light_to_col: 0,
-            search_history: Vec::new(), replace_history: Vec::new(),
+            search_history: None, searchtop: None,
+            replace_history: None, replacetop: None, replacebot: None,
+            execute_history: None, executetop: None, executebot: None,
+            statedir: None, registername: None, latest_timestamp: 942927132,
+            positions_register: None, history_changed: false,
+            startup_problem: None,
             sidebar: false,
             interface_color_pair: vec![0; NUMBER_OF_ELEMENTS],
             allfuncs: None, shortcuts: None, syntaxes: None,
@@ -659,11 +693,17 @@ pub fn measured_copy(string: &[u8], count: usize) -> Vec<u8> {
     v
 }
 
-/// 创建新行节点。
-pub fn make_new_node(given: &LineStruct) -> LineRef {
+/// 创建新行节点（对应 text.c 的 `make_new_node`）。
+/// `given` 为 `None` 时相当于 C 的 `make_new_node(NULL)`，行号为 1。
+/// 注意：与 C 一致，`prev`/`next`/`data` 由调用方随后设置。
+pub fn make_new_node(given: Option<&LineStruct>) -> LineRef {
+    let lineno = match given {
+        Some(g) => g.lineno + 1,
+        None => 1,
+    };
     Rc::new(RefCell::new(LineStruct {
         data: String::new(),
-        lineno: given.lineno + 1,
+        lineno,
         next: None,
         prev: None,
         multidata: None,

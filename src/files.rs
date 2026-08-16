@@ -258,3 +258,126 @@ pub fn is_modified() -> bool {
     });
     false
 }
+
+// ======================== 路径处理（对应 files.c） ========================
+
+/// 当给定路径以 ~/ 或 ~user/ 开头时转换波浪号记号。
+/// 返回包含展开后路径的已分配字符串（对应 `expand_leading_tilde`）。
+pub fn expand_leading_tilde(path: &str) -> String {
+    if !path.starts_with('~') || path.len() == 1 {
+        return path.to_string();
+    }
+
+    /* 计算需要比较多少字符。 */
+    let i = path[1..].find('/').map(|p| p + 1).unwrap_or(path.len());
+
+    let tilded: String;
+    if i == 1 {
+        crate::utils::get_homedir();
+        tilded = with_global(|g| g.homedir.clone().unwrap_or_default());
+    } else {
+        /* ~user/：查询密码数据库（安全封装 libc）。 */
+        #[cfg(unix)]
+        {
+            tilded = home_of_user(&path[1..i]).unwrap_or_default();
+        }
+        #[cfg(not(unix))]
+        {
+            tilded = String::new();
+        }
+    }
+
+    format!("{}{}", tilded, &path[i..])
+}
+
+/// 安全封装：在密码数据库中查找给定用户的主目录。
+/// （内部使用 `unsafe` 调用 `libc::getpwent` 等，对外仅返回 `Option<String>`。）
+#[cfg(unix)]
+fn home_of_user(username: &str) -> Option<String> {
+    let cname = std::ffi::CString::new(username).ok()?;
+    let mut result = None;
+    // 安全封装：unsafe 仅用于 libc 调用
+    unsafe {
+        libc::setpwent();
+        loop {
+            let pw = libc::getpwent();
+            if pw.is_null() {
+                break;
+            }
+            let name = std::ffi::CStr::from_ptr((*pw).pw_name);
+            if name.to_bytes() == cname.as_bytes() {
+                let dir = (*pw).pw_dir;
+                if !dir.is_null() {
+                    result = Some(std::ffi::CStr::from_ptr(dir).to_string_lossy().into_owned());
+                }
+                break;
+            }
+        }
+        libc::endpwent();
+    }
+    result
+}
+
+/// 非 Unix 平台无操作版本。
+#[cfg(not(unix))]
+fn home_of_user(_username: &str) -> Option<String> {
+    None
+}
+
+/// 对于给定的裸路径（或路径加文件名），当路径存在时返回规范的绝对路径
+/// （加文件名），不存在时返回 None（对应 `get_full_path`）。
+pub fn get_full_path(origpath: &str) -> Option<String> {
+    if origpath.is_empty() {
+        return None;
+    }
+
+    let untilded = expand_leading_tilde(origpath);
+    let mut target = canonicalize_safely(&untilded);
+
+    /* 若 canonicalize 失败，尝试去掉最后一个组件（该组件可能是尚不存在的文件）。 */
+    if target.is_none() {
+        let mut untilded = untilded.clone();
+        let (slash_pos, rest);
+        match untilded.rfind('/') {
+            None => {
+                /* 若没有斜杠，在名字前加上 "./"。 */
+                untilded.insert_str(0, "./");
+                slash_pos = 1;
+                rest = untilded[1..].to_string(); // 含 '/'（此时为 "/名字"）
+            }
+            Some(s) => {
+                slash_pos = s;
+                rest = untilded[s..].to_string(); // 含 '/'
+            }
+        }
+
+        let dirpart = untilded[..slash_pos].to_string();
+
+        /* 成功后，重新加上原路径的最后组件。 */
+        if let Some(mut t) = canonicalize_safely(&dirpart) {
+            t.push_str(&rest);
+            target = Some(t);
+        }
+    }
+
+    /* 确保非根目录的目录路径以斜杠结尾。 */
+    if let Some(t) = &target {
+        if t.len() > 1 {
+            if let Ok(meta) = std::fs::metadata(t) {
+                if meta.is_dir() && !t.ends_with('/') {
+                    target = Some(format!("{}/", t));
+                }
+            }
+        }
+    }
+
+    target
+}
+
+/// 对路径做规范化（等价于 C 的 `realpath`；用 `std::fs::canonicalize` 替代）。
+fn canonicalize_safely(path: &str) -> Option<String> {
+    match std::fs::canonicalize(path) {
+        Ok(p) => Some(p.to_string_lossy().into_owned()),
+        Err(_) => None,
+    }
+}

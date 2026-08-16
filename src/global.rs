@@ -20,8 +20,6 @@ pub fn global_init() {
         g.LINES = 24;
         g.editwinrows = 20;
         g.interface_color_pair = vec![0; NUMBER_OF_ELEMENTS];
-        g.search_history = Vec::new();
-        g.replace_history = Vec::new();
         g.allfuncs = None;
         g.shortcuts = None;
         g.syntaxes = None;

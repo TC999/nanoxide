@@ -290,3 +290,76 @@ pub fn get_comment_string() -> Option<String> {
     });
     None
 }
+
+// ======================== 错误消息（对应 rcfile.c 的 jot_error） ========================
+
+use std::cell::Cell;
+
+/// nanorc 文件状态（对应 rcfile.c 的 static 变量 nanorc、lineno）。
+thread_local! {
+    static ERRORS_HEAD: RefCell<Option<LineRef>> = const { RefCell::new(None) };
+    static ERRORS_TAIL: RefCell<Option<LineRef>> = const { RefCell::new(None) };
+    static NANORC_FILE: RefCell<Option<String>> = const { RefCell::new(None) };
+    static NANORC_LINENO: Cell<usize> = const { Cell::new(0) };
+}
+
+/// 设置当前正在解析的 nanorc 文件名（供 jot_error 使用）。
+pub(crate) fn set_nanorc(name: Option<String>) {
+    NANORC_FILE.with(|n| *n.borrow_mut() = name);
+}
+
+/// 设置当前解析行号（供 jot_error 使用）。
+pub(crate) fn set_rcfile_lineno(lineno: usize) {
+    NANORC_LINENO.with(|l| l.set(lineno));
+}
+
+/// 将给定错误消息存入链表，待退出时打印（对应 `jot_error`）。
+pub fn jot_error(msg: &str) {
+    let tail = ERRORS_TAIL.with(|t| t.borrow().clone());
+    let error = match &tail {
+        Some(r) => make_new_node(Some(&*r.borrow())),
+        None => make_new_node(None),
+    };
+
+    if ERRORS_HEAD.with(|h| h.borrow().is_none()) {
+        ERRORS_HEAD.with(|h| *h.borrow_mut() = Some(error.clone()));
+    } else if let Some(t) = tail {
+        t.borrow_mut().next = Some(error.clone());
+    }
+    ERRORS_TAIL.with(|t| *t.borrow_mut() = Some(error.clone()));
+
+    /* 首次出错时记录 startup_problem 的概要。 */
+    with_global_mut(|g| {
+        if g.startup_problem.is_none() {
+            let nanorc = NANORC_FILE.with(|n| n.borrow().clone());
+            g.startup_problem = Some(match nanorc {
+                Some(nr) => format!("Mistakes in '{}'", nr),
+                None => "Problems with history file".to_string(),
+            });
+        }
+    });
+
+    /* 拼装完整错误文本。 */
+    let lineno = NANORC_LINENO.with(|l| l.get());
+    let nanorc = NANORC_FILE.with(|n| n.borrow().clone());
+    let textbuf = if lineno > 0 {
+        match &nanorc {
+            Some(nr) => format!("Error in {} on line {}: {}", nr, lineno, msg),
+            None => msg.to_string(),
+        }
+    } else {
+        msg.to_string()
+    };
+
+    error.borrow_mut().data = textbuf;
+}
+
+/// 打印累积的错误消息到 stderr（对应 rcfile.c 的 `print_errors`）。
+pub fn print_errors() {
+    let mut item = ERRORS_HEAD.with(|h| h.borrow().clone());
+    while let Some(e) = item {
+        eprintln!("{}", e.borrow().data);
+        let next = { let r = e.borrow(); r.next.clone() };
+        item = next;
+    }
+}

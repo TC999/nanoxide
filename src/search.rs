@@ -233,3 +233,116 @@ pub fn find_next_match_highlight(needle: &str, from_line: Option<LineRef>) -> Op
     });
     None
 }
+
+// ======================== 跳转到指定行列（对应 search.c 的 goto_line_and_column） ========================
+
+/// 转到指定的行和列（注意两者都是从 1 开始计数的）
+/// （对应 `goto_line_and_column`）。
+pub fn goto_line_and_column(mut line: isize, mut column: isize, hugfloor: bool) {
+    /* 负行号表示：从文件末尾倒数。 */
+    let mut tail_data: Option<(LineRef, isize, isize)> = None;
+
+    with_global_mut(|g| {
+        let of = g.openfile.as_ref().expect("no open file").clone();
+        let mut of = of.borrow_mut();
+
+        let filebot_lineno = of.filebot.as_ref().map(|b| b.borrow().lineno).unwrap_or(1);
+        let current_lineno = of.current.as_ref().map(|c| c.borrow().lineno).unwrap_or(1);
+
+        if line < 0 {
+            line = filebot_lineno + line + 1;
+        } else if line == 0 {
+            line = current_lineno;
+        }
+        if line < 1 {
+            line = 1;
+        }
+
+        /* 若目标行在视口之外，需要重算颜色。 */
+        if let (Some(et), Some(cur)) = (&of.edittop, &of.current) {
+            let et_lineno = et.borrow().lineno;
+            let cur_lineno = cur.borrow().lineno;
+            if line > et_lineno + g.editwinrows as isize
+                || (g.flags.isset(SOFTWRAP) && line > cur_lineno)
+            {
+                g.recook |= g.perturbed;
+            }
+        }
+
+        /* 迭代到请求的行。 */
+        let mut current = of.filetop.clone().unwrap();
+        let mut remaining = line;
+        loop {
+            let is_filebot = of.filebot.as_ref().map(|b| std::rc::Rc::ptr_eq(&current, b)).unwrap_or(false);
+            if remaining <= 1 || is_filebot {
+                break;
+            }
+            let next = { let r = current.borrow(); r.next.clone() }.unwrap();
+            current = next;
+            remaining -= 1;
+        }
+        of.current = Some(current.clone());
+
+        /* 负列号表示：从行末倒数。 */
+        let data = current.borrow().data.clone();
+        let line_breadth = utils::breadth(data.as_bytes()) as isize;
+        if column < 0 {
+            column = line_breadth + column + 2;
+        } else if column == 0 {
+            column = of.placewewant as isize + 1;
+        }
+        if column < 1 {
+            column = 1;
+        }
+
+        /* 设置与请求列对应的 x 位置。 */
+        of.current_x = utils::actual_x(data.as_bytes(), column as usize - 1);
+        of.placewewant = column as usize - 1;
+
+        if g.flags.isset(SOFTWRAP) && of.placewewant / g.editwincols
+            > line_breadth as usize / g.editwincols
+        {
+            of.placewewant = line_breadth as usize;
+        }
+
+        if hugfloor {
+            tail_data = Some((of.current.clone().unwrap(), filebot_lineno, current_lineno));
+        }
+    });
+
+    if !hugfloor {
+        return;
+    }
+
+    /* 注意：以下计算在闭包外执行，因为 leftedge_for/go_forward_chunks
+     * 会再次访问全局状态。 */
+    let (current, filebot_lineno, current_lineno) = match tail_data {
+        Some(t) => t,
+        None => return,
+    };
+
+    let rows_from_tail = if ISSET(SOFTWRAP) {
+        let mut currentline = current;
+        let mut leftedge = crate::winio::leftedge_for(utils::xplustabs(), &currentline);
+        let rows = with_global(|g| g.editwinrows) / 2;
+        rows - crate::winio::go_forward_chunks(rows, &mut currentline, &mut leftedge)
+    } else {
+        (filebot_lineno - current_lineno) as i32
+    };
+
+    let half = with_global(|g| g.editwinrows) / 2;
+    let jumpy = ISSET(JUMPY_SCROLLING);
+
+    /* 若目标行接近文件尾部，把最后一行或块放在屏幕底行；
+     * 否则，将目标行居中。 */
+    if rows_from_tail < half && !jumpy {
+        with_global_mut(|g| {
+            let of = g.openfile.as_ref().expect("no open file").clone();
+            let mut of = of.borrow_mut();
+            of.cursor_row = (g.editwinrows - 1 - rows_from_tail) as isize;
+        });
+        crate::winio::adjust_viewport(UpdateType::Stationary);
+    } else {
+        crate::winio::adjust_viewport(UpdateType::Centering);
+    }
+}

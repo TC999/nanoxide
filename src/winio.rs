@@ -537,3 +537,375 @@ pub fn terminal_restore() {
     let _ = execute!(stdout, LeaveAlternateScreen, EnableLineWrap, Show);
     let _ = terminal::disable_raw_mode();
 }
+
+// ======================== 软换行（对应 winio.c 软换行函数组） ========================
+
+use std::cell::Cell;
+
+/// `get_softwrap_breakpoint` 的静态状态（对应 C 的 static text/column）。
+thread_local! {
+    static SW_LINE_START: Cell<usize> = const { Cell::new(0) };
+    static SW_INDEX: Cell<usize> = const { Cell::new(0) };
+    static SW_COLUMN: Cell<usize> = const { Cell::new(0) };
+}
+
+fn editwincols_value() -> usize {
+    with_global(|g| g.editwincols)
+}
+
+/// SHIM 宏：在 ZERO 模式下、替换/确认菜单中把底栏算作一行。
+fn shim_value() -> i32 {
+    with_global(|g| {
+        if g.flags.isset(ZERO) && (g.currmenu == MREPLACEWITH || g.currmenu == MYESNO) {
+            1
+        } else {
+            0
+        }
+    })
+}
+
+/// 获取 leftedge 之后可断开给定 linedata 的列号并返回。
+/// （结果至多比 leftedge 大 editwincols。）
+/// 当 kickoff 为 TRUE 时从 linedata 开头开始；否则从上一次调用处继续。
+/// 当搜索断点时到达行尾，将 end_of_line 置为 TRUE。
+/// （对应 `get_softwrap_breakpoint`。）
+pub fn get_softwrap_breakpoint(
+    linedata: &[u8],
+    leftedge: usize,
+    kickoff: &mut bool,
+    end_of_line: &mut bool,
+) -> usize {
+    let rightside = leftedge + editwincols_value();
+    /* 可在其处断开文本的列（无更佳选择时）。 */
+    let mut breaking_col = rightside;
+    /* 最近见到的空白字符的列位置。 */
+    let mut last_blank_col = 0;
+    /* 最近见到的空白字符的位置。 */
+    let mut farthest_blank: Option<usize> = None;
+
+    /* 换行时初始化静态变量。 */
+    if *kickoff {
+        SW_LINE_START.set(linedata.as_ptr() as usize);
+        SW_INDEX.set(0);
+        SW_COLUMN.set(0);
+        *kickoff = false;
+    }
+
+    let mut index = SW_INDEX.get();
+    let mut column = SW_COLUMN.get();
+
+    /* 先找到文本中当前块开始的位置。 */
+    while chars::byte_at(linedata, index) != 0 && column < leftedge {
+        index += chars::advance_over(&linedata[index..], &mut column);
+    }
+
+    /* 再找到文本中本块应结束的位置。 */
+    while chars::byte_at(linedata, index) != 0 && column <= rightside {
+        /* 在空白处断行时，在目标列 *之前* 断开。 */
+        if ISSET(AT_BLANKS) && chars::is_blank_char(&linedata[index..]) && column < rightside {
+            farthest_blank = Some(index);
+            last_blank_col = column;
+        }
+
+        breaking_col = if linedata[index] == b'\t' { rightside } else { column };
+        index += chars::advance_over(&linedata[index..], &mut column);
+    }
+
+    /* 保存静态状态，供下一次调用继续。 */
+    SW_INDEX.set(index);
+    SW_COLUMN.set(column);
+
+    /* 若未越过限制，则已找到断点；若甚至未*到达*限制则已到行尾。 */
+    if column <= rightside {
+        *end_of_line = column < rightside;
+        return column;
+    }
+
+    /* 若在空白处软换行且找到至少一个空白，则在该空白之后断开——
+     * 只要它不越过屏幕边缘。 */
+    if let Some(fb) = farthest_blank {
+        let mut aftertheblank = last_blank_col;
+        let onestep = chars::advance_over(&linedata[fb..], &mut aftertheblank);
+
+        if aftertheblank <= rightside {
+            SW_INDEX.set(fb + onestep);
+            SW_COLUMN.set(aftertheblank);
+            return aftertheblank;
+        }
+
+        /* 若是越过边缘的制表符，则在屏幕边缘断开。 */
+        if linedata[fb] == b'\t' {
+            breaking_col = rightside;
+        }
+    }
+
+    /* 否则，在最后一个不越界的字符处断开。 */
+    if editwincols_value() > 1 {
+        breaking_col
+    } else {
+        column.saturating_sub(1)
+    }
+}
+
+/// 返回给定行中、给定列所在的软换行块的行号（相对首行，零基）。
+/// 若 leftedge 非 None，在其中返回该块的最左列。
+/// （对应 `get_chunk_and_edge`。）
+pub fn get_chunk_and_edge(column: usize, line: &LineRef, leftedge: Option<&mut usize>) -> usize {
+    let mut current_chunk = 0;
+    let mut end_of_line = false;
+    let mut kickoff = true;
+    let mut start_col = 0;
+
+    loop {
+        let data = line.borrow().data.clone();
+        let end_col = get_softwrap_breakpoint(data.as_bytes(), start_col, &mut kickoff, &mut end_of_line);
+
+        /* 当列在范围内或到达行尾时，结束。 */
+        if end_of_line || (start_col <= column && column < end_col) {
+            if let Some(le) = leftedge {
+                *le = start_col;
+            }
+            return current_chunk;
+        }
+
+        start_col = end_col;
+        current_chunk += 1;
+    }
+}
+
+/// 返回给定行软换行时需要的额外行数（对应 `extra_chunks_in`）。
+pub fn extra_chunks_in(line: &LineRef) -> usize {
+    get_chunk_and_edge(usize::MAX >> 1, line, None)
+}
+
+/// 返回给定行中、column 所在的软换行块的行号（相对首行，零基）
+/// （对应 `chunk_for`）。
+pub fn chunk_for(column: usize, line: &LineRef) -> usize {
+    get_chunk_and_edge(column, line, None)
+}
+
+/// 返回给定行中、给定列所在的软换行块的最左列（对应 `leftedge_for`）。
+pub fn leftedge_for(column: usize, line: &LineRef) -> usize {
+    let mut leftedge = 0;
+    get_chunk_and_edge(column, line, Some(&mut leftedge));
+    leftedge
+}
+
+/// 软换行模式下，若给定列位于软换行块的断点处或其之后，则将其移回
+/// 断点前的最后一列。给定列相对于 current 中的给定 leftedge；
+/// 返回的列相对于文本开头（对应 `actual_last_column`）。
+pub fn actual_last_column(leftedge: usize, mut column: usize) -> usize {
+    if ISSET(SOFTWRAP) {
+        let mut kickoff = true;
+        let mut last_chunk = false;
+        let data = with_global(|g| {
+            g.openfile.as_ref().map(|of| {
+                of.borrow().current.as_ref().map(|c| c.borrow().data.clone()).unwrap_or_default()
+            }).unwrap_or_default()
+        });
+        let end_col = get_softwrap_breakpoint(data.as_bytes(), leftedge, &mut kickoff, &mut last_chunk) - leftedge;
+
+        /* 若不在最后一块，则已越过行末一列。后退一列可能落在多列字符
+         * 中间，但 actual_x() 稍后会修正。 */
+        let end_col = if last_chunk { end_col } else { end_col.saturating_sub(1) };
+
+        if column > end_col {
+            column = end_col;
+        }
+    }
+
+    leftedge + column
+}
+
+/// 尝试从给定行和给定列（leftedge）向上移动 nrows 个软换行块。
+/// 移动后，leftedge 将设为当前块的起始列。
+/// 返回未能向上移动的块数，完全成功时为零（对应 `go_back_chunks`）。
+pub fn go_back_chunks(nrows: i32, line: &mut LineRef, leftedge: &mut usize) -> i32 {
+    let mut i = nrows;
+
+    if ISSET(SOFTWRAP) {
+        /* 回退请求的块数。 */
+        while i > 0 {
+            let chunk = chunk_for(*leftedge, line);
+            *leftedge = 0;
+
+            if chunk as i32 >= i {
+                return go_forward_chunks(chunk as i32 - i, line, leftedge);
+            }
+
+            let at_filetop = with_global(|g| {
+                g.openfile.as_ref().map(|of| {
+                    let of = of.borrow();
+                    of.filetop.as_ref().map(|t| std::rc::Rc::ptr_eq(t, line)).unwrap_or(false)
+                }).unwrap_or(false)
+            });
+            if at_filetop {
+                break;
+            }
+
+            i -= chunk as i32;
+            let prev = { let r = line.borrow(); r.prev.clone() };
+            *line = prev.and_then(|w| w.upgrade()).unwrap();
+            *leftedge = usize::MAX >> 1;
+        }
+
+        if *leftedge == usize::MAX >> 1 {
+            *leftedge = leftedge_for(*leftedge, line);
+        }
+    } else {
+        while i > 0 {
+            let has_prev = { let r = line.borrow(); r.prev.is_some() };
+            if !has_prev {
+                break;
+            }
+            let prev = { let r = line.borrow(); r.prev.clone() };
+            *line = prev.and_then(|w| w.upgrade()).unwrap();
+            i -= 1;
+        }
+    }
+
+    i
+}
+
+/// 尝试从给定行和给定列（leftedge）向下移动 nrows 个软换行块。
+/// 移动后，leftedge 将设为当前块的起始列。
+/// 返回未能向下移动的块数，完全成功时为零（对应 `go_forward_chunks`）。
+pub fn go_forward_chunks(nrows: i32, line: &mut LineRef, leftedge: &mut usize) -> i32 {
+    let mut i = nrows;
+
+    if ISSET(SOFTWRAP) {
+        let mut current_leftedge = *leftedge;
+        let mut kickoff = true;
+
+        /* 前进请求的块数。 */
+        while i > 0 {
+            let mut end_of_line = false;
+            let data = { let r = line.borrow(); r.data.clone() };
+            current_leftedge = get_softwrap_breakpoint(data.as_bytes(), current_leftedge, &mut kickoff, &mut end_of_line);
+
+            if !end_of_line {
+                i -= 1;
+                continue;
+            }
+
+            let at_filebot = with_global(|g| {
+                g.openfile.as_ref().map(|of| {
+                    let of = of.borrow();
+                    of.filebot.as_ref().map(|b| std::rc::Rc::ptr_eq(b, line)).unwrap_or(false)
+                }).unwrap_or(false)
+            });
+            if at_filebot {
+                break;
+            }
+
+            let next = { let r = line.borrow(); r.next.clone() };
+            *line = next.unwrap();
+            current_leftedge = 0;
+            kickoff = true;
+            i -= 1;
+        }
+
+        /* 仅当确实能够移动时才更改 leftedge。 */
+        if i < nrows {
+            *leftedge = current_leftedge;
+        }
+    } else {
+        while i > 0 {
+            let has_next = { let r = line.borrow(); r.next.is_some() };
+            if !has_next {
+                break;
+            }
+            let next = { let r = line.borrow(); r.next.clone() };
+            *line = next.unwrap();
+            i -= 1;
+        }
+    }
+
+    i
+}
+
+/// 返回 TRUE 如果 current[current_x] 在视口之前（对应 `current_is_above_screen`）。
+pub fn current_is_above_screen() -> bool {
+    with_global(|g| {
+        let of = g.openfile.as_ref().expect("no open file").borrow();
+        let current = of.current.clone().unwrap();
+        let edittop = of.edittop.clone().unwrap();
+        let cur_lineno = current.borrow().lineno;
+        let edit_lineno = edittop.borrow().lineno;
+
+        if g.flags.isset(SOFTWRAP) {
+            cur_lineno < edit_lineno
+                || (cur_lineno == edit_lineno && utils::xplustabs() < of.firstcolumn)
+        } else {
+            cur_lineno < edit_lineno
+        }
+    })
+}
+
+/// 返回 TRUE 如果 current[current_x] 在视口之外（对应 `current_is_below_screen`）。
+pub fn current_is_below_screen() -> bool {
+    with_global(|g| {
+        let shim = shim_value();
+        if g.flags.isset(SOFTWRAP) {
+            let mut line = g.openfile.as_ref().expect("no open file").borrow().edittop.clone().unwrap();
+            let mut leftedge = g.openfile.as_ref().unwrap().borrow().firstcolumn;
+            let rows = g.editwinrows - 1 - shim;
+            go_forward_chunks(rows, &mut line, &mut leftedge);
+            let of = g.openfile.as_ref().unwrap().borrow();
+            let current = of.current.clone().unwrap();
+            line.borrow().lineno < current.borrow().lineno
+                || (line.borrow().lineno == current.borrow().lineno
+                    && leftedge < leftedge_for(utils::xplustabs(), &current))
+        } else {
+            let of = g.openfile.as_ref().unwrap().borrow();
+            let current = of.current.clone().unwrap();
+            let edittop = of.edittop.clone().unwrap();
+            let cur_lineno = current.borrow().lineno;
+            let edit_lineno = edittop.borrow().lineno;
+            cur_lineno >= edit_lineno + (g.editwinrows - shim) as isize
+        }
+    })
+}
+
+/// 返回 TRUE 如果 current[current_x] 在视口之外（对应 `current_is_offscreen`）。
+pub fn current_is_offscreen() -> bool {
+    current_is_above_screen() || current_is_below_screen()
+}
+
+/// 移动 edittop 使 current 显示在屏幕上。manner 说明方式：
+/// STATIONARY 表示光标应保持在同一个屏幕行上，
+/// CENTERING 表示 current 应位于屏幕中央，
+/// FLOWING 表示只需滚动到足以让 current 进入视野。
+/// （对应 `adjust_viewport`。）
+pub fn adjust_viewport(manner: UpdateType) {
+    let mut goal = 0;
+
+    if manner == UpdateType::Stationary {
+        goal = with_global(|g| g.openfile.as_ref().unwrap().borrow().cursor_row as i32);
+    } else if manner == UpdateType::Centering {
+        goal = with_global(|g| g.editwinrows) / 2;
+    } else if !current_is_above_screen() {
+        goal = with_global(|g| g.editwinrows) - 1 - shim_value();
+    }
+
+    with_global_mut(|g| {
+        let of = g.openfile.as_ref().expect("no open file").clone();
+        let mut of = of.borrow_mut();
+        of.edittop = of.current.clone();
+        if g.flags.isset(SOFTWRAP) {
+            let current = of.current.clone().unwrap();
+            of.firstcolumn = leftedge_for(utils::xplustabs(), &current);
+        }
+    });
+
+    /* 从 current[current_x] 开始将 edittop 回退 goal 行。 */
+    with_global_mut(|g| {
+        let of = g.openfile.as_ref().expect("no open file").clone();
+        let mut of = of.borrow_mut();
+        let mut edittop = of.edittop.clone().unwrap();
+        let mut firstcolumn = of.firstcolumn;
+        go_back_chunks(goal, &mut edittop, &mut firstcolumn);
+        of.edittop = Some(edittop);
+        of.firstcolumn = firstcolumn;
+    });
+}

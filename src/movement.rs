@@ -9,7 +9,7 @@
 use crate::definitions::*;
 use std::rc::Rc;
 use crate::chars::{mb_cur_max};
-use crate::utils::{actual_x, xplustabs};
+use crate::utils::{actual_x, wideness};
 
 /// 获取编辑窗口行数。
 fn editwinrows() -> i32 {
@@ -26,7 +26,7 @@ pub fn do_left() {
                 let data = of_ref.current.as_ref().map(|c| c.borrow().data.clone()).unwrap_or_default();
                 let char_len = mb_cur_max(data.as_bytes(), of_ref.current_x);
                 of_ref.current_x = if char_len > 0 { of_ref.current_x - 1 } else { of_ref.current_x.saturating_sub(1) };
-                of_ref.placewewant = xplustabs(data.as_bytes(), of_ref.current_x);
+                of_ref.placewewant = wideness(data.as_bytes(), of_ref.current_x);
             }
         }
     });
@@ -43,7 +43,7 @@ pub fn do_right() {
             if of_ref.current_x < data_len {
                 let char_len = 1.max(1); // 简化：移动一个字节
                 of_ref.current_x = (of_ref.current_x + 1).min(data_len);
-                of_ref.placewewant = xplustabs(data.as_bytes(), of_ref.current_x);
+                of_ref.placewewant = wideness(data.as_bytes(), of_ref.current_x);
             }
         }
     });
@@ -116,7 +116,7 @@ pub fn do_end() {
             let mut of_ref = of.borrow_mut();
             let data = of_ref.current.as_ref().map(|c| c.borrow().data.clone()).unwrap_or_default();
             of_ref.current_x = data.len();
-            of_ref.placewewant = xplustabs(data.as_bytes(), of_ref.current_x);
+            of_ref.placewewant = wideness(data.as_bytes(), of_ref.current_x);
         }
     });
 }
@@ -188,7 +188,7 @@ pub fn do_prev_word() {
                 pos -= 1;
             }
             of_ref.current_x = pos;
-            of_ref.placewewant = xplustabs(bytes, pos);
+            of_ref.placewewant = wideness(bytes, pos);
         }
     });
 }
@@ -211,7 +211,7 @@ pub fn do_next_word() {
                 pos += 1;
             }
             of_ref.current_x = pos;
-            of_ref.placewewant = xplustabs(bytes, pos);
+            of_ref.placewewant = wideness(bytes, pos);
         }
     });
 }
