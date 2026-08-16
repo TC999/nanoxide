@@ -346,3 +346,32 @@ pub fn goto_line_and_column(mut line: isize, mut column: isize, hugfloor: bool) 
         crate::winio::adjust_viewport(UpdateType::Centering);
     }
 }
+// ======================== 跳转到指定行与列位置（对应 search.c 的 goto_line_posx） ========================
+
+/// 转到指定的行与 x 位置（对应 `goto_line_posx`）。
+pub fn goto_line_posx(linenumber: isize, pos_x: usize) {
+    with_global_mut(|g| {
+        let of = g.openfile.as_ref().expect("no open file").clone();
+        let mut of = of.borrow_mut();
+
+        let edittop_lineno = of.edittop.as_ref().map(|e| e.borrow().lineno).unwrap_or(0);
+        let current_lineno = of.current.as_ref().map(|c| c.borrow().lineno).unwrap_or(0);
+        if linenumber > edittop_lineno + g.editwinrows as isize
+            || (g.flags.isset(SOFTWRAP) && linenumber > current_lineno)
+        {
+            g.recook |= g.perturbed;
+        }
+
+        let filebot = of.filebot.clone().unwrap();
+        let fb_lineno = filebot.borrow().lineno;
+        if linenumber < fb_lineno {
+            of.current = Some(crate::utils::line_from_number(linenumber));
+        } else {
+            of.current = Some(filebot);
+        }
+
+        of.current_x = pos_x;
+        of.placewewant = crate::utils::xplustabs();
+        g.refresh_needed = true;
+    });
+}

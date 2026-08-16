@@ -193,8 +193,8 @@ pub fn do_prev_word() {
     });
 }
 
-/// 移动到下一个单词。
-pub fn do_next_word() {
+/// 移动到下一个单词（对应 move.c 的 `do_next_word`）。
+pub fn do_next_word(_allow_punct: bool) {
     with_global_mut(|g| {
         let openfile = g.openfile.clone();
         if let Some(of) = openfile {

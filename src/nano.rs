@@ -20,6 +20,8 @@ use crate::cut;
 use crate::rcfile;
 use crate::color;
 use crate::help;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// 主函数入口。
 pub fn main() {
@@ -275,7 +277,7 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     if key == 8 { cut::do_backspace(); winio::edit_refresh(); return true; }           // Ctrl+H
     if key == 9 { text::do_tab(); winio::edit_refresh(); return true; }                // Ctrl+I (Tab)
     if key == 10 { return true; }                                                       // Ctrl+J
-    if key == 11 { cut::do_cut(); winio::edit_refresh(); return true; }                // Ctrl+K
+    if key == 11 { cut::cut_text(); winio::edit_refresh(); return true; }                // Ctrl+K
     if key == 12 { text::do_refresh(); winio::edit_refresh(); return true; }           // Ctrl+L
     if key == 13 { text::do_enter(); winio::edit_refresh(); return true; }             // Ctrl+M (Enter)
     if key == 14 { movement::do_down(); winio::edit_refresh(); return true; }          // Ctrl+N
@@ -285,7 +287,7 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     if key == 18 { files::do_insertfile(); winio::edit_refresh(); return true; }       // Ctrl+R
     if key == 19 { text::do_suspend(); return true; }                                  // Ctrl+S
     if key == 20 { text::do_spell(); return true; }                                    // Ctrl+T
-    if key == 21 { cut::do_paste(); winio::edit_refresh(); return true; }              // Ctrl+U
+    if key == 21 { cut::paste_text(); winio::edit_refresh(); return true; }              // Ctrl+U
     if key == 22 { movement::do_page_down(); winio::edit_refresh(); return true; }     // Ctrl+V
     if key == 23 { search::do_search_forward(); winio::edit_refresh(); return true; }  // Ctrl+W
     if key == 24 {                                                                     // Ctrl+X
@@ -305,8 +307,8 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     if key == KEY_F0 + 6 { text::do_spell(); return true; }                            // F6
     if key == KEY_F0 + 7 { return true; }                                              // F7
     if key == KEY_F0 + 8 { return true; }                                              // F8
-    if key == KEY_F0 + 9 { cut::do_cut(); winio::edit_refresh(); return true; }        // F9
-    if key == KEY_F0 + 10 { cut::do_paste(); winio::edit_refresh(); return true; }     // F10
+    if key == KEY_F0 + 9 { cut::cut_text(); winio::edit_refresh(); return true; }        // F9
+    if key == KEY_F0 + 10 { cut::paste_text(); winio::edit_refresh(); return true; }     // F10
     if key == KEY_F0 + 11 { return true; }                                             // F11
     if key == KEY_F0 + 12 { return true; }                                             // F12
 
@@ -326,7 +328,7 @@ fn execute_function(key: i32, _menu: i32) -> bool {
 
     // 修饰键
     if key == CONTROL_LEFT { movement::do_prev_word(); winio::edit_refresh(); return true; }
-    if key == CONTROL_RIGHT { movement::do_next_word(); winio::edit_refresh(); return true; }
+    if key == CONTROL_RIGHT { movement::do_next_word(false); winio::edit_refresh(); return true; }
     if key == CONTROL_HOME { movement::do_first_line(); winio::edit_refresh(); return true; }
     if key == CONTROL_END { movement::do_last_line(); winio::edit_refresh(); return true; }
     if key == CONTROL_DELETE { cut::do_delete(); winio::edit_refresh(); return true; }
@@ -335,7 +337,7 @@ fn execute_function(key: i32, _menu: i32) -> bool {
 
     // Alt 组合
     if key == ALT_LEFT { movement::do_prev_word(); winio::edit_refresh(); return true; }
-    if key == ALT_RIGHT { movement::do_next_word(); winio::edit_refresh(); return true; }
+    if key == ALT_RIGHT { movement::do_next_word(false); winio::edit_refresh(); return true; }
     if key == ALT_UP { movement::to_para_begin(); winio::edit_refresh(); return true; }
     if key == ALT_DOWN { movement::to_para_end(); winio::edit_refresh(); return true; }
     if key == ALT_HOME { movement::do_first_line(); winio::edit_refresh(); return true; }
@@ -385,5 +387,181 @@ pub fn emergency_save_all() {
         if !targetname.is_empty() {
             files::write_it_out(true, false);
         }
+    }
+}
+
+// ======================== 行节点操作（对应 nano.c） ========================
+
+/// 将新节点插入既有 linestruct 链表中（对应 `splice_node`）。
+pub fn splice_node(afterthis: &LineRef, newnode: &LineRef) {
+    let after_next = { let r = afterthis.borrow(); r.next.clone() };
+
+    newnode.borrow_mut().next = after_next.clone();
+    newnode.borrow_mut().prev = Some(Rc::downgrade(afterthis));
+    if let Some(an) = &after_next {
+        an.borrow_mut().prev = Some(Rc::downgrade(newnode));
+    }
+    afterthis.borrow_mut().next = Some(newnode.clone());
+
+    /* 当节点插入到缓冲区末尾之后时…… */
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            let mut of = of.borrow_mut();
+            let is_filebot = of.filebot.as_ref().map(|b| Rc::ptr_eq(b, afterthis)).unwrap_or(false);
+            if is_filebot {
+                of.filebot = Some(newnode.clone());
+            }
+        }
+    });
+}
+
+/// 释放给定节点中的数据结构（对应 `delete_node`）。
+pub fn delete_node(line: &LineRef) {
+    /* 若屏幕首行被删除，后退一行。 */
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            let mut of = of.borrow_mut();
+            let is_edittop = of.edittop.as_ref().map(|e| Rc::ptr_eq(e, line)).unwrap_or(false);
+            if is_edittop {
+                let prev = { let r = line.borrow(); r.prev.clone() };
+                of.edittop = prev.and_then(|w| w.upgrade());
+            }
+            /* 若硬换行的溢出行被删除…… */
+            let is_spillage = of.spillage_line.as_ref().map(|s| Rc::ptr_eq(s, line)).unwrap_or(false);
+            if is_spillage {
+                of.spillage_line = None;
+            }
+        }
+    });
+    /* data 与 multidata 由 Rc 自动释放。 */
+}
+
+/// 将节点从链表中断开并删除（对应 `unlink_node`）。
+pub fn unlink_node(line: &LineRef) {
+    let (prev, next) = {
+        let r = line.borrow();
+        (r.prev.clone(), r.next.clone())
+    };
+
+    if let Some(p) = prev.as_ref().and_then(|w| w.upgrade()) {
+        p.borrow_mut().next = next.clone();
+    }
+    if let Some(n) = &next {
+        n.borrow_mut().prev = prev.clone();
+    }
+
+    /* 删除缓冲区末尾的节点时…… */
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            let mut of = of.borrow_mut();
+            let is_filebot = of.filebot.as_ref().map(|b| Rc::ptr_eq(b, line)).unwrap_or(false);
+            if is_filebot {
+                of.filebot = prev.as_ref().and_then(|w| w.upgrade());
+            }
+        }
+    });
+
+    delete_node(line);
+}
+
+/// 释放整条 linestruct 链表（对应 `free_lines`）。
+pub fn free_lines(src: Option<LineRef>) {
+    let mut src = match src {
+        Some(s) => s,
+        None => return,
+    };
+
+    loop {
+        let next = { let r = src.borrow(); r.next.clone() };
+        match next {
+            Some(n) => {
+                let prev = { let r = n.borrow(); r.prev.clone() };
+                if let Some(p) = prev.as_ref().and_then(|w| w.upgrade()) {
+                    delete_node(&p);
+                }
+                src = n;
+            }
+            None => break,
+        }
+    }
+
+    delete_node(&src);
+}
+
+/// 复制一个 linestruct 节点（对应 `copy_node`）。
+pub fn copy_node(src: &LineStruct) -> LineRef {
+    Rc::new(RefCell::new(LineStruct {
+        data: src.data.clone(),
+        lineno: src.lineno,
+        next: None,
+        prev: None,
+        multidata: None,
+        has_anchor: src.has_anchor,
+    }))
+}
+
+/// 复制整条 linestruct 链表（对应 `copy_buffer`）。
+pub fn copy_buffer(src: &LineRef) -> LineRef {
+    let head = copy_node(&src.borrow());
+    head.borrow_mut().prev = None;
+
+    let mut item = head.clone();
+    let mut srcline = { let r = src.borrow(); r.next.clone() };
+
+    while let Some(s) = srcline {
+        let newnode = copy_node(&s.borrow());
+        newnode.borrow_mut().prev = Some(Rc::downgrade(&item));
+        item.borrow_mut().next = Some(newnode.clone());
+
+        item = newnode;
+        srcline = { let r = s.borrow(); r.next.clone() };
+    }
+
+    item.borrow_mut().next = None;
+
+    head
+}
+
+/// 从给定行开始重新编号缓冲区中的行（对应 `renumber_from`）。
+pub fn renumber_from(line: &LineRef) {
+    let mut number = {
+        let prev = { let r = line.borrow(); r.prev.clone() };
+        match prev.and_then(|w| w.upgrade()) {
+            Some(p) => p.borrow().lineno,
+            None => 0,
+        }
+    };
+
+    let mut l = line.clone();
+    loop {
+        number += 1;
+        l.borrow_mut().lineno = number;
+        let next = { let r = l.borrow(); r.next.clone() };
+        match next {
+            Some(n) => l = n,
+            None => break,
+        }
+    }
+}
+
+/// 将当前缓冲区标记为已修改（对应 `set_modified`）。
+pub fn set_modified() {
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            of.borrow_mut().modified = true;
+        }
+    });
+    winio::titlebar(None);
+}
+
+/// 受限模式时显示警告并返回 TRUE，否则返回 FALSE
+/// （对应 `in_restricted_mode`）。
+pub fn in_restricted_mode() -> bool {
+    if ISSET(RESTRICTED) {
+        winio::statusline(MessageType::Ahem, "This function is disabled in restricted mode");
+        winio::beep();
+        true
+    } else {
+        false
     }
 }

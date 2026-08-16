@@ -538,6 +538,34 @@ pub fn terminal_restore() {
     let _ = terminal::disable_raw_mode();
 }
 
+/// 终端响铃（对应 curses 的 `beep`）。
+pub fn beep() {
+    use std::io::Write;
+    let _ = std::io::stdout().write_all(b"\x07");
+    let _ = std::io::stdout().flush();
+}
+
+/// 重绘编辑窗口：必要时调整视口并标记需要刷新
+/// （对应 `edit_redraw`；渲染细节由 `edit_refresh` 完成）。
+pub fn edit_redraw(old_current: &LineRef, manner: UpdateType) {
+    if manner == UpdateType::Flowing {
+        /* 若光标移动，确保当前行可见。 */
+        let moved = with_global(|g| {
+            g.openfile.as_ref().map(|of| {
+                let of = of.borrow();
+                of.current.as_ref().map(|c| !std::rc::Rc::ptr_eq(c, old_current)).unwrap_or(false)
+            }).unwrap_or(false)
+        });
+        if moved && current_is_offscreen() {
+            adjust_viewport(UpdateType::Stationary);
+        }
+    } else if current_is_offscreen() {
+        adjust_viewport(manner);
+    }
+
+    with_global_mut(|g| g.refresh_needed = true);
+}
+
 // ======================== 软换行（对应 winio.c 软换行函数组） ========================
 
 use std::cell::Cell;
