@@ -119,9 +119,9 @@ pub fn open_buffer(filename: &str) -> bool {
     }
 }
 
-/// 将缓冲区写入文件。
+/// 将缓冲区写入文件（对应 files.c 的 `write_it_out`）。
 pub fn write_it_out(_finalize: bool, _mark_only: bool) -> i32 {
-    with_global_mut(|g| {
+    let result = with_global_mut(|g| {
         let openfile = g.openfile.clone();
         if let Some(of) = openfile {
             let of_ref = of.borrow();
@@ -130,15 +130,29 @@ pub fn write_it_out(_finalize: bool, _mark_only: bool) -> i32 {
                 return -1;
             }
 
-            // 收集所有行数据
-            let mut content = String::new();
+            /* 收集所有行数据（排除末尾魔法行）。 */
+            let mut lines: Vec<String> = Vec::new();
             let mut current = of_ref.filetop.clone();
             while let Some(c) = current {
                 let data = c.borrow().data.clone();
-                content.push_str(&data);
-                content.push('\n');
+                lines.push(data);
                 let next = c.borrow().next.clone();
                 current = next;
+            }
+
+            /* 魔法行：末尾的空行（非唯一行时）不写入。 */
+            if lines.len() > 1 && lines.last().map(|s| s.is_empty()).unwrap_or(false) {
+                lines.pop();
+            }
+
+            let mut content = String::new();
+            let last = lines.len().saturating_sub(1);
+            for (i, l) in lines.iter().enumerate() {
+                content.push_str(l);
+                /* 每行以换行结尾；NO_NEWLINES 时末行不加。 */
+                if i < last || !ISSET(NO_NEWLINES) {
+                    content.push('\n');
+                }
             }
 
             match fs::write(&filename, &content) {
@@ -156,22 +170,20 @@ pub fn write_it_out(_finalize: bool, _mark_only: bool) -> i32 {
             -1
         }
     });
-    -1
+    result
 }
 
-/// 写入文件（用户交互版）。
+/// 写入文件（用户交互版；对应 `do_writeout`）。
 pub fn do_writeout() {
-    with_global_mut(|g| {
-        let openfile = g.openfile.clone();
-        if let Some(of) = openfile {
-            let filename = of.borrow().filename.clone().unwrap_or_default();
-            if !filename.is_empty() {
-                write_it_out(true, false);
-            } else {
-                set_statusbar_message("No filename to write");
-            }
-        }
+    let filename = with_global(|g| {
+        g.openfile.as_ref().and_then(|of| of.borrow().filename.clone()).unwrap_or_default()
     });
+    if !filename.is_empty() {
+        /* 注意：write_it_out 内部访问 GLOBAL，不能在 with_global_mut 闭包内调用。 */
+        write_it_out(true, false);
+    } else {
+        set_statusbar_message("No filename to write");
+    }
 }
 
 /// 获取下一个可用文件名（用于紧急保存）。

@@ -262,6 +262,11 @@ pub fn refresh_screen() {
     });
 
     let _ = stdout.flush();
+
+    /* 刷新后恢复光标：显示并移到编辑位置。 */
+    let _ = execute!(stdout, Show);
+    place_the_cursor();
+    let _ = stdout.flush();
 }
 
 /// 绘制标题栏行（格式参照 C 版 titlebar）。
@@ -468,16 +473,24 @@ pub fn blank_edit() {
     let _ = stdout.flush();
 }
 
-/// 放置光标。
+/// 放置光标（对应 `place_the_cursor`）。
 pub fn place_the_cursor() {
     with_global(|g| {
         let openfile = g.openfile.clone();
         if let Some(of) = openfile {
             let of_ref = of.borrow();
             let cursor_row = (of_ref.cursor_row + 1) as u16;
-            let cursor_col = (of_ref.current_x + of_ref.firstcolumn) as u16;
+            /* 光标列用显示列宽计算（而非字节偏移）。 */
+            let cur = of_ref.current.clone();
+            let cursor_col = match cur {
+                Some(c) => {
+                    let data = c.borrow().data.clone();
+                    crate::utils::wideness(data.as_bytes(), of_ref.current_x) as u16
+                }
+                None => of_ref.current_x as u16,
+            };
             let mut stdout = io::stdout();
-            let _ = execute!(stdout, cursor::MoveTo(cursor_col as u16, cursor_row));
+            let _ = execute!(stdout, cursor::MoveTo(cursor_col, cursor_row));
         }
     });
 }
