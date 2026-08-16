@@ -405,12 +405,12 @@ pub fn search_init(replacing: bool, retain_answer: bool) {
         };
         let answer = with_global(|g| g.answer.clone()).unwrap_or_default();
         let msg = format!(
-            "Search{}{}{}{} (to replace){}{}",
+            "Search{}{}{}{}{}{}",
             if ISSET(CASE_SENSITIVE) { " [Case sensitive]" } else { "" },
             if ISSET(USE_REGEXP) { " [Reg.exp.]" } else { "" },
             if ISSET(BACKWARDS_SEARCH) { " [Backwards]" } else { "" },
-            if replacing { "" } else { "" },
-            if replacing { "" } else { "" },
+            if replacing { " (to replace)" } else { "" },
+            "",
             thedefault
         );
 

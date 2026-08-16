@@ -97,7 +97,7 @@ pub fn get_keycode() -> i32 {
 }
 
 /// 将 crossterm KeyEvent 转换为 nano 键码。
-fn translate_keycode(key: KeyEvent) -> i32 {
+pub fn translate_keycode(key: KeyEvent) -> i32 {
     match key.code {
         KeyCode::Char(c) => {
             if key.modifiers == KeyModifiers::CONTROL {

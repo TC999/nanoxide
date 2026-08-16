@@ -246,23 +246,32 @@ fn main_loop() {
             continue;
         }
 
-        // 查找快捷键并执行
-        let menu = with_global(|g| g.currmenu);
-        let handled = execute_function(key, menu);
+        // 查找快捷键并执行（或作为普通字符输入）
+        handle_input_key(key);
+    }
+}
 
-        if !handled {
-            // 处理普通字符输入
-            if key > 0 && key < 256 && key != ESC_CODE as i32 {
-                let ch = char::from_u32(key as u32);
-                if let Some(c) = ch {
-                    if !with_global(|g| ISSET(VIEW_MODE)) {
-                        text::insert_char(c);
-                        winio::edit_refresh();
-                    }
+/// 处理单个按键：执行快捷键或作为普通字符输入。
+/// 返回 TRUE 表示已处理。
+pub fn handle_input_key(key: i32) -> bool {
+    let menu = with_global(|g| g.currmenu);
+    let handled = execute_function(key, menu);
+
+    if !handled {
+        // 处理普通字符输入
+        if key > 0 && key < 256 && key != ESC_CODE as i32 {
+            let ch = char::from_u32(key as u32);
+            if let Some(c) = ch {
+                if !ISSET(VIEW_MODE) {
+                    text::insert_char(c);
+                    winio::edit_refresh();
+                    return true;
                 }
             }
         }
     }
+
+    handled
 }
 
 /// 根据键码执行对应函数。
