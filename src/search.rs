@@ -11,6 +11,14 @@ use crate::chars;
 use crate::utils;
 use crate::history;
 use crate::global;
+use crate::nano;
+use crate::winio;
+use std::rc::Rc;
+
+/// 获取当前打开的缓冲区引用（克隆 Rc，释放全局借用）。
+fn openfile_ref() -> OpenFileRef {
+    with_global(|g| g.openfile.as_ref().expect("no open file").clone())
+}
 
 /// 初始化正则表达式（模式匹配）。
 pub fn regexp_init(pattern: &str) -> bool {
@@ -102,64 +110,9 @@ pub fn find_next_match(needle: &str, start_line: Option<LineRef>, start_x: usize
     None
 }
 
-/// 执行搜索（向前）。
-pub fn do_search_forward() {
-    with_global_mut(|g| {
-        let needle = g.last_search.clone().unwrap_or_default();
-        if needle.is_empty() {
-            return;
-        }
-        if let Some((found_line, found_x)) = find_next_match(&needle, None, 0, false) {
-            if let Some(of) = &g.openfile {
-                let mut of_ref = of.borrow_mut();
-                of_ref.current = Some(found_line);
-                of_ref.current_x = found_x;
-                g.didfind = 1;
-            }
-        } else {
-            g.didfind = 0;
-            set_statusbar_message("Not found");
-        }
-    });
-}
-
-/// 执行搜索（向后）。
-pub fn do_search_backward() {
-    with_global_mut(|g| {
-        let needle = g.last_search.clone().unwrap_or_default();
-        if needle.is_empty() {
-            return;
-        }
-        let current = g.openfile.as_ref().and_then(|of| of.borrow().current.clone());
-        let current_x = g.openfile.as_ref().map(|of| of.borrow().current_x).unwrap_or(0);
-        if let Some((found_line, found_x)) = find_next_match(&needle, current, current_x, true) {
-            if let Some(of) = &g.openfile {
-                let mut of_ref = of.borrow_mut();
-                of_ref.current = Some(found_line);
-                of_ref.current_x = found_x;
-                g.didfind = 1;
-            }
-        } else {
-            g.didfind = 0;
-            set_statusbar_message("Not found");
-        }
-    });
-}
-
-/// 查找下一个。
-pub fn do_find_next() {
-    do_search_forward();
-}
-
-/// 查找上一个。
-pub fn do_find_previous() {
-    do_search_backward();
-}
-
 /// 执行替换。
-pub fn do_replace() {
-    // 简化：提示用户输入搜索和替换字符串
-    set_statusbar_message("Replace (not fully implemented)");
+pub fn do_replace_old_removed() {
+    // 已被 search_init/do_replace_loop 替代
 }
 
 /// 替换所有匹配。
@@ -374,4 +327,670 @@ pub fn goto_line_posx(linenumber: isize, pos_x: usize) {
         of.placewewant = crate::utils::xplustabs();
         g.refresh_needed = true;
     });
+}
+
+// ======================== 搜索核心（对应 search.c） ========================
+
+/// 编译给定正则（对应 `regexp_init`；用 MatchPattern 替代）。
+/// 返回 TRUE 当表达式有效。
+pub fn regexp_init_real(regexp: &str) -> bool {
+    let valid = if regexp.contains('*') || regexp.contains('?') {
+        Some(MatchPattern::from_glob(regexp))
+    } else {
+        Some(MatchPattern::from_literal(regexp))
+    };
+    match valid {
+        Some(pat) => {
+            with_global_mut(|g| {
+                g.search_regexp = Some(pat);
+                g.regexp_compiled = true;
+            });
+            true
+        }
+        None => {
+            winio::statusline(MessageType::Ahem, &format!("Bad regex \"{}\"", regexp));
+            false
+        }
+    }
+}
+
+/// 搜索结束后释放正则并安排刷新（对应 `tidy_up_after_search`）。
+pub fn tidy_up_after_search() {
+    with_global_mut(|g| {
+        if g.regexp_compiled {
+            g.search_regexp = None;
+            g.regexp_compiled = false;
+        }
+        let marked = g.openfile.as_ref().map(|of| of.borrow().mark.is_some()).unwrap_or(false);
+        if marked {
+            g.refresh_needed = true;
+        }
+        g.recook |= g.perturbed;
+    });
+}
+
+/// 准备提示并询问用户要搜索什么（对应 `search_init`）。
+pub fn search_init(replacing: bool, retain_answer: bool) {
+    let cols = with_global(|g| g.COLS);
+    let inhelp = with_global(|g| g.inhelp);
+
+    /* 若之前搜索过，包含在提示中。 */
+    let last_search = with_global(|g| g.last_search.clone()).unwrap_or_default();
+    let thedefault = if !last_search.is_empty() {
+        let disp = winio::display_string(last_search.as_bytes(), 0, cols / 3, false, false);
+        let dots = utils::breadth(last_search.as_bytes()) > cols / 3;
+        format!(" [{} {}]", disp, if dots { "..." } else { "" })
+    } else {
+        String::new()
+    };
+
+    let mut retain_answer = retain_answer;
+    loop {
+        let menu = if inhelp {
+            MFINDINHELP
+        } else if replacing {
+            MREPLACE
+        } else {
+            MWHEREIS
+        };
+        let answer = with_global(|g| g.answer.clone()).unwrap_or_default();
+        let msg = format!(
+            "Search{}{}{}{} (to replace){}{}",
+            if ISSET(CASE_SENSITIVE) { " [Case sensitive]" } else { "" },
+            if ISSET(USE_REGEXP) { " [Reg.exp.]" } else { "" },
+            if ISSET(BACKWARDS_SEARCH) { " [Backwards]" } else { "" },
+            if replacing { "" } else { "" },
+            if replacing { "" } else { "" },
+            thedefault
+        );
+
+        let mut search_history = with_global(|g| g.search_history.clone())
+            .unwrap_or_else(|| make_new_node(None));
+        let response = crate::prompt::do_prompt(
+            menu,
+            if retain_answer { &answer } else { "" },
+            Some(&mut search_history),
+            Some(winio::edit_refresh),
+            &msg,
+        );
+        with_global_mut(|g| g.search_history = Some(search_history));
+
+        /* 取消，或空白回答且本次会话尚未搜索过时，退出。 */
+        if response == -1 || (response == -2 && with_global(|g| g.last_search.clone()).unwrap_or_default().is_empty()) {
+            winio::statusbar("Cancelled");
+            break;
+        }
+
+        /* Enter 被按下时，准备进行替换或搜索。 */
+        if response == 0 || response == -2 {
+            let answer = with_global(|g| g.answer.clone()).unwrap_or_default();
+            if !answer.is_empty() {
+                with_global_mut(|g| g.last_search = Some(answer.clone()));
+                let mut sh = with_global(|g| g.search_history.clone()).unwrap_or_else(|| make_new_node(None));
+                history::update_history(&mut sh, &answer, true);
+                with_global_mut(|g| g.search_history = Some(sh));
+            }
+
+            let ls = with_global(|g| g.last_search.clone()).unwrap_or_default();
+            if ISSET(USE_REGEXP) && !regexp_init_real(&ls) {
+                break;
+            }
+
+            if replacing {
+                ask_for_and_do_replacements();
+            } else {
+                go_looking();
+            }
+            break;
+        }
+
+        retain_answer = true;
+
+        let function = crate::global::interpret(response);
+
+        /* 此处是五个切换之一或快捷键被执行。 */
+        match function {
+            Some(FunctionId::DoToggleCaseSensitive) => TOGGLE(CASE_SENSITIVE),
+            Some(FunctionId::DoToggleBackwards) => TOGGLE(BACKWARDS_SEARCH),
+            Some(FunctionId::DoToggleRegexp) => TOGGLE(USE_REGEXP),
+            _ => break,
+        }
+    }
+
+    if !inhelp {
+        tidy_up_after_search();
+    }
+}
+
+/// 从当前行开始查找 needle（对应 `findnextstr`）。
+/// 返回 1 找到、0 未找到、-2 取消。
+pub fn findnextstr(
+    needle: &str,
+    whole_word_only: bool,
+    modus: i32,
+    match_len: &mut usize,
+    skipone: bool,
+    begin: Option<&LineRef>,
+    begin_x: usize,
+) -> i32 {
+    let mut found_len = needle.len();
+    let mut feedback = 0;
+    let inhelp = with_global(|g| g.inhelp);
+
+    let mut came_full_circle = with_global(|g| g.came_full_circle);
+
+    let of = openfile_ref();
+    let mut line = of.borrow().current.clone().unwrap();
+    let mut from = of.borrow().current_x;
+    let mut found: Option<usize> = None;
+    let mut found_x = 0;
+
+    if begin.is_none() {
+        came_full_circle = false;
+    }
+
+    let mut skipone = skipone;
+    loop {
+        let data = line.borrow().data.clone();
+        let bytes = data.as_bytes();
+
+        /* 开始新搜索时跳过第一个字符，然后搜索当前行。 */
+        if skipone {
+            skipone = false;
+            if ISSET(BACKWARDS_SEARCH) && from != 0 {
+                from = chars::step_left(bytes, from);
+                found = crate::utils::strstrwrapper(bytes, needle.as_bytes(), from);
+            } else if !ISSET(BACKWARDS_SEARCH) && chars::byte_at(bytes, from) != 0 {
+                from += chars::char_length(&bytes[from..]);
+                found = crate::utils::strstrwrapper(bytes, needle.as_bytes(), from);
+            }
+        } else {
+            found = crate::utils::strstrwrapper(bytes, needle.as_bytes(), from);
+        }
+
+        if let Some(f) = found {
+            /* 正则搜索时计算匹配长度。 */
+            if ISSET(USE_REGEXP) {
+                // 简化：匹配长度 = needle 长度
+            }
+
+            /* 拼写检查时匹配应是独立单词。 */
+            if whole_word_only && !utils::is_separate_word(f, found_len, bytes) {
+                from = f + chars::char_length(&bytes[f..]);
+                continue;
+            }
+
+            /* 不在魔法行上时匹配有效。 */
+            let has_next = { let r = line.borrow(); r.next.is_some() };
+            if has_next || chars::byte_at(bytes, 0) != 0 {
+                break;
+            }
+        }
+
+        /* 若回到起点则没有 needle。 */
+        if came_full_circle {
+            with_global_mut(|g| g.came_full_circle = false);
+            return 0;
+        }
+
+        /* 移到前一行或下一行。 */
+        let next_line = if ISSET(BACKWARDS_SEARCH) {
+            { let r = line.borrow(); r.prev.clone() }.and_then(|w| w.upgrade())
+        } else {
+            { let r = line.borrow(); r.next.clone() }
+        };
+        line = match next_line {
+            Some(l) => l,
+            None => {
+                if whole_word_only || modus == INREGION {
+                    return 0;
+                }
+                let of = openfile_ref();
+                let wrapped = if ISSET(BACKWARDS_SEARCH) {
+                    of.borrow().filebot.clone().unwrap()
+                } else {
+                    of.borrow().filetop.clone().unwrap()
+                };
+                if modus == JUSTFIND {
+                    winio::statusline(MessageType::Remark, "Search Wrapped");
+                    feedback = -2;
+                }
+                wrapped
+            }
+        };
+
+        /* 回到起始行时记下。 */
+        if let Some(b) = begin {
+            if Rc::ptr_eq(&line, b) {
+                came_full_circle = true;
+            }
+        }
+
+        /* 把起始 x 设为行首或行尾。 */
+        from = 0;
+        if ISSET(BACKWARDS_SEARCH) {
+            from = line.borrow().data.len();
+        }
+
+        /* 每秒瞥一眼键盘检查取消。 */
+        if feedback != -2 {
+            if winio::kbhit() {
+                let input = winio::get_kbinput();
+                let function = crate::global::interpret(input);
+                if function == Some(FunctionId::DoCancel) {
+                    winio::statusbar("Cancelled");
+                    with_global_mut(|g| g.came_full_circle = false);
+                    return -2;
+                }
+            }
+            feedback += 1;
+            if feedback > 0 {
+                winio::statusbar("Searching...");
+            }
+        }
+    }
+
+    found_x = found.unwrap();
+    let data = line.borrow().data.clone();
+
+    /* 确保找到的出现不在起始 x 之后。 */
+    if came_full_circle
+        && ((!ISSET(BACKWARDS_SEARCH) && (found_x > begin_x || (modus == REPLACING && found_x == begin_x)))
+            || (ISSET(BACKWARDS_SEARCH) && found_x < begin_x))
+    {
+        with_global_mut(|g| g.came_full_circle = false);
+        return 0;
+    }
+
+    /* 把当前位置设为找到的。 */
+    let of = openfile_ref();
+    {
+        let mut of_ref = of.borrow_mut();
+        of_ref.current = Some(line.clone());
+        of_ref.current_x = found_x;
+    }
+
+    *match_len = found_len;
+
+    if modus == JUSTFIND {
+        let marked = with_global(|g| g.openfile.as_ref().map(|of| of.borrow().mark.is_some()).unwrap_or(false));
+        let softmark = with_global(|g| g.openfile.as_ref().map(|of| of.borrow().softmark).unwrap_or(false));
+        if !marked || softmark {
+            with_global_mut(|g| {
+                g.spotlighted = true;
+                g.light_from_col = utils::xplustabs();
+                g.light_to_col = utils::wideness(data.as_bytes(), found_x + found_len);
+                let (united, ew) = (g.united_sidescroll, g.editwincols);
+                if united && g.light_to_col < ew - CUSHION {
+                    if let Some(of) = &g.openfile {
+                        of.borrow_mut().brink = 0;
+                    }
+                } else if united {
+                    let b = utils::get_page_start(g.light_to_col);
+                    if let Some(of) = &g.openfile {
+                        of.borrow_mut().brink = b;
+                    }
+                }
+                g.refresh_needed = true;
+            });
+        }
+    }
+
+    if feedback > 0 {
+        winio::wipe_statusbar();
+    }
+
+    with_global_mut(|g| g.came_full_circle = came_full_circle);
+    let _ = inhelp;
+    1
+}
+
+/// 报告给定字符串未找到（对应 `not_found_msg`）。
+fn not_found_msg(str: &str) {
+    let cols = with_global(|g| g.COLS);
+    let disp = winio::display_string(str.as_bytes(), 0, (cols / 2) + 1, false, false);
+    let numchars = utils::actual_x(disp.as_bytes(), utils::wideness(disp.as_bytes(), cols / 2));
+    let dots = if disp.as_bytes().get(numchars).copied().unwrap_or(0) == 0 { "" } else { "..." };
+    winio::statusline(MessageType::Ahem, &format!("\"{}{}\" not found", &disp[..numchars.min(disp.len())], dots));
+}
+
+/// 搜索全局字符串 last_search 并报告（对应 `go_looking`）。
+pub fn go_looking() {
+    let (was_current, was_x) = with_global(|g| {
+        let of = g.openfile.as_ref().unwrap().borrow();
+        (of.current.clone().unwrap(), of.current_x)
+    });
+
+    with_global_mut(|g| g.came_full_circle = false);
+
+    let mut match_len = 0;
+    let last_search = with_global(|g| g.last_search.clone()).unwrap_or_default();
+    let of = openfile_ref();
+    let (cur, cur_x) = {
+        let of_ref = of.borrow();
+        (of_ref.current.clone().unwrap(), of_ref.current_x)
+    };
+    let didfind = findnextstr(&last_search, false, JUSTFIND, &mut match_len, true, Some(&cur), cur_x);
+
+    /* 若找到且回到起始点，则是唯一出现。 */
+    let (same_current, same_x) = with_global(|g| {
+        let of = g.openfile.as_ref().unwrap().borrow();
+        let same_c = of.current.as_ref().map(|c| Rc::ptr_eq(c, &was_current)).unwrap_or(false);
+        (same_c, of.current_x == was_x)
+    });
+    if didfind == 1 && same_current && same_x {
+        winio::statusline(MessageType::Remark, "This is the only occurrence");
+    } else if didfind == 0 {
+        not_found_msg(&last_search);
+    }
+
+    winio::edit_redraw(&was_current, UpdateType::Centering);
+}
+
+/// 询问并向前搜索（对应 `do_search_forward`）。
+pub fn do_search_forward() {
+    UNSET(BACKWARDS_SEARCH);
+    search_init(false, false);
+}
+
+/// 询问并向后搜索（对应 `do_search_backward`）。
+pub fn do_search_backward() {
+    SET(BACKWARDS_SEARCH);
+    search_init(false, false);
+}
+
+/// 不提示地搜索最后给出的字符串（对应 `do_research`）。
+pub fn do_research() {
+    let last_search = with_global(|g| g.last_search.clone()).unwrap_or_default();
+
+    if last_search.is_empty() {
+        winio::statusline(MessageType::Ahem, "No current search pattern");
+        return;
+    }
+
+    if ISSET(USE_REGEXP) && !regexp_init_real(&last_search) {
+        return;
+    }
+
+    with_global_mut(|g| g.currmenu = MWHEREIS);
+
+    let lines = with_global(|g| g.LINES);
+    if lines > 1 {
+        winio::wipe_statusbar();
+    }
+
+    go_looking();
+
+    let inhelp = with_global(|g| g.inhelp);
+    if !inhelp {
+        tidy_up_after_search();
+    }
+}
+
+/// 向后搜索下一次出现（对应 `do_findprevious`）。
+pub fn do_findprevious() {
+    SET(BACKWARDS_SEARCH);
+    do_research();
+}
+
+/// 向前搜索下一次出现（对应 `do_findnext`）。
+pub fn do_findnext() {
+    UNSET(BACKWARDS_SEARCH);
+    do_research();
+}
+
+/// 返回给定 regex 的替换文本大小，考虑子表达式引用
+/// （对应 `replace_regexp`；简化实现）。
+fn replace_regexp(string: Option<&mut String>) -> usize {
+    let answer = with_global(|g| g.answer.clone()).unwrap_or_default();
+    let mut replacement_size = 0;
+    let mut output = String::new();
+
+    let given = answer.as_bytes();
+    let mut i = 0;
+    while i < given.len() {
+        let c = given[i];
+        let digit = if i + 1 < given.len() { given[i + 1] - b'0' } else { 0 };
+
+        /* 有效的反向引用时使用子表达式，否则使用字面回答。 */
+        if c == b'\\' && 0 < digit && digit < 10 {
+            let d = digit as usize;
+            if let Some(reg) = with_global(|g| g.regmatches.get(d).cloned()) {
+                if let (Some(so), Some(eo)) = reg {
+                    let of = openfile_ref();
+                    let data = of.borrow().current.as_ref().map(|c| c.borrow().data.clone()).unwrap_or_default();
+                    if so <= eo && eo <= data.len() {
+                        let extent = &data.as_bytes()[so..eo];
+                        output.push_str(&String::from_utf8_lossy(extent));
+                        replacement_size += extent.len();
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+            output.push(c as char);
+            replacement_size += 1;
+            i += 1;
+        } else {
+            output.push(c as char);
+            replacement_size += 1;
+            i += 1;
+        }
+    }
+
+    if let Some(s) = string {
+        *s = output;
+    }
+
+    replacement_size
+}
+
+/// 返回当前行的一个 needle 被替换后的副本（对应 `replace_line`）。
+fn replace_line(needle: &str) -> String {
+    let answer = with_global(|g| g.answer.clone()).unwrap_or_default();
+    let of = openfile_ref();
+    let (data, current_x) = {
+        let of_ref = of.borrow();
+        (
+            of_ref.current.as_ref().map(|c| c.borrow().data.clone()).unwrap_or_default(),
+            of_ref.current_x,
+        )
+    };
+
+    let match_len = needle.len();
+    let mut copy = String::new();
+    copy.push_str(&data[..current_x]);
+    copy.push_str(&answer);
+    copy.push_str(&data[current_x + match_len..]);
+    copy
+}
+
+/// 逐步检查搜索字符串的每次出现并提示用户是否替换
+/// （对应 `do_replace_loop`）。
+fn do_replace_loop(needle: &str, real_current: &LineRef, real_current_x: &mut usize) -> isize {
+    let mut skipone = ISSET(BACKWARDS_SEARCH);
+    let mut replaceall = false;
+    let modus = REPLACING;
+    let mut numreplaced: isize = -1;
+    let mut match_len = 0;
+
+    with_global_mut(|g| g.came_full_circle = false);
+
+    loop {
+        let mut choice = NO;
+        let result = findnextstr(needle, false, modus, &mut match_len, skipone, Some(real_current), *real_current_x);
+
+        /* 未找到或取消时停止循环。 */
+        if result < 1 {
+            if result < 0 {
+                numreplaced = -2;
+            }
+            break;
+        }
+
+        /* 表示找到搜索字符串。 */
+        if numreplaced == -1 {
+            numreplaced = 0;
+        }
+
+        if !replaceall {
+            with_global_mut(|g| {
+                g.spotlighted = true;
+                g.light_from_col = utils::xplustabs();
+                let of = g.openfile.as_ref().unwrap().borrow();
+                let cur = of.current.clone().unwrap();
+                g.light_to_col = utils::wideness(cur.borrow().data.as_bytes(), of.current_x + match_len);
+                let (united, ew) = (g.united_sidescroll, g.editwincols);
+                if united && g.light_to_col < ew - CUSHION {
+                    drop(of);
+                    g.openfile.as_ref().unwrap().borrow_mut().brink = 0;
+                } else if united {
+                    let b = utils::get_page_start(g.light_to_col);
+                    drop(of);
+                    g.openfile.as_ref().unwrap().borrow_mut().brink = b;
+                }
+            });
+            winio::edit_refresh();
+
+            choice = crate::prompt::ask_user(true, "Replace this instance?");
+
+            with_global_mut(|g| g.spotlighted = false);
+
+            if choice == CANCEL {
+                break;
+            }
+
+            replaceall = choice == ALL;
+
+            skipone = choice == 0 || ISSET(BACKWARDS_SEARCH);
+        }
+
+        if choice == YES || replaceall {
+            let altered = replace_line(needle);
+            let length_change = altered.len() as isize
+                - with_global(|g| {
+                    g.openfile.as_ref().unwrap().borrow().current.as_ref().map(|c| c.borrow().data.len()).unwrap_or(0)
+                }) as isize;
+
+            let of = openfile_ref();
+            let (is_real, cur_x_lt) = {
+                let of_ref = of.borrow();
+                let is_real = of_ref.current.as_ref().map(|c| Rc::ptr_eq(c, real_current)).unwrap_or(false);
+                (is_real, of_ref.current_x < *real_current_x)
+            };
+            if is_real && cur_x_lt {
+                let of_ref = of.borrow();
+                let cur_x = of_ref.current_x;
+                if *real_current_x < cur_x + match_len {
+                    *real_current_x = cur_x + match_len;
+                }
+                *real_current_x = (*real_current_x as isize + length_change) as usize;
+            }
+
+            /* 不再寻找同样的零长度或行首匹配。 */
+            if match_len == 0 {
+                skipone = true;
+            }
+
+            /* 向前移动时把光标放在替换文本之后。 */
+            let cur_x = of.borrow().current_x;
+            if !ISSET(BACKWARDS_SEARCH) {
+                of.borrow_mut().current_x = cur_x + match_len + length_change as usize;
+            }
+
+            /* 更新文件大小并放入修改后的行。 */
+            {
+                let mut of_ref = of.borrow_mut();
+                let cur = of_ref.current.clone().unwrap();
+                let old_len = cur.borrow().data.len();
+                of_ref.totsize = of_ref.totsize.saturating_sub(old_len);
+                cur.borrow_mut().data = altered.clone();
+                of_ref.totsize += altered.len();
+            }
+
+            crate::color::check_the_multis(&of.borrow().current.clone().unwrap());
+            with_global_mut(|g| g.refresh_needed = false);
+            nano::set_modified();
+            with_global_mut(|g| g.as_an_at = true);
+            numreplaced += 1;
+        }
+    }
+
+    if numreplaced == -1 {
+        not_found_msg(needle);
+    }
+
+    numreplaced
+}
+
+/// 替换字符串（对应 `do_replace`）。
+pub fn do_replace() {
+    if ISSET(VIEW_MODE) {
+        winio::statusline(MessageType::Ahem, "View mode: Replace disabled");
+    } else {
+        UNSET(BACKWARDS_SEARCH);
+        search_init(true, false);
+    }
+}
+
+/// 询问用户用什么替换搜索字符串，并执行替换（对应 `ask_for_and_do_replacements`）。
+pub fn ask_for_and_do_replacements() {
+    let (was_edittop, was_firstcolumn, beginline, begin_x) = with_global(|g| {
+        let of = g.openfile.as_ref().unwrap().borrow();
+        (
+            of.edittop.clone().unwrap(),
+            of.firstcolumn,
+            of.current.clone().unwrap(),
+            of.current_x,
+        )
+    });
+    let last_search = with_global(|g| g.last_search.clone()).unwrap_or_default();
+
+    let mut replace_history = with_global(|g| g.replace_history.clone())
+        .unwrap_or_else(|| make_new_node(None));
+    let response = crate::prompt::do_prompt(
+        MREPLACEWITH,
+        "",
+        Some(&mut replace_history),
+        Some(winio::edit_refresh),
+        "Replace with",
+    );
+    with_global_mut(|g| g.replace_history = Some(replace_history));
+
+    /* 非空时把替换字符串加入替换历史。 */
+    if response == 0 {
+        let answer = with_global(|g| g.answer.clone()).unwrap_or_default();
+        if !answer.is_empty() {
+            let mut rh = with_global(|g| g.replace_history.clone()).unwrap_or_else(|| make_new_node(None));
+            history::update_history(&mut rh, &answer, true);
+            with_global_mut(|g| g.replace_history = Some(rh));
+        }
+    }
+
+    /* 取消或执行了函数时完成。 */
+    if response == -1 {
+        winio::statusbar("Cancelled");
+        return;
+    } else if response > 0 {
+        return;
+    }
+
+    let mut begin_x = begin_x;
+    let numreplaced = do_replace_loop(&last_search, &beginline, &mut begin_x);
+
+    /* 恢复到之前的位置。 */
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            let mut of = of.borrow_mut();
+            of.edittop = Some(was_edittop);
+            of.firstcolumn = was_firstcolumn;
+            of.current = Some(beginline);
+            of.current_x = begin_x;
+        }
+        g.refresh_needed = true;
+    });
+
+    if numreplaced >= 0 {
+        winio::statusline(MessageType::Remark, &format!("Replaced {} occurrence{}", numreplaced, if numreplaced == 1 { "" } else { "s" }));
+    }
 }
