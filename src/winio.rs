@@ -937,3 +937,73 @@ pub fn adjust_viewport(manner: UpdateType) {
         of.firstcolumn = firstcolumn;
     });
 }
+// ======================== 视口滚动与行更新（对应 winio.c） ========================
+
+/// 检查标记是否开启，或 old_column 与 new_column 是否在不同"页"上
+/// （软换行模式下仅前者适用），这意味着相关行需要重绘
+/// （对应 `line_needs_update`）。
+pub fn line_needs_update(old_column: usize, new_column: usize) -> bool {
+    if crate::utils::get_page_start(old_column) == crate::utils::get_page_start(new_column) {
+        return with_global(|g| g.openfile.as_ref().map(|of| of.borrow().mark.is_some()).unwrap_or(false));
+    }
+    let united = with_global(|g| g.united_sidescroll);
+    if united {
+        with_global_mut(|g| g.refresh_needed = true);
+    }
+    !with_global(|g| g.refresh_needed)
+}
+
+/// 把编辑窗口顶行向上（BACKWARD）或向下（FORWARD）移动一行或一块，
+/// 并重绘新出现的行。crossterm 架构下以全量刷新等价实现
+/// （对应 `edit_scroll`）。
+pub fn edit_scroll(direction: ScrollDirection) {
+    with_global_mut(|g| {
+        let of = g.openfile.as_ref().expect("no open file").clone();
+        let mut of = of.borrow_mut();
+        let mut edittop = of.edittop.clone().unwrap();
+        let mut firstcolumn = of.firstcolumn;
+
+        if direction == ScrollDirection::Backward {
+            go_back_chunks(1, &mut edittop, &mut firstcolumn);
+        } else {
+            go_forward_chunks(1, &mut edittop, &mut firstcolumn);
+        }
+        of.edittop = Some(edittop);
+        of.firstcolumn = firstcolumn;
+    });
+    with_global_mut(|g| g.refresh_needed = true);
+}
+
+/// 无条件重绘整个屏幕（对应 `full_refresh`）。
+pub fn full_refresh() {
+    with_global_mut(|g| g.refresh_needed = true);
+    edit_refresh();
+}
+
+/// 绘制屏幕的三个元素：标题栏、编辑窗口内容、底栏
+/// （对应 `draw_all_subwindows`）。
+pub fn draw_all_subwindows() {
+    edit_refresh();
+    bottombars();
+}
+
+/// 滚动方向枚举（对应 winio.c 的 `update_type` 中 FORWARD/BACKWARD 用法）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollDirection {
+    Forward,
+    Backward,
+}
+
+/// 重绘给定行（对应 winio.c 的 `update_line`）。
+/// 返回该行占用的行数（软换行时为块数，否则为 1）。
+/// 在 crossterm 架构下，逐行渲染由 `edit_refresh` 的全量重绘完成，
+/// 这里标记需要刷新并返回正确的行数。
+pub fn update_line(line: &LineRef, index: usize) -> i32 {
+    let _ = index;
+    with_global_mut(|g| g.refresh_needed = true);
+    if ISSET(SOFTWRAP) {
+        (extra_chunks_in(line) + 1) as i32
+    } else {
+        1
+    }
+}
