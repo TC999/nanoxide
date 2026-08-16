@@ -142,3 +142,35 @@ fn write_file_promptbar_displays() {
     assert_eq!(nano_rs::prompt::get_answer(), "test_wo.txt");
     assert_eq!(with_global(|g| g.prompt.clone()), Some("Write to File".to_string()));
 }
+
+/// 吸收链：普通字符应加入 answer（修复 waiting_keycodes 阻塞读取后）。
+#[test]
+fn absorb_character_adds_to_answer() {
+    nano_rs::global::global_init();
+    with_global_mut(|g| {
+        g.COLS = 80;
+        g.LINES = 24;
+        g.currmenu = MWRITEFILE;
+        g.prompt = Some("Write to File".to_string());
+        g.answer = Some(String::new());
+    });
+    // 输入 'a'（无快捷键）
+    nano_rs::prompt::absorb_character(97, None);
+    assert_eq!(nano_rs::prompt::get_answer(), "a", "普通字符应被吸收进 answer");
+    // 再输入 'b'
+    nano_rs::prompt::absorb_character(98, None);
+    assert_eq!(nano_rs::prompt::get_answer(), "ab");
+}
+
+/// Enter 不应被 waiting_keycodes 阻塞（吸收函数不读取按键）。
+#[test]
+fn absorb_enter_does_not_block() {
+    nano_rs::global::global_init();
+    with_global_mut(|g| {
+        g.currmenu = MWRITEFILE;
+        g.answer = Some("test.txt".to_string());
+    });
+    // DoEnter 作为 function 传入，不应阻塞（waiting_keycodes 非阻塞）
+    nano_rs::prompt::absorb_character(13, Some(FunctionId::DoEnter));
+    assert_eq!(nano_rs::prompt::get_answer(), "test.txt");
+}

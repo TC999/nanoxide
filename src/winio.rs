@@ -196,8 +196,13 @@ pub fn translate_keycode(key: KeyEvent) -> i32 {
 }
 
 /// 等待按键代码。
+/// 返回是否有等待中的按键（非阻塞；对应 C 的 `waiting_codes` 计数）。
 pub fn waiting_keycodes() -> i32 {
-    wgetch()
+    if event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
+        1
+    } else {
+        0
+    }
 }
 
 /// 启用键盘中断。

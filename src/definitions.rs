@@ -731,7 +731,7 @@ impl GlobalState {
             sidebar: false,
             cutbuffer: None, cutbottom: None,
             keep_cutbuffer: false, inherited_anchor: false, cycling_aim: 0,
-            typing_x: usize::MAX >> 1,
+            typing_x: 0,
             prompt: None,
             whitespace: Some(vec![0xC2, 0xBB, 0xC2, 0xB7]),
             whitelen: (2, 2),

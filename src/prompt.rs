@@ -369,6 +369,9 @@ pub fn draw_the_promptbar() {
     let _ = crossterm::execute!(stdout, crossterm::cursor::MoveTo(0, status_row));
     use std::io::Write;
     let _ = write!(stdout, "{:width$}", display, width = cols);
+    /* 把光标放到回答的输入位置（冒号之后，对应 C 的 wmove(footwin, 0, ...)）。 */
+    let cursor_col = (base + utils::wideness(answer.as_bytes(), typing_x) - the_page) as u16;
+    let _ = crossterm::execute!(stdout, crossterm::cursor::MoveTo(cursor_col, status_row));
     let _ = stdout.flush();
 }
 
