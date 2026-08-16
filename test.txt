@@ -1,5 +1,0 @@
-1145141919810
-This is the GNU nano editor, but  rewrite in Rust-lang
-这是 GNU nano 的 Rust 重写版。
-,./;'[]\!@#$%%^&*(*)_+-=|
-~`
