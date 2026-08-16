@@ -49,5 +49,5 @@ fn draw_bars_works() {
     setup();
     nano_rs::winio::titlebar(None);
     nano_rs::winio::statusbar("test message");
-    nano_rs::winio::bottombars();
+    nano_rs::winio::bottombars(nano_rs::definitions::MMAIN);
 }

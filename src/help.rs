@@ -316,7 +316,7 @@ pub fn show_help() {
         g.currmenu = MHELP;
     });
 
-    winio::bottombars();
+    winio::bottombars(with_global(|g| g.currmenu));
 
     /* 从帮助文本头部提取标题。 */
     let help_text = with_global(|g| g.help_text.clone()).unwrap_or_default();
@@ -375,7 +375,7 @@ pub fn show_help() {
             Some(FunctionId::DoSearchForward) | Some(FunctionId::DoSearchBackward)
             | Some(FunctionId::DoFindNext) | Some(FunctionId::DoFindPrevious) => {
                 crate::prompt::run_function(function.unwrap());
-                winio::bottombars();
+                winio::bottombars(with_global(|g| g.currmenu));
             }
             Some(FunctionId::DoFullRefresh) => winio::full_refresh(),
             Some(FunctionId::DoExit) => break,
@@ -421,7 +421,7 @@ pub fn show_help() {
     if no_help_or_zero {
         winio::window_init();
     }
-    winio::bottombars();
+    winio::bottombars(with_global(|g| g.currmenu));
     winio::titlebar(None);
     winio::edit_refresh();
 }

@@ -196,3 +196,19 @@ fn statusbar_backspace_and_delete_remove_chars() {
     nano_rs::prompt::handle_editing(FunctionId::DoDelete);
     assert_eq!(nano_rs::prompt::get_answer(), "ac.txt", "Delete 应删除光标处字符");
 }
+
+/// bottombars(menu) 应把当前菜单切到该菜单（对应 C 的 bottombars 内部 currmenu = menu）。
+#[test]
+fn bottombars_switches_currmenu() {
+    nano_rs::global::global_init();
+    nano_rs::global::shortcut_init();
+    with_global_mut(|g| {
+        g.COLS = 80;
+        g.LINES = 24;
+        g.currmenu = MMAIN;
+    });
+    nano_rs::winio::bottombars(MWRITEFILE);
+    assert_eq!(with_global(|g| g.currmenu), MWRITEFILE, "bottombars(MWRITEFILE) 应切换当前菜单");
+    nano_rs::winio::bottombars(MMAIN);
+    assert_eq!(with_global(|g| g.currmenu), MMAIN, "bottombars(MMAIN) 应切回主菜单");
+}

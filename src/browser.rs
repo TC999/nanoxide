@@ -445,7 +445,7 @@ pub fn browse(path: &str) -> Option<String> {
         } else {
             loop {
                 with_global_mut(|g| g.lastmessage = MessageType::Vacuum);
-                winio::bottombars();
+                winio::bottombars(with_global(|g| g.currmenu));
 
                 /* 列表本身或选中文件变化时显示列表。 */
                 let selected = get_selected();

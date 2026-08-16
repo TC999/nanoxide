@@ -494,7 +494,7 @@ pub fn acquire_an_answer(
                 if let Some(rf) = refresh_func {
                     rf();
                 }
-                winio::bottombars();
+                winio::bottombars(with_global(|g| g.currmenu));
             }
         } else if function == Some(FunctionId::DoNothing) {
             /* 忽略。 */
@@ -638,8 +638,8 @@ pub fn do_prompt(
     let was_typing_x = get_typing_x();
     let saved_prompt = with_global(|g| g.prompt.clone());
 
-    winio::bottombars();
-    with_global_mut(|g| g.currmenu = menu);
+    /* 立即切换到该菜单的底部快捷键（对应 C 的 bottombars(menu)）。 */
+    winio::bottombars(menu);
 
     if get_answer() != provided {
         set_answer(provided);
@@ -664,6 +664,8 @@ pub fn do_prompt(
 
     /* 恢复之前的提示和可能的输入位置。 */
     with_global_mut(|g| g.prompt = saved_prompt);
+    /* 提示结束，切回主菜单（对应 C 中主循环用 MMAIN 恢复底部快捷键）。 */
+    with_global_mut(|g| g.currmenu = MMAIN);
     if function == Some(FunctionId::DoCancel) || function == Some(FunctionId::DoEnter)
         || function == Some(FunctionId::ToFirstFile) || function == Some(FunctionId::ToLastFile)
         || function == Some(FunctionId::DoFirstLine) || function == Some(FunctionId::DoLastLine)

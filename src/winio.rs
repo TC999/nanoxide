@@ -445,7 +445,10 @@ pub fn wipe_statusbar() {
 }
 
 /// 显示底部栏快捷键。
-pub fn bottombars() {
+/// 在底部两行显示指定菜单的快捷键，并把当前菜单设为该菜单
+/// （对应 C 的 `bottombars(menu)`，内部先 `currmenu = menu`）。
+pub fn bottombars(menu: i32) {
+    with_global_mut(|g| g.currmenu = menu);
     let mut stdout = io::stdout();
     let cols = with_global(|g| g.COLS);
     let lines = with_global(|g| g.LINES);
@@ -1027,7 +1030,8 @@ pub fn full_refresh() {
 /// （对应 `draw_all_subwindows`）。
 pub fn draw_all_subwindows() {
     edit_refresh();
-    bottombars();
+    let menu = with_global(|g| g.currmenu);
+    bottombars(menu);
 }
 
 /// 滚动方向枚举（对应 winio.c 的 `update_type` 中 FORWARD/BACKWARD 用法）。
