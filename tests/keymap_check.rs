@@ -20,7 +20,7 @@ fn arrow_keys_map_correctly() {
     assert_eq!(tc(key(KeyCode::End)), nano_rs::definitions::KEY_END);
     assert_eq!(tc(key(KeyCode::Delete)), nano_rs::definitions::KEY_DC);
     assert_eq!(tc(key(KeyCode::Backspace)), nano_rs::definitions::KEY_BACKSPACE);
-    assert_eq!(tc(key(KeyCode::Enter)), nano_rs::definitions::KEY_ENTER);
+    assert_eq!(tc(key(KeyCode::Enter)), 13, "主键盘 Enter 应译为 CR(13)");
     assert_eq!(tc(key(KeyCode::Char('a'))), 97);
     assert_eq!(tc(key(KeyCode::Char(' '))), 32);
 }
@@ -121,3 +121,33 @@ fn no_welcome_message_with_content_or_name() {
     nano_rs::text::inject(b"hello", 5);
     assert!(!nano_rs::nano::show_welcome_message());
 }
+
+/// 提示菜单中 Enter/Esc/^C 的映射（对应 C 的 MMOST ^M 与取消键）。
+#[test]
+fn prompt_enter_and_cancel_keys() {
+    use nano_rs::definitions::*;
+    nano_rs::global::global_init();
+    nano_rs::global::shortcut_init();
+
+    let enter = nano_rs::global::find_shortcut(13, MWRITEFILE).map(|k| k.borrow().func);
+    assert_eq!(enter, Some(FunctionId::DoEnter), "写入提示中 Enter 应为确认");
+
+    let esc = nano_rs::global::find_shortcut(27, MWRITEFILE).map(|k| k.borrow().func);
+    assert_eq!(esc, Some(FunctionId::DoCancel), "写入提示中 Esc 应为取消");
+
+    let cc = nano_rs::global::find_shortcut(3, MWRITEFILE).map(|k| k.borrow().func);
+    assert_eq!(cc, Some(FunctionId::DoCancel), "写入提示中 ^C 应为取消");
+
+    // 搜索提示中 Enter 仍是"搜索"（不被通用 ^M 覆盖）
+    let w = nano_rs::global::find_shortcut(13, MWHEREIS).map(|k| k.borrow().func);
+    assert_eq!(w, Some(FunctionId::DoSearchForward));
+}
+
+/// 主键盘 Enter 键应译为 13（'\r'），与 C 的 wgetch 一致。
+#[test]
+fn enter_key_translates_to_cr() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let ev = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(nano_rs::winio::translate_keycode(ev), 13);
+}
+

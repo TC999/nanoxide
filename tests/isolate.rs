@@ -107,3 +107,38 @@ fn nonexistent_file_startup_no_panic() {
     let cur = with_global(|g| g.openfile.as_ref().unwrap().borrow().current.clone());
     assert!(cur.is_some());
 }
+
+/// write_it_out 应把缓冲区写到指定文件、清除修改标记（对应 files.c write_file 核心）。
+#[test]
+fn write_it_out_saves_file() {
+    setup();
+    nano_rs::text::inject(b"hello world", 11);
+    let path = std::env::temp_dir().join(format!("nano_rs_test_{}.txt", std::process::id()));
+    let ps = path.to_str().unwrap().to_string();
+    with_global_mut(|g| {
+        let of = g.openfile.as_ref().unwrap().clone();
+        of.borrow_mut().filename = Some(ps);
+    });
+    let n = nano_rs::files::write_it_out(false, true);
+    assert!(n > 0, "保存应返回写入字节数");
+    let content = std::fs::read_to_string(&path).expect("文件应已写入");
+    assert_eq!(content, "hello world\n");
+    let modified = with_global(|g| g.openfile.as_ref().unwrap().borrow().modified);
+    assert!(!modified, "保存后应清除修改标记");
+    let _ = std::fs::remove_file(&path);
+}
+
+/// "Write to File" 提示栏应显示前缀与可编辑的回答（不崩溃）。
+#[test]
+fn write_file_promptbar_displays() {
+    nano_rs::global::global_init();
+    with_global_mut(|g| {
+        g.COLS = 80;
+        g.LINES = 24;
+        g.prompt = Some("Write to File".to_string());
+        g.answer = Some("test_wo.txt".to_string());
+    });
+    nano_rs::prompt::draw_the_promptbar();
+    assert_eq!(nano_rs::prompt::get_answer(), "test_wo.txt");
+    assert_eq!(with_global(|g| g.prompt.clone()), Some("Write to File".to_string()));
+}

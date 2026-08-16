@@ -136,8 +136,7 @@ pub fn find_shortcut_by_func(func: FunctionId) -> Option<KeyRef> {
             current = s.borrow().next.clone();
         }
         None
-    });
-    None // 防止借用问题，实际需要遍历
+    })
 }
 
 /// 查找快捷键。
@@ -152,8 +151,7 @@ pub fn find_shortcut(keycode: i32, menu: i32) -> Option<KeyRef> {
             current = s_ref.next.clone();
         }
         None
-    });
-    None
+    })
 }
 
 /// 获取所有快捷键的迭代器。
@@ -166,8 +164,7 @@ pub fn iter_shortcuts() -> Vec<KeyRef> {
             current = s.borrow().next.clone();
         }
         result
-    });
-    Vec::new()
+    })
 }
 
 /// 获取所有函数的迭代器。
@@ -180,8 +177,7 @@ pub fn iter_funcs() -> Vec<FuncRef> {
             current = f.borrow().next.clone();
         }
         result
-    });
-    Vec::new()
+    })
 }
 
 /// 设置是否在 VT 终端上。
@@ -247,6 +243,10 @@ pub fn shortcut_init() {
     add_to_sclist(MREPLACE, r"^C", 3, FunctionId::DoCancel, 0);
     add_to_sclist(MREPLACE, r"^R", 18, FunctionId::DoToggleRegexp, 0);
     add_to_sclist(MREPLACE, r"^B", 2, FunctionId::DoToggleBackwards, 0);
+    // 通用提示快捷键（对应 C 的 MMOST|MBROWSER ^M、取消 ^C 与 Esc）
+    add_to_sclist(MMOST | MBROWSER, r"^M", 13, FunctionId::DoEnter, 0);
+    add_to_sclist((MMOST & !MMAIN) | MYESNO, r"^C", 3, FunctionId::DoCancel, 0);
+    add_to_sclist((MMOST & !MMAIN) | MYESNO, "Cancel", ESC_CODE as i32, FunctionId::DoCancel, 0);
     // YesNo 菜单
     add_to_sclist(MYESNO, "Y", 121, FunctionId::None, 0);
     add_to_sclist(MYESNO, "N", 110, FunctionId::None, 0);

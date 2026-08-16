@@ -7,6 +7,7 @@
 //! 转换说明：使用 `std::fs` 和 `std::io` 替代 C 文件 API。
 
 use crate::definitions::*;
+use crate::winio;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::fs;
@@ -120,71 +121,123 @@ pub fn open_buffer(filename: &str) -> bool {
     }
 }
 
-/// 将缓冲区写入文件（对应 files.c 的 `write_it_out`）。
-pub fn write_it_out(_finalize: bool, _mark_only: bool) -> i32 {
-    let result = with_global_mut(|g| {
+/// 将缓冲区写入给定文件（对应 files.c 的 `write_file` 核心）。
+/// 成功返回写入字节数；失败返回 -1。
+fn save_to(answer: &str) -> i32 {
+    /* 收集所有行数据（排除末尾魔法行）。 */
+    let lines = with_global(|g| {
         let openfile = g.openfile.clone();
-        if let Some(of) = openfile {
-            let of_ref = of.borrow();
-            let filename = of_ref.filename.clone().unwrap_or_default();
-            if filename.is_empty() {
-                return -1;
-            }
-
-            /* 收集所有行数据（排除末尾魔法行）。 */
-            let mut lines: Vec<String> = Vec::new();
-            let mut current = of_ref.filetop.clone();
-            while let Some(c) = current {
-                let data = c.borrow().data.clone();
-                lines.push(data);
-                let next = c.borrow().next.clone();
-                current = next;
-            }
-
-            /* 魔法行：末尾的空行（非唯一行时）不写入。 */
-            if lines.len() > 1 && lines.last().map(|s| s.is_empty()).unwrap_or(false) {
-                lines.pop();
-            }
-
-            let mut content = String::new();
-            let last = lines.len().saturating_sub(1);
-            for (i, l) in lines.iter().enumerate() {
-                content.push_str(l);
-                /* 每行以换行结尾；NO_NEWLINES 时末行不加。 */
-                if i < last || !ISSET(NO_NEWLINES) {
-                    content.push('\n');
+        match openfile {
+            Some(of) => {
+                let of_ref = of.borrow();
+                let mut lines: Vec<String> = Vec::new();
+                let mut current = of_ref.filetop.clone();
+                while let Some(c) = current {
+                    let data = c.borrow().data.clone();
+                    lines.push(data);
+                    let next = c.borrow().next.clone();
+                    current = next;
                 }
+                lines
             }
-
-            match fs::write(&filename, &content) {
-                Ok(_) => {
-                    drop(of_ref);
-                    of.borrow_mut().modified = false;
-                    content.len() as i32
-                }
-                Err(e) => {
-                    set_statusbar_message(&format!("Error writing {}: {}", filename, e));
-                    -1
-                }
-            }
-        } else {
-            -1
+            None => Vec::new(),
         }
     });
-    result
+
+    if lines.is_empty() {
+        return -1;
+    }
+
+    /* 魔法行：末尾的空行（非唯一行时）不写入。 */
+    let mut lines = lines;
+    if lines.len() > 1 && lines.last().map(|s| s.is_empty()).unwrap_or(false) {
+        lines.pop();
+    }
+
+    let mut content = String::new();
+    let last = lines.len().saturating_sub(1);
+    for (i, l) in lines.iter().enumerate() {
+        content.push_str(l);
+        /* 每行以换行结尾；NO_NEWLINES 时末行不加。 */
+        if i < last || !ISSET(NO_NEWLINES) {
+            content.push('\n');
+        }
+    }
+
+    match fs::write(answer, &content) {
+        Ok(_) => {
+            /* 保存成功：更新文件名、清除修改标记（对应 write_file 的收尾）。 */
+            with_global_mut(|g| {
+                if let Some(of) = &g.openfile {
+                    let mut of_ref = of.borrow_mut();
+                    of_ref.modified = false;
+                    if !answer.is_empty() {
+                        of_ref.filename = Some(answer.to_string());
+                    }
+                }
+            });
+            let linecount = lines.len();
+            let msg = if linecount == 1 {
+                format!("Wrote {} line", linecount)
+            } else {
+                format!("Wrote {} lines", linecount)
+            };
+            winio::statusline(MessageType::Remark, &msg);
+            content.len() as i32
+        }
+        Err(e) => {
+            winio::statusline(MessageType::Ahem, &format!("Error writing {}: {}", answer, e));
+            -1
+        }
+    }
 }
 
-/// 写入文件（用户交互版；对应 `do_writeout`）。
+/// 将缓冲区写入文件（无提示直接保存；对应 files.c `write_file`，供紧急保存）。
+pub fn write_it_out(_finalize: bool, _mark_only: bool) -> i32 {
+    let filename = with_global(|g| {
+        g.openfile
+            .as_ref()
+            .and_then(|of| of.borrow().filename.clone())
+            .unwrap_or_default()
+    });
+    if filename.is_empty() {
+        return -1;
+    }
+    save_to(&filename)
+}
+
+/// 写入文件（对应 files.c 的 `do_writeout`）：在状态栏显示
+/// "Write to File: <文件名>" 提示，冒号右侧可编辑要保存的文件名；
+/// 运行时不带文件名参数则提示处为空，直接输入新文件名即可。
 pub fn do_writeout() {
     let filename = with_global(|g| {
-        g.openfile.as_ref().and_then(|of| of.borrow().filename.clone()).unwrap_or_default()
+        g.openfile
+            .as_ref()
+            .and_then(|of| of.borrow().filename.clone())
+            .unwrap_or_default()
     });
-    if !filename.is_empty() {
-        /* 注意：write_it_out 内部访问 GLOBAL，不能在 with_global_mut 闭包内调用。 */
-        write_it_out(true, false);
-    } else {
-        set_statusbar_message("No filename to write");
+
+    /* 对应 C：do_prompt(MWRITEFILE, given, NULL, edit_refresh, "Write to File")。
+     * prompt 栏显示 "Write to File: <回答>"，可编辑；Enter 保存，Esc 取消。 */
+    let response = crate::prompt::do_prompt(
+        MWRITEFILE,
+        &filename,
+        None,
+        Some(winio::edit_refresh),
+        "Write to File",
+    );
+
+    if response < 0 {
+        winio::statusbar("Cancelled");
+        return;
     }
+
+    let answer = crate::prompt::get_answer();
+    if answer.is_empty() {
+        return;
+    }
+
+    save_to(&answer);
 }
 
 /// 获取下一个可用文件名（用于紧急保存）。

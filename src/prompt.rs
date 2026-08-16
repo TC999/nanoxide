@@ -24,11 +24,11 @@ use std::rc::Rc;
 
 // ======================== 回答与提示的全局访问 ========================
 
-fn get_answer() -> String {
+pub fn get_answer() -> String {
     with_global(|g| g.answer.clone().unwrap_or_default())
 }
 
-fn set_answer(s: &str) {
+pub fn set_answer(s: &str) {
     with_global_mut(|g| g.answer = Some(s.to_string()));
 }
 

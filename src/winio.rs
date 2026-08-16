@@ -118,7 +118,7 @@ pub fn translate_keycode(key: KeyEvent) -> i32 {
                 c as i32
             }
         }
-        KeyCode::Enter => KEY_ENTER,
+        KeyCode::Enter => 13, /* 主键盘 Enter 对应 '\r'（与 C 的 wgetch 一致） */
         KeyCode::Backspace => KEY_BACKSPACE,
         KeyCode::Tab => '\t' as i32,
         KeyCode::BackTab => KEY_BTAB,
