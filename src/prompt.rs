@@ -554,7 +554,7 @@ pub fn changes_something(_func: FunctionId) -> bool {
 }
 
 /// 运行一个函数（对应 C 中 `function()` 调用）。
-fn run_function(func: FunctionId) {
+pub fn run_function(func: FunctionId) {
     use crate::cut;
     use crate::movement;
     use crate::nano;

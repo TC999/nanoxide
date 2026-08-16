@@ -288,3 +288,27 @@ pub fn shortcut_init() {
     add_to_funcs(FunctionId::DoEnter, MMAIN, "Enter", "enter_gist", true);
     add_to_funcs(FunctionId::DoTab, MMAIN, "Tab", "tab_gist", true);
 }
+// ======================== 按键解释（对应 global.c） ========================
+
+/// 将按键码解释为函数（对应 `interpret`）。
+pub fn interpret(kbinput: i32) -> Option<FunctionId> {
+    let currmenu = with_global(|g| g.currmenu);
+    find_shortcut(kbinput, currmenu).map(|s| s.borrow().func)
+}
+
+/// 未绑定按键的提示（对应 `unbound_key`）。
+pub fn unbound_key(kbinput: i32) {
+    if kbinput >= 0 {
+        use crate::winio;
+        winio::statusline(
+            crate::definitions::MessageType::Ahem,
+            "Unbound key",
+        );
+        winio::beep();
+    }
+}
+
+/// 返回 flag 的简短名称（对应 `epithet_of_flag`）。
+pub fn epithet_of_flag(_flag: i32) -> &'static str {
+    "toggle"
+}

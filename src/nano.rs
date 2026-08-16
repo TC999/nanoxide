@@ -565,3 +565,56 @@ pub fn in_restricted_mode() -> bool {
         false
     }
 }
+// ======================== 缓冲区管理（对应 nano.c） ========================
+
+/// 创建新缓冲区并把它设为当前（对应 `make_new_buffer`）。
+pub fn make_new_buffer() {
+    let new_of = Rc::new(RefCell::new(OpenFileStruct::new()));
+    let line = make_new_node(None);
+    new_of.borrow_mut().filetop = Some(line.clone());
+    new_of.borrow_mut().filebot = Some(line.clone());
+    new_of.borrow_mut().current = new_of.borrow().filetop.clone();
+    new_of.borrow_mut().edittop = new_of.borrow().filetop.clone();
+    new_of.borrow_mut().totsize = 1;
+
+    with_global_mut(|g| {
+        let old = g.openfile.clone();
+        match old {
+            None => g.openfile = Some(new_of),
+            Some(o) => {
+                let next = { let r = o.borrow(); r.next.clone() };
+                let prev = { let r = o.borrow(); r.prev.clone() };
+                new_of.borrow_mut().next = next.clone();
+                new_of.borrow_mut().prev = prev;
+                if let Some(n) = &next {
+                    n.borrow_mut().prev = Some(Rc::downgrade(&new_of));
+                }
+                o.borrow_mut().next = Some(new_of.clone());
+                new_of.borrow_mut().prev = Some(Rc::downgrade(&o));
+                g.openfile = Some(new_of);
+            }
+        }
+    });
+}
+
+/// 关闭当前缓冲区并回到前一个（对应 `close_buffer`）。
+pub fn close_buffer() {
+    with_global_mut(|g| {
+        let of = g.openfile.clone();
+        if let Some(cur) = of {
+            let prev = { let r = cur.borrow(); r.prev.clone() }.and_then(|w| w.upgrade());
+            let next = { let r = cur.borrow(); r.next.clone() };
+
+            /* 从循环链表摘除当前缓冲区。 */
+            if let Some(p) = &prev {
+                p.borrow_mut().next = next.clone();
+            }
+            if let Some(n) = &next {
+                n.borrow_mut().prev = prev.as_ref().map(|p| Rc::downgrade(p));
+            }
+
+            /* 回到前一个缓冲区；若无，则回到下一个。 */
+            g.openfile = prev.or(next);
+        }
+    });
+}

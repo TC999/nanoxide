@@ -470,6 +470,41 @@ pub struct OpenFileStruct {
     pub next: Option<OpenFileRef>, pub prev: Option<OpenFileWeak>,
 }
 
+impl OpenFileStruct {
+    /// 创建默认的空缓冲区结构。
+    pub fn new() -> Self {
+        OpenFileStruct {
+            filename: None,
+            filetop: None,
+            filebot: None,
+            edittop: None,
+            current: None,
+            totsize: 1,
+            firstcolumn: 0,
+            current_x: 0,
+            placewewant: 0,
+            brink: 0,
+            cursor_row: 0,
+            statinfo: None,
+            spillage_line: None,
+            mark: None,
+            mark_x: 0,
+            softmark: false,
+            fmt: FormatType::Unspecified,
+            lock_filename: None,
+            undotop: None,
+            current_undo: None,
+            last_saved: None,
+            last_action: UndoType::Other,
+            modified: false,
+            syntax: None,
+            errormessage: None,
+            next: None,
+            prev: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RcOption {
     pub name: &'static str, pub flag: i64,
@@ -496,6 +531,7 @@ pub struct CompletionStruct {
 // ======================== 安全全局状态 ========================
 
 /// 全局标志位容器。
+#[derive(Debug, Clone)]
 pub struct GlobalFlags {
     flags: [Flagword; 4],
 }
@@ -613,6 +649,10 @@ pub struct GlobalState {
     pub have_palette: bool,
     pub hilite_attribute: i32,
     pub syntaxstr: Option<String>,
+    pub help_text: Option<String>,
+    pub help_start_of_body: usize,
+    pub help_end_of_intro: usize,
+    pub help_location: usize,
     pub interface_color_pair: Vec<i32>,
     pub allfuncs: Option<FuncRef>,
     pub shortcuts: Option<KeyRef>,
@@ -665,6 +705,8 @@ impl GlobalState {
             have_palette: false,
             hilite_attribute: 0,
             syntaxstr: None,
+            help_text: None, help_start_of_body: 0, help_end_of_intro: 0,
+            help_location: 0,
             interface_color_pair: vec![0; NUMBER_OF_ELEMENTS],
             allfuncs: None, shortcuts: None, syntaxes: None,
             commandname: None, planted_shortcut: None,
