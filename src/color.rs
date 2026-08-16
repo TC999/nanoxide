@@ -7,7 +7,10 @@
 //! 转换说明：使用 crossterm 颜色 API 替代 ncurses。
 
 use crate::definitions::*;
+use crate::chars;
+use crate::winio;
 use crossterm::style::Color;
+use std::rc::Rc;
 
 /// 颜色常量。
 pub const A_NORMAL: i32 = 0;
@@ -124,4 +127,514 @@ pub fn color_number_to_name(color: i16) -> &'static str {
 pub fn prepare_color_pair(fg: i16, bg: i16, attributes: i32) -> i32 {
     // 组合颜色属性
     attributes | ((fg as i32 + 1) << 8) | ((bg as i32 + 1) << 12)
+}
+
+// ======================== 界面颜色对（对应 color.c） ========================
+
+/// 初始化 nano 界面元素的颜色对（对应 `set_interface_colorpairs`）。
+/// crossterm 架构下颜色对映射为属性值。
+pub fn set_interface_colorpairs_full() {
+    let mut defaults_allowed = false;
+    /* crossterm 无 use_default_colors 概念；默认颜色由 Color::Reset 表示。 */
+    let _ = defaults_allowed;
+
+    let elements = with_global(|g| g.color_combo.clone());
+
+    for (index, combo) in elements.iter().enumerate() {
+        if let Some(c) = combo {
+            let c = c.borrow();
+            let mut fg = c.fg;
+            let mut bg = c.bg;
+            /* 若不允许默认颜色，把 THE_DEFAULT 替换为黑白。 */
+            if fg == THE_DEFAULT as i16 {
+                fg = 7; // COLOR_WHITE
+            }
+            if bg == THE_DEFAULT as i16 {
+                bg = 0; // COLOR_BLACK
+            }
+            init_pair(index as i16 + 1, fg, bg);
+            set_interface_color_pair(index, COLOR_PAIR(index as i32 + 1) | c.attributes);
+            with_global_mut(|g| g.rescind_colors = false);
+        } else {
+            if index == FUNCTION_TAG || index == SCROLL_BAR {
+                set_interface_color_pair(index, A_NORMAL);
+            } else if index == GUIDE_STRIPE {
+                set_interface_color_pair(index, A_REVERSE);
+            } else if index == SPOTLIGHTED {
+                init_pair(index as i16 + 1, 0, 3 + if 16 > 15 { 8 } else { 0 });
+                set_interface_color_pair(index, COLOR_PAIR(index as i32 + 1));
+            } else if index == MINI_INFOBAR || index == PROMPT_BAR {
+                let tb = with_global(|g| g.interface_color_pair[TITLE_BAR]);
+                set_interface_color_pair(index, tb);
+            } else if index == ERROR_MESSAGE {
+                init_pair(index as i16 + 1, 7, 1);
+                set_interface_color_pair(index, COLOR_PAIR(index as i32 + 1) | A_BOLD);
+            } else {
+                let ha = with_global(|g| g.hilite_attribute);
+                set_interface_color_pair(index, ha);
+            }
+        }
+    }
+
+    /* 清理 color_combo。 */
+    with_global_mut(|g| g.color_combo = vec![None; NUMBER_OF_ELEMENTS]);
+
+    if with_global(|g| g.rescind_colors) {
+        set_interface_color_pair(SPOTLIGHTED, A_REVERSE);
+        set_interface_color_pair(ERROR_MESSAGE, A_REVERSE);
+    }
+}
+
+/// 为给定语法中的每个前景/背景颜色组合分配对编号，相同组合用相同编号
+/// （对应 `set_syntax_colorpairs`）。
+pub fn set_syntax_colorpairs(sntx: &SyntaxRef) {
+    let mut number = NUMBER_OF_ELEMENTS as i16;
+
+    /* 收集颜色列表。 */
+    let colors: Vec<ColorRef> = {
+        let mut v = Vec::new();
+        let mut cur = sntx.borrow().color.clone();
+        while let Some(c) = cur {
+            v.push(c.clone());
+            let next = { let r = c.borrow(); r.next.clone() };
+            cur = next;
+        }
+        v
+    };
+
+    for ink in &colors {
+        {
+            let mut ink_ref = ink.borrow_mut();
+            if ink_ref.fg == THE_DEFAULT as i16 {
+                ink_ref.fg = 7;
+            }
+            if ink_ref.bg == THE_DEFAULT as i16 {
+                ink_ref.bg = 0;
+            }
+        }
+
+        /* 找相同组合的旧颜色。 */
+        let mut older_pair: Option<i16> = None;
+        for older in &colors {
+            if Rc::ptr_eq(older, ink) {
+                break;
+            }
+            let o = older.borrow();
+            let i = ink.borrow();
+            if o.fg == i.fg && o.bg == i.bg {
+                older_pair = Some(o.pairnum);
+                break;
+            }
+        }
+
+        let mut ink_ref = ink.borrow_mut();
+        ink_ref.pairnum = match older_pair {
+            Some(p) => p,
+            None => {
+                number += 1;
+                number
+            }
+        };
+        let pn = ink_ref.pairnum;
+        ink_ref.attributes |= COLOR_PAIR(pn as i32);
+    }
+}
+
+/// 初始化当前语法的颜色对（对应 `prepare_palette`）。
+pub fn prepare_palette() {
+    let mut number = NUMBER_OF_ELEMENTS as i16;
+    let sntx = with_global(|g| {
+        g.openfile.as_ref().and_then(|of| of.borrow().syntax.clone())
+    });
+    let Some(sntx) = sntx else { return };
+
+    let colors: Vec<ColorRef> = {
+        let mut v = Vec::new();
+        let mut cur = sntx.borrow().color.clone();
+        while let Some(c) = cur {
+            v.push(c.clone());
+            let next = { let r = c.borrow(); r.next.clone() };
+            cur = next;
+        }
+        v
+    };
+
+    /* 为每个唯一对编号告诉渲染层颜色组合。 */
+    for ink in &colors {
+        let ink_ref = ink.borrow();
+        if ink_ref.pairnum > number {
+            init_pair(ink_ref.pairnum, ink_ref.fg, ink_ref.bg);
+            number = ink_ref.pairnum;
+        }
+    }
+
+    with_global_mut(|g| g.have_palette = true);
+}
+
+/// 尝试把给定字符串与 head 开始的列表中的某个正则匹配
+/// （对应 `found_in_list`）。
+pub fn found_in_list(head: Option<RegexListRef>, shibboleth: &str) -> bool {
+    let mut item = head;
+    while let Some(it) = item {
+        let matched = {
+            let r = it.borrow();
+            r.one_rgx.as_ref().map(|rgx| rgx.matches(shibboleth)).unwrap_or(false)
+        };
+        if matched {
+            return true;
+        }
+        let next = { let r = it.borrow(); r.next.clone() };
+        item = next;
+    }
+    false
+}
+
+/// 找到适用于当前缓冲区的语法，必要时加载并初始化
+/// （对应 `find_and_prime_applicable_syntax`）。
+pub fn find_and_prime_applicable_syntax() {
+    let mut sntx: Option<SyntaxRef> = None;
+    let inhelp = with_global(|g| g.inhelp);
+
+    /* 若 rc 文件未读或没有语法，退出。 */
+    let syntaxes = with_global(|g| g.syntaxes.clone());
+    if syntaxes.is_none() {
+        return;
+    }
+
+    /* 若指定了语法覆盖字符串，使用它。 */
+    let syntaxstr = with_global(|g| g.syntaxstr.clone());
+    if let Some(sstr) = &syntaxstr {
+        if sstr == "none" {
+            return;
+        }
+        let mut cur = syntaxes.clone();
+        while let Some(s) = cur {
+            let name_matches = {
+                let r = s.borrow();
+                r.name.as_ref().map(|n| n == sstr).unwrap_or(false)
+            };
+            if name_matches {
+                sntx = Some(s.clone());
+                break;
+            }
+            let next = { let r = s.borrow(); r.next.clone() };
+            cur = next;
+        }
+        if sntx.is_none() && !inhelp {
+            winio::statusline(MessageType::Alert, &format!("Unknown syntax name: {}", sstr));
+        }
+    }
+
+    /* 未指定覆盖或未匹配时，按文件名（扩展名）查找。 */
+    if sntx.is_none() && !inhelp {
+        let filename = with_global(|g| {
+            g.openfile.as_ref().and_then(|of| of.borrow().filename.clone())
+        });
+        if let Some(fname) = filename {
+            let fullname = crate::files::get_full_path(&fname)
+                .unwrap_or_else(|| fname.clone());
+            let mut cur = syntaxes.clone();
+            while let Some(s) = cur {
+                let found = {
+                    let r = s.borrow();
+                    found_in_list(r.extensions.clone(), &fullname)
+                };
+                if found {
+                    sntx = Some(s.clone());
+                    break;
+                }
+                let next = { let r = s.borrow(); r.next.clone() };
+                cur = next;
+            }
+        }
+    }
+
+    /* 文件名未匹配时，尝试首行。 */
+    if sntx.is_none() && !inhelp {
+        let firstline = with_global(|g| {
+            g.openfile.as_ref().and_then(|of| {
+                of.borrow().filetop.as_ref().map(|t| t.borrow().data.clone())
+            })
+        });
+        if let Some(fl) = firstline {
+            let mut cur = syntaxes.clone();
+            while let Some(s) = cur {
+                let found = {
+                    let r = s.borrow();
+                    found_in_list(r.headers.clone(), &fl)
+                };
+                if found {
+                    sntx = Some(s.clone());
+                    break;
+                }
+                let next = { let r = s.borrow(); r.next.clone() };
+                cur = next;
+            }
+        }
+    }
+
+    /* 全部未匹配时，寻找 default 语法。 */
+    if sntx.is_none() && !inhelp {
+        let mut cur = syntaxes.clone();
+        while let Some(s) = cur {
+            let is_default = {
+                let r = s.borrow();
+                r.name.as_ref().map(|n| n == "default").unwrap_or(false)
+            };
+            if is_default {
+                sntx = Some(s.clone());
+                break;
+            }
+            let next = { let r = s.borrow(); r.next.clone() };
+            cur = next;
+        }
+    }
+
+    /* 语法尚未加载时解析并初始化其颜色。 */
+    if let Some(s) = &sntx {
+        let needs_parse = { let r = s.borrow(); r.filename.is_some() };
+        if needs_parse {
+            set_syntax_colorpairs(s);
+        }
+    }
+
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            of.borrow_mut().syntax = sntx;
+        }
+    });
+}
+
+/// 判断多行正则的匹配是否仍然相同；不同则安排屏幕刷新
+/// （对应 `check_the_multis`）。
+pub fn check_the_multis(line: &LineRef) {
+    /* 若无语法或无多行正则，无事可做。 */
+    let (syntax, multiscore) = with_global(|g| {
+        g.openfile.as_ref().map(|of| {
+            let of = of.borrow();
+            let s = of.syntax.clone();
+            (s.clone(), s.as_ref().map(|s| s.borrow().multiscore).unwrap_or(0))
+        }).unwrap_or((None, 0))
+    });
+    let Some(syntax) = syntax else { return };
+    if multiscore == 0 {
+        return;
+    }
+
+    if line.borrow().multidata.is_none() {
+        with_global_mut(|g| g.refresh_needed = true);
+        return;
+    }
+
+    let colors: Vec<ColorRef> = {
+        let mut v = Vec::new();
+        let mut cur = syntax.borrow().color.clone();
+        while let Some(c) = cur {
+            v.push(c.clone());
+            let next = { let r = c.borrow(); r.next.clone() };
+            cur = next;
+        }
+        v
+    };
+
+    let line_data = line.borrow().data.clone();
+    let multidata = line.borrow().multidata.clone().unwrap_or_default();
+
+    for ink in &colors {
+        /* 若不是多行正则，跳过。 */
+        let ink_ref = ink.borrow();
+        if ink_ref.end.is_none() {
+            continue;
+        }
+        let id = ink_ref.id;
+
+        let astart = ink_ref.start.as_ref()
+            .and_then(|s| s.find_match_bytes(line_data.as_bytes()))
+            .map(|(_, eo)| eo)
+            .unwrap_or(0);
+        let astart_match = ink_ref.start.as_ref().map(|s| s.matches(&line_data)).unwrap_or(false);
+        let afterstart = if astart_match { astart } else { 0 };
+
+        let anend = ink_ref.end.as_ref()
+            .and_then(|e| e.find_match_bytes(&line_data.as_bytes()[afterstart..]))
+            .is_some();
+
+        let md = multidata.get(id as usize).copied().unwrap_or(0);
+        if md == NOTHING as i16 {
+            if !astart_match {
+                continue;
+            }
+        } else if md == WHOLELINE as i16 {
+            /* 确保检测到的 start 匹配不是实际上的 end 匹配。 */
+            let end_whole = ink_ref.end.as_ref()
+                .map(|e| e.find_match_bytes(line_data.as_bytes()).is_none())
+                .unwrap_or(true);
+            if !anend && (!astart_match || end_whole) {
+                continue;
+            }
+        } else if md == JUSTONTHIS as i16 {
+            if astart_match && anend {
+                let third = ink_ref.start.as_ref()
+                    .and_then(|s| s.find_match_bytes(&line_data.as_bytes()[afterstart + 0..]))
+                    .is_none();
+                if third {
+                    continue;
+                }
+            }
+        } else if md == STARTSHERE as i16 {
+            if astart_match && !anend {
+                continue;
+            }
+        } else if md == ENDSHERE as i16 {
+            if !astart_match && anend {
+                continue;
+            }
+        }
+
+        /* 不匹配：有变化，重绘。 */
+        with_global_mut(|g| {
+            g.refresh_needed = true;
+            g.perturbed = true;
+        });
+        return;
+    }
+}
+
+/// 预计算多行起始与结束正则信息以加速渲染
+/// （对应 `precalc_multicolorinfo`）。
+pub fn precalc_multicolorinfo() {
+    let (syntax, multiscore) = with_global(|g| {
+        g.openfile.as_ref().map(|of| {
+            let of = of.borrow();
+            let s = of.syntax.clone();
+            (s.clone(), s.as_ref().map(|s| s.borrow().multiscore).unwrap_or(0))
+        }).unwrap_or((None, 0))
+    });
+    let Some(syntax) = syntax else { return };
+    if multiscore == 0 || ISSET(NO_SYNTAX) {
+        return;
+    }
+
+    /* 为每行分配多行正则信息的缓存空间。 */
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            let mut of = of.borrow_mut();
+            let mut line = of.filetop.clone();
+            while let Some(l) = line {
+                if l.borrow().multidata.is_none() {
+                    l.borrow_mut().multidata = Some(vec![0; multiscore as usize]);
+                }
+                let next = { let r = l.borrow(); r.next.clone() };
+                line = next;
+            }
+        }
+    });
+
+    let colors: Vec<ColorRef> = {
+        let mut v = Vec::new();
+        let mut cur = syntax.borrow().color.clone();
+        while let Some(c) = cur {
+            v.push(c.clone());
+            let next = { let r = c.borrow(); r.next.clone() };
+            cur = next;
+        }
+        v
+    };
+
+    for ink in &colors {
+        /* 不是多行正则则跳过。 */
+        let ink_ref = ink.borrow();
+        if ink_ref.end.is_none() {
+            continue;
+        }
+        let (id, start_pat, end_pat) = (ink_ref.id, ink_ref.start.clone(), ink_ref.end.clone());
+        drop(ink_ref);
+
+        let lines: Vec<LineRef> = with_global(|g| {
+            let mut v = Vec::new();
+            let mut line = g.openfile.as_ref().unwrap().borrow().filetop.clone();
+            while let Some(l) = line {
+                v.push(l.clone());
+                let next = { let r = l.borrow(); r.next.clone() };
+                line = next;
+            }
+            v
+        });
+
+        let mut line_iter = 0;
+        while line_iter < lines.len() {
+            let line = &lines[line_iter];
+            let mut index = 0;
+            let data = line.borrow().data.clone();
+
+            /* 假设开始时不适用任何内容。 */
+            line.borrow_mut().multidata.as_mut().map(|m| m[id as usize] = NOTHING as i16);
+
+            /* 当行中有 start 匹配时，寻找 end；找到后标记所有受影响的行。 */
+            loop {
+                let startmatch = start_pat.as_ref()
+                    .and_then(|s| s.find_match_bytes(&data.as_bytes()[index..]))
+                    .map(|(so, eo)| (index + so, index + eo));
+                let Some((_, start_eo)) = startmatch else { break };
+
+                /* 在 start 匹配之后开始寻找 end 匹配。 */
+                index = start_eo;
+
+                /* 若同一行有 end 匹配，标记该行并继续找其他 start。 */
+                let endmatch = end_pat.as_ref()
+                    .and_then(|e| e.find_match_bytes(&data.as_bytes()[index..]))
+                    .map(|(so, eo)| (index + so, index + eo));
+                if let Some((_, end_eo)) = endmatch {
+                    line.borrow_mut().multidata.as_mut().map(|m| m[id as usize] = JUSTONTHIS as i16);
+                    index += end_eo;
+
+                    /* 若总匹配长度为零，强制前进。 */
+                    if start_eo - 0 + end_eo == 0 {
+                        /* 位于行尾时没有其他 start。 */
+                        if data.as_bytes().get(index).copied().unwrap_or(0) == 0 {
+                            break;
+                        }
+                        index = chars::step_right(data.as_bytes(), index);
+                    }
+                    continue;
+                }
+
+                /* 在后续行中寻找 end 匹配。 */
+                let mut tailline = line_iter + 1;
+                let mut tail_end_found = false;
+                while tailline < lines.len() {
+                    let tdata = lines[tailline].borrow().data.clone();
+                    if end_pat.as_ref().map(|e| e.find_match_bytes(tdata.as_bytes()).is_some()).unwrap_or(false) {
+                        tail_end_found = true;
+                        break;
+                    }
+                    tailline += 1;
+                }
+
+                line.borrow_mut().multidata.as_mut().map(|m| m[id as usize] = STARTSHERE as i16);
+
+                /* 把中间各行标记为 WHOLELINE。 */
+                for li in line_iter + 1..tailline {
+                    lines[li].borrow_mut().multidata.as_mut().map(|m| m[id as usize] = WHOLELINE as i16);
+                }
+
+                if !tail_end_found {
+                    /* 跳到文件末尾。 */
+                    line_iter = lines.len() - 1;
+                    break;
+                }
+
+                lines[tailline].borrow_mut().multidata.as_mut().map(|m| m[id as usize] = ENDSHERE as i16);
+
+                /* 在 end 匹配后寻找可能的新的 start。 */
+                let end_eo = end_pat.as_ref()
+                    .and_then(|e| e.find_match_bytes(lines[tailline].borrow().data.as_bytes()))
+                    .map(|(_, eo)| eo)
+                    .unwrap_or(0);
+                index = end_eo;
+            }
+
+            line_iter += 1;
+        }
+    }
 }
