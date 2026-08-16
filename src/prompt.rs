@@ -201,7 +201,7 @@ pub fn copy_the_answer() {
 }
 
 fn nano_free_lines(src: Option<LineRef>) {
-    crate::nano::free_lines(src);
+    crate::files::free_lines(src);
 }
 
 /// 把 cutbuffer 的第一行粘贴到当前回答（对应 `paste_into_answer`）。
@@ -560,7 +560,7 @@ pub fn changes_something(_func: FunctionId) -> bool {
 pub fn run_function(func: FunctionId) {
     use crate::cut;
     use crate::movement;
-    use crate::nano;
+    use crate::files;
     use crate::search;
     use crate::text;
     match func {
@@ -615,7 +615,7 @@ pub fn run_function(func: FunctionId) {
         FunctionId::DoJustify => {}
         _ => {}
     }
-    let _ = nano::set_modified;
+    let _ = files::set_modified;
 }
 
 // ======================== 提示问题（对应 do_prompt） ========================

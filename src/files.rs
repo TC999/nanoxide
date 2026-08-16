@@ -1,4 +1,4 @@
-﻿/**************************************************************************
+/**************************************************************************
  * files.rs  --  GNU nano 文件 I/O（对应 files.c）
  * 版权 (C) 1999-2026 Free Software Foundation, Inc.
  **************************************************************************/
@@ -445,5 +445,268 @@ fn canonicalize_safely(path: &str) -> Option<String> {
     match std::fs::canonicalize(path) {
         Ok(p) => Some(p.to_string_lossy().into_owned()),
         Err(_) => None,
+    }
+}
+// ======================== 行节点操作（对应 nano.c 的节点函数） ========================
+
+/// 将新节点插入既有 linestruct 链表中（对应 `splice_node`）。
+pub fn splice_node(afterthis: &LineRef, newnode: &LineRef) {
+    let after_next = { let r = afterthis.borrow(); r.next.clone() };
+
+    newnode.borrow_mut().next = after_next.clone();
+    newnode.borrow_mut().prev = Some(Rc::downgrade(afterthis));
+    if let Some(an) = &after_next {
+        an.borrow_mut().prev = Some(Rc::downgrade(newnode));
+    }
+    afterthis.borrow_mut().next = Some(newnode.clone());
+
+    /* 当节点插入到缓冲区末尾之后时…… */
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            let mut of = of.borrow_mut();
+            let is_filebot = of.filebot.as_ref().map(|b| Rc::ptr_eq(b, afterthis)).unwrap_or(false);
+            if is_filebot {
+                of.filebot = Some(newnode.clone());
+            }
+        }
+    });
+}
+
+/// 释放给定节点中的数据结构（对应 `delete_node`）。
+pub fn delete_node(line: &LineRef) {
+    /* 若屏幕首行被删除，后退一行。 */
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            let mut of = of.borrow_mut();
+            let is_edittop = of.edittop.as_ref().map(|e| Rc::ptr_eq(e, line)).unwrap_or(false);
+            if is_edittop {
+                let prev = { let r = line.borrow(); r.prev.clone() };
+                of.edittop = prev.and_then(|w| w.upgrade());
+            }
+            /* 若硬换行的溢出行被删除…… */
+            let is_spillage = of.spillage_line.as_ref().map(|s| Rc::ptr_eq(s, line)).unwrap_or(false);
+            if is_spillage {
+                of.spillage_line = None;
+            }
+        }
+    });
+    /* data 与 multidata 由 Rc 自动释放。 */
+}
+
+/// 将节点从链表中断开并删除（对应 `unlink_node`）。
+pub fn unlink_node(line: &LineRef) {
+    let (prev, next) = {
+        let r = line.borrow();
+        (r.prev.clone(), r.next.clone())
+    };
+
+    if let Some(p) = prev.as_ref().and_then(|w| w.upgrade()) {
+        p.borrow_mut().next = next.clone();
+    }
+    if let Some(n) = &next {
+        n.borrow_mut().prev = prev.clone();
+    }
+
+    /* 删除缓冲区末尾的节点时…… */
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            let mut of = of.borrow_mut();
+            let is_filebot = of.filebot.as_ref().map(|b| Rc::ptr_eq(b, line)).unwrap_or(false);
+            if is_filebot {
+                of.filebot = prev.as_ref().and_then(|w| w.upgrade());
+            }
+        }
+    });
+
+    delete_node(line);
+}
+
+/// 释放整条 linestruct 链表（对应 `free_lines`）。
+pub fn free_lines(src: Option<LineRef>) {
+    let mut src = match src {
+        Some(s) => s,
+        None => return,
+    };
+
+    loop {
+        let next = { let r = src.borrow(); r.next.clone() };
+        match next {
+            Some(n) => {
+                let prev = { let r = n.borrow(); r.prev.clone() };
+                if let Some(p) = prev.as_ref().and_then(|w| w.upgrade()) {
+                    delete_node(&p);
+                }
+                src = n;
+            }
+            None => break,
+        }
+    }
+
+    delete_node(&src);
+}
+
+/// 复制一个 linestruct 节点（对应 `copy_node`）。
+pub fn copy_node(src: &LineStruct) -> LineRef {
+    Rc::new(RefCell::new(LineStruct {
+        data: src.data.clone(),
+        lineno: src.lineno,
+        next: None,
+        prev: None,
+        multidata: None,
+        has_anchor: src.has_anchor,
+    }))
+}
+
+/// 复制整条 linestruct 链表（对应 `copy_buffer`）。
+pub fn copy_buffer(src: &LineRef) -> LineRef {
+    let head = copy_node(&src.borrow());
+    head.borrow_mut().prev = None;
+
+    let mut item = head.clone();
+    let mut srcline = { let r = src.borrow(); r.next.clone() };
+
+    while let Some(s) = srcline {
+        let newnode = copy_node(&s.borrow());
+        newnode.borrow_mut().prev = Some(Rc::downgrade(&item));
+        item.borrow_mut().next = Some(newnode.clone());
+
+        item = newnode;
+        srcline = { let r = s.borrow(); r.next.clone() };
+    }
+
+    item.borrow_mut().next = None;
+
+    head
+}
+
+/// 从给定行开始重新编号缓冲区中的行（对应 `renumber_from`）。
+pub fn renumber_from(line: &LineRef) {
+    let mut number = {
+        let prev = { let r = line.borrow(); r.prev.clone() };
+        match prev.and_then(|w| w.upgrade()) {
+            Some(p) => p.borrow().lineno,
+            None => 0,
+        }
+    };
+
+    let mut l = line.clone();
+    loop {
+        number += 1;
+        l.borrow_mut().lineno = number;
+        let next = { let r = l.borrow(); r.next.clone() };
+        match next {
+            Some(n) => l = n,
+            None => break,
+        }
+    }
+}
+
+// ======================== 缓冲区管理（对应 nano.c） ========================
+
+/// 创建新缓冲区并把它设为当前（对应 `make_new_buffer`）。
+pub fn make_new_buffer() {
+    let new_of = Rc::new(RefCell::new(OpenFileStruct::new()));
+    let line = make_new_node(None);
+    {
+        let mut of = new_of.borrow_mut();
+        of.filetop = Some(line.clone());
+        of.filebot = Some(line.clone());
+        of.current = of.filetop.clone();
+        of.edittop = of.filetop.clone();
+        of.totsize = 1;
+    }
+
+    with_global_mut(|g| {
+        let old = g.openfile.clone();
+        match old {
+            None => g.openfile = Some(new_of),
+            Some(o) => {
+                let next = { let r = o.borrow(); r.next.clone() };
+                let prev = { let r = o.borrow(); r.prev.clone() };
+                new_of.borrow_mut().next = next.clone();
+                new_of.borrow_mut().prev = prev;
+                if let Some(n) = &next {
+                    n.borrow_mut().prev = Some(new_of.clone());
+                }
+                o.borrow_mut().next = Some(new_of.clone());
+                new_of.borrow_mut().prev = Some(o.clone());
+                g.openfile = Some(new_of);
+            }
+        }
+    });
+}
+
+/// 关闭当前缓冲区并回到前一个（对应 `close_buffer`）。
+pub fn close_buffer() {
+    with_global_mut(|g| {
+        let of = g.openfile.clone();
+        if let Some(cur) = of {
+            let prev = { let r = cur.borrow(); r.prev.clone() };
+            let next = { let r = cur.borrow(); r.next.clone() };
+
+            /* 从双向链表摘除当前缓冲区。 */
+            if let Some(p) = &prev {
+                p.borrow_mut().next = next.clone();
+            }
+            if let Some(n) = &next {
+                n.borrow_mut().prev = prev.clone();
+            }
+
+            /* 回到前一个缓冲区；若无，则回到下一个。 */
+            g.openfile = prev.or(next);
+        }
+    });
+}
+
+/// 将当前缓冲区标记为已修改（对应 `set_modified`）。
+pub fn set_modified() {
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            of.borrow_mut().modified = true;
+        }
+    });
+    winio::titlebar(None);
+}
+
+/// 受限模式时显示警告并返回 TRUE，否则返回 FALSE
+/// （对应 `in_restricted_mode`）。
+pub fn in_restricted_mode() -> bool {
+    if ISSET(RESTRICTED) {
+        winio::statusline(MessageType::Ahem, "This function is disabled in restricted mode");
+        winio::beep();
+        true
+    } else {
+        false
+    }
+}
+
+/// 紧急保存所有缓冲区（对应 `emergency_save_all`）。
+pub fn emergency_save_all() {
+    let openfiles: Vec<OpenFileRef> = {
+        let mut result = Vec::new();
+        let mut current = with_global(|g| g.openfile.clone());
+        loop {
+            let next = match current {
+                Some(ref ofile) => {
+                    result.push(ofile.clone());
+                    ofile.borrow().next.clone()
+                }
+                None => break,
+            };
+            current = next;
+        }
+        result
+    };
+    for openfile in openfiles {
+        let filename = openfile.borrow().filename.clone().unwrap_or_default();
+        let plainname = if filename.is_empty() {
+            format!("nano.{}", std::process::id())
+        } else {
+            filename.clone()
+        };
+        let targetname = get_next_filename(&plainname, ".save");
+        if !targetname.is_empty() {
+            write_it_out(true, false);
+        }
     }
 }

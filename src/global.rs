@@ -392,3 +392,160 @@ pub fn shortcut_init_rest() {
     add_to_funcs(FunctionId::DoGotoDir, MBROWSER, "Go To Dir", "gotodir_gist", false);
     add_to_funcs(FunctionId::DoVerbatimInput, MMAIN, "Verbatim Input", "verbatim_gist", false);
 }
+
+// ======================== 命令行参数解析（对应 nano.c 的 main） ========================
+
+/// 解析命令行参数。
+/// 解析命令行选项（对应 C 的 getopt_long 循环）。
+/// GNU getopt 默认会重排 argv，因此选项可以出现在文件名之后；
+/// 这里记录第一个文件名，同时继续解析后续选项。
+pub fn parse_args(args: &[String]) -> Option<String> {
+    let mut i = 1;
+    let mut filename: Option<String> = None;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg.starts_with('-') {
+            match arg.as_str() {
+                "-V" | "--version" => {
+                    print_version();
+                    std::process::exit(0);
+                }
+                "-h" | "--help" => {
+                    print_usage();
+                    std::process::exit(0);
+                }
+                "-v" | "--view" => SET(VIEW_MODE),
+                "-x" | "--nohelp" => SET(NO_HELP),
+                "-S" | "--softwrap" => SET(SOFTWRAP),
+                "-m" | "--mouse" => SET(USE_MOUSE),
+                "-i" | "--autoindent" => SET(AUTOINDENT),
+                "-k" | "--cutfromcursor" => SET(CUT_FROM_CURSOR),
+                "-l" | "--linenumbers" => SET(LINE_NUMBERS),
+                "-b" | "--boldtext" => SET(BOLD_TEXT),
+                "-u" | "--unix" => SET(MAKE_IT_UNIX),
+                "-w" | "--nowrap" => SET(NO_WRAP),
+                "-c" | "--constantshow" => SET(CONSTANT_SHOW),
+                "-p" | "--preserve" => SET(PRESERVE),
+                "-A" | "--smarthome" => SET(SMART_HOME),
+                "-E" | "--tabstospaces" => SET(TABS_TO_SPACES),
+                "-Q" | "--quotestr" => {
+                    i += 1;
+                    if i < args.len() {
+                        // 设置引用字符串模式
+                    }
+                }
+                "-r" | "--fill" => {
+                    i += 1;
+                    if i < args.len() {
+                        if let Ok(f) = args[i].parse::<isize>() {
+                            with_global_mut(|g| g.fill = f);
+                        }
+                    }
+                }
+                "-T" | "--tabsize" => {
+                    i += 1;
+                    if i < args.len() {
+                        if let Ok(s) = args[i].parse::<usize>() {
+                            with_global_mut(|g| g.tabsize = s);
+                            set_tabsize_independent(s);
+                        }
+                    }
+                }
+                "-R" | "--restricted" => SET(RESTRICTED),
+                "-o" | "--operatingdir" => {
+                    i += 1;
+                    // 设置操作目录
+                }
+                "-f" | "--rcfile" => {
+                    i += 1;
+                    // 指定 rc 文件
+                }
+                "-K" | "--rebinddelete" => SET(REBIND_DELETE),
+                "-s" | "--speller" => {
+                    i += 1;
+                    // 设置拼写检查器
+                }
+                "-Y" | "--syntax" => {
+                    i += 1;
+                    // 设置语法
+                }
+                "-g" | "--positionlog" => SET(POSITIONLOG),
+                "-Z" | "--locking" => SET(LOCKING),
+                "-U" | "--quickblank" => SET(QUICK_BLANK),
+                "-j" | "--jumpyscrolling" => SET(JUMPY_SCROLLING),
+                "-e" | "--emptyline" => SET(EMPTY_LINE),
+                "-J" | "--guidestripe" => {
+                    i += 1;
+                    // 设置引导线
+                }
+                "-t" | "--saveonexit" => SET(SAVE_ON_EXIT),
+                "-0" | "--zero" => SET(ZERO),
+                "-M" | "--modernbindings" => SET(MODERN_BINDINGS),
+                "-H" | "--historylog" => SET(HISTORYLOG),
+                "-B" | "--backup" => SET(MAKE_BACKUP),
+                "-C" | "--backupdir" => {
+                    i += 1;
+                    // 设置备份目录
+                }
+                "-I" | "--insecurebackup" => SET(INSECURE_BACKUP),
+                "-N" | "--noconvert" => SET(NO_CONVERT),
+                "-L" | "--nonewlines" => SET(NO_NEWLINES),
+                "-X" | "--wordbounds" => SET(WORD_BOUNDS),
+                "-W" | "--whitespacedisplay" => SET(WHITESPACE_DISPLAY),
+                "-O" | "--colonparsing" => SET(COLON_PARSING),
+                "-F" | "--multibuffer" => SET(NEW_BUFFER),
+                _ => {
+                    if arg == "--" {
+                        /* "--" 之后的参数都是文件名，不再解析选项。 */
+                        i += 1;
+                        if filename.is_none() {
+                            filename = args.get(i).cloned();
+                        }
+                        break;
+                    }
+                }
+            }
+        } else {
+            /* 文件名参数；继续解析后续选项（对应 GNU getopt 的重排）。 */
+            if filename.is_none() {
+                filename = Some(arg.clone());
+            }
+        }
+        i += 1;
+    }
+    filename
+}
+
+/// 打印版本信息。
+fn print_version() {
+    println!("nano-rs version {}", VERSION);
+    println!("(Rust translation of GNU nano)");
+    println!("Compiled options: --enable-utf8");
+}
+
+/// 打印使用说明。
+fn print_usage() {
+    println!("Usage: nano [OPTIONS] [FILE]");
+    println!("");
+    println!("GNU nano - a small, friendly text editor");
+    println!("");
+    println!("Basic options:");
+    println!("  -V, --version          Print version information");
+    println!("  -h, --help             Print this help message");
+    println!("  -v, --view             View mode (read-only)");
+    println!("  -x, --nohelp           Hide the help lines");
+    println!("  -S, --softwrap         Soft wrap lines");
+    println!("  -m, --mouse            Enable mouse");
+    println!("  -i, --autoindent       Auto-indent new lines");
+    println!("  -k, --cutfromcursor     Cut from cursor to end of line");
+    println!("  -l, --linenumbers      Show line numbers");
+    println!("  -b, --boldtext         Use bold text");
+    println!("  -u, --unix             Save in Unix format");
+    println!("  -w, --nowrap           Don't wrap long lines");
+    println!("  -c, --constantshow     Constantly show cursor position");
+    println!("  -p, --preserve         Preserve XON/XOFF");
+    println!("  -A, --smarthome        Smart home key");
+    println!("  -E, --tabstospaces     Convert typed tabs to spaces");
+    println!("  -T, --tabsize=N        Tab size (default 8)");
+    println!("  -r, --fill=N           Target width for wrap (default -2)");
+}

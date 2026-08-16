@@ -2,7 +2,7 @@
 
 use nano_rs::definitions::*;
 use nano_rs::global::global_init;
-use nano_rs::nano::make_new_buffer;
+use nano_rs::files::make_new_buffer;
 
 fn setup() {
     global_init();
@@ -116,9 +116,9 @@ fn full_key_sequence() {
     setup();
     make_three_lines();
     nano_rs::movement::to_first_line();
-    nano_rs::nano::handle_input_key('a' as i32);
-    nano_rs::nano::handle_input_key(nano_rs::definitions::KEY_DOWN);
-    nano_rs::nano::handle_input_key('x' as i32);
+    nano_rs::winio::handle_input_key('a' as i32);
+    nano_rs::winio::handle_input_key(nano_rs::definitions::KEY_DOWN);
+    nano_rs::winio::handle_input_key('x' as i32);
     // 第 1 行应有 a（保持目标列 1，x 插到第 2 行第 1 列）
     let line1 = with_global(|g| {
         g.openfile.as_ref().unwrap().borrow().filetop.as_ref().unwrap().borrow().data.clone()

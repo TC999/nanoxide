@@ -17,7 +17,7 @@
 use crate::definitions::*;
 use crate::chars;
 use crate::movement;
-use crate::nano;
+use crate::files;
 use crate::utils;
 use crate::winio;
 use std::rc::Rc;
@@ -145,10 +145,10 @@ pub fn expunge(action: UndoType) {
             current.borrow_mut().data = cdata;
         }
 
-        nano::unlink_node(&joining);
+        files::unlink_node(&joining);
 
         /* 连接了两行，需要重新编号并刷新屏幕。 */
-        nano::renumber_from(&current);
+        files::renumber_from(&current);
         with_global_mut(|g| g.refresh_needed = true);
 
         /* 调整文件大小。 */
@@ -164,7 +164,7 @@ pub fn expunge(action: UndoType) {
         return;
     }
 
-    nano::set_modified();
+    files::set_modified();
 }
 
 /// 删除光标下的字符及之后的零宽字符；
@@ -361,7 +361,7 @@ pub fn chop_word(forward: bool) {
     crate::text::update_undo(UndoType::Cut);
 
     /* 丢弃剪下的单词并恢复 cutbuffer。 */
-    nano::free_lines(with_global(|g| g.cutbuffer.clone()));
+    files::free_lines(with_global(|g| g.cutbuffer.clone()));
     with_global_mut(|g| g.cutbuffer = is_cutbuffer);
 }
 
@@ -565,7 +565,7 @@ pub fn extract_segment(top: &LineRef, top_x: usize, bot: &LineRef, bot_x: usize)
             cutbottom.borrow_mut().next = taken_next.clone();
         }
 
-        nano::delete_node(&taken);
+        files::delete_node(&taken);
 
         with_global_mut(|g| {
             g.inherited_anchor = inherited_anchor || taken_anchor;
@@ -598,7 +598,7 @@ pub fn extract_segment(top: &LineRef, top_x: usize, bot: &LineRef, bot_x: usize)
 
     /* 闭包外调用（避免持有 GLOBAL 借用）。 */
     let current = { let r = of.borrow(); r.current.clone().unwrap() };
-    nano::renumber_from(&current);
+    files::renumber_from(&current);
 
     /* 视口起点在被取区域内时，调整视口。 */
     if edittop_inside {
@@ -739,9 +739,9 @@ pub fn ingraft_buffer(topline: &LineRef) {
         });
     }
 
-    nano::delete_node(topline);
+    files::delete_node(topline);
 
-    nano::renumber_from(&line);
+    files::renumber_from(&line);
 
     /* 若文本不以换行结尾而应当有换行，则添加一个。 */
     let need_magicline = {
@@ -769,7 +769,7 @@ pub fn copy_from_buffer(somebuffer: &LineRef) {
         }).unwrap_or(0)
     });
 
-    let the_copy = nano::copy_buffer(somebuffer);
+    let the_copy = files::copy_buffer(somebuffer);
     ingraft_buffer(&the_copy);
 
     with_global_mut(|g| {
@@ -811,7 +811,7 @@ pub fn do_snip(marked: bool, until_eof: bool, append: bool) {
     }
     let keep_cutbuffer = with_global(|g| g.keep_cutbuffer);
     if (marked || until_eof || !keep_cutbuffer) && !append {
-        nano::free_lines(with_global(|g| g.cutbuffer.clone()));
+        files::free_lines(with_global(|g| g.cutbuffer.clone()));
         with_global_mut(|g| g.cutbuffer = None);
     }
 
@@ -881,7 +881,7 @@ pub fn do_snip(marked: bool, until_eof: bool, append: bool) {
     /* 行操作之后，后续操作应添加到 cutbuffer。 */
     with_global_mut(|g| g.keep_cutbuffer = !marked && !until_eof);
 
-    nano::set_modified();
+    files::set_modified();
     with_global_mut(|g| {
         g.refresh_needed = true;
         g.perturbed = true;
@@ -1026,7 +1026,7 @@ pub fn copy_marked_region() {
         let mut nodes = vec![tmp];
         let mut n = { let r = nodes[0].borrow(); r.next.clone() };
         // 无后继（我们只构造单节点）
-        nano::copy_buffer(&nodes[0])
+        files::copy_buffer(&nodes[0])
     };
 
     /* 恢复缓冲区的正确状态。 */
@@ -1074,7 +1074,7 @@ pub fn copy_text() {
     }
     let keep = with_global(|g| g.keep_cutbuffer);
     if !keep {
-        nano::free_lines(with_global(|g| g.cutbuffer.clone()));
+        files::free_lines(with_global(|g| g.cutbuffer.clone()));
         with_global_mut(|g| g.cutbuffer = None);
     }
 
@@ -1130,7 +1130,7 @@ pub fn copy_text() {
         if let Some(p) = cb_prev.as_ref().and_then(|w| w.upgrade()) {
             p.borrow_mut().next = Some(addition.clone());
         }
-        nano::delete_node(&cutbottom);
+        files::delete_node(&cutbottom);
         with_global_mut(|g| g.cutbottom = Some(addition.clone()));
     } else if ISSET(CUT_FROM_CURSOR) {
         with_global_mut(|g| {
@@ -1247,7 +1247,7 @@ pub fn paste_text() {
         }
     });
 
-    nano::set_modified();
+    files::set_modified();
     winio::wipe_statusbar();
     with_global_mut(|g| g.refresh_needed = true);
 }

@@ -16,7 +16,7 @@
 use crate::definitions::*;
 use crate::global;
 use crate::movement;
-use crate::nano;
+use crate::files;
 use crate::text;
 use crate::utils;
 use crate::winio;
@@ -176,7 +176,7 @@ pub fn wrap_help_text_into_buffer() {
     let mut ptr = start_of_body;
     let mut sum = 0;
 
-    nano::make_new_buffer();
+    files::make_new_buffer();
 
     /* 顶部确保有空白行（美学）。 */
     if !ISSET(MINIBAR) || !ISSET(EMPTY_LINE) {
@@ -422,7 +422,7 @@ pub fn show_help() {
     }
 
     /* 丢弃帮助文本缓冲区。 */
-    nano::close_buffer();
+    files::close_buffer();
 
     /* 恢复 flag 设置。 */
     with_global_mut(|g| {

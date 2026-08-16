@@ -50,7 +50,7 @@ fn arrow_keys_do_not_collide_with_ctrl_codes() {
 fn render_uses_current_buffer_data() {
     use nano_rs::definitions::*;
     nano_rs::global::global_init();
-    nano_rs::nano::make_new_buffer();
+    nano_rs::files::make_new_buffer();
     with_global_mut(|g| {
         g.COLS = 80;
         g.LINES = 24;
@@ -96,7 +96,7 @@ fn welcome_message_on_empty_buffer() {
 
     // 模拟 main 不带文件名：open_buffer("") → 空缓冲区、无文件名 → 显示欢迎消息
     nano_rs::files::open_buffer("");
-    assert!(nano_rs::nano::show_welcome_message());
+    assert!(nano_rs::winio::show_welcome_message());
 }
 
 /// 缓冲区有内容或带文件名时不应显示欢迎消息。
@@ -114,12 +114,12 @@ fn no_welcome_message_with_content_or_name() {
 
     // 带文件名（即使文件不存在，新文件分支也有名字）→ 不显示
     nano_rs::files::open_buffer("named_file.txt");
-    assert!(!nano_rs::nano::show_welcome_message());
+    assert!(!nano_rs::winio::show_welcome_message());
 
     // 无文件名但有内容 → 不显示
     nano_rs::files::open_buffer("");
     nano_rs::text::inject(b"hello", 5);
-    assert!(!nano_rs::nano::show_welcome_message());
+    assert!(!nano_rs::winio::show_welcome_message());
 }
 
 /// 提示菜单中 Enter/Esc/^C 的映射（对应 C 的 MMOST ^M 与取消键）。

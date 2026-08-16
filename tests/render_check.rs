@@ -2,7 +2,7 @@
 
 use nano_rs::definitions::*;
 use nano_rs::global::global_init;
-use nano_rs::nano::make_new_buffer;
+use nano_rs::files::make_new_buffer;
 
 fn setup() {
     global_init();

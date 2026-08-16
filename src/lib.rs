@@ -18,4 +18,3 @@ pub mod prompt;
 pub mod browser;
 pub mod winio;
 pub mod help;
-pub mod nano;

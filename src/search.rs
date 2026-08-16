@@ -11,7 +11,7 @@ use crate::chars;
 use crate::utils;
 use crate::history;
 use crate::global;
-use crate::nano;
+use crate::files;
 use crate::winio;
 use std::rc::Rc;
 
@@ -922,7 +922,7 @@ fn do_replace_loop(needle: &str, real_current: &LineRef, real_current_x: &mut us
 
             crate::color::check_the_multis(&of.borrow().current.clone().unwrap());
             with_global_mut(|g| g.refresh_needed = false);
-            nano::set_modified();
+            files::set_modified();
             with_global_mut(|g| g.as_an_at = true);
         set_as_an_at_independent(true);
             numreplaced += 1;

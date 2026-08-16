@@ -17,7 +17,7 @@ use crate::definitions::*;
 use crate::chars;
 use std::cell::RefCell;
 use crate::cut;
-use crate::nano;
+use crate::files;
 use crate::utils;
 use crate::winio;
 use std::rc::Rc;
@@ -320,7 +320,7 @@ pub fn do_indent() {
         line = next;
     }
 
-    nano::set_modified();
+    files::set_modified();
     ensure_firstcolumn_is_aligned();
     with_global_mut(|g| {
         g.refresh_needed = true;
@@ -372,7 +372,7 @@ pub fn do_unindent() {
         line = next;
     }
 
-    nano::set_modified();
+    files::set_modified();
     ensure_firstcolumn_is_aligned();
     with_global_mut(|g| {
         g.refresh_needed = true;
@@ -616,7 +616,7 @@ pub fn do_comment() {
         line = next;
     }
 
-    nano::set_modified();
+    files::set_modified();
     ensure_firstcolumn_is_aligned();
     with_global_mut(|g| {
         g.refresh_needed = true;
@@ -750,7 +750,7 @@ pub fn redo_cut(u: &UndoRef) {
 
     cut::do_snip(true, false, type_ == UndoType::Zap);
 
-    nano::free_lines(with_global(|g| g.cutbuffer.clone()));
+    files::free_lines(with_global(|g| g.cutbuffer.clone()));
     with_global_mut(|g| g.cutbuffer = oldcutbuffer);
 }
 
@@ -819,8 +819,8 @@ pub fn do_undo() {
                 let next_anchor = next.borrow().has_anchor;
                 let cur_anchor = l.borrow().has_anchor;
                 l.borrow_mut().has_anchor = cur_anchor || next_anchor;
-                nano::unlink_node(&next);
-                nano::renumber_from(l);
+                files::unlink_node(&next);
+                files::renumber_from(l);
                 let of = openfile_ref();
                 of.borrow_mut().current = Some(l.clone());
             }
@@ -857,8 +857,8 @@ pub fn do_undo() {
                 let strdata = u.borrow().strdata.clone().unwrap_or_default();
                 let intruder = make_new_node(Some(&*l.borrow()));
                 intruder.borrow_mut().data = strdata;
-                nano::splice_node(l, &intruder);
-                nano::renumber_from(&intruder);
+                files::splice_node(l, &intruder);
+                files::renumber_from(&intruder);
             }
             crate::search::goto_line_posx(head_lineno, head_x);
         }
@@ -1051,7 +1051,7 @@ fn finalize_undo(u: &UndoRef, undidmsg: Option<&str>, undoing: bool) {
         of.borrow_mut().modified = false;
         winio::titlebar(None);
     } else {
-        nano::set_modified();
+        files::set_modified();
     }
 }
 
@@ -1131,8 +1131,8 @@ pub fn do_redo() {
                 let strdata = u.borrow().strdata.clone().unwrap_or_default();
                 let intruder = make_new_node(Some(&*l.borrow()));
                 intruder.borrow_mut().data = strdata;
-                nano::splice_node(l, &intruder);
-                nano::renumber_from(&intruder);
+                files::splice_node(l, &intruder);
+                files::renumber_from(&intruder);
             }
             crate::search::goto_line_posx(head_lineno + 1, tail_x);
         }
@@ -1160,8 +1160,8 @@ pub fn do_redo() {
                 data.push_str(&strdata);
                 l.borrow_mut().data = data;
                 let next = { let r = l.borrow(); r.next.clone() }.unwrap();
-                nano::unlink_node(&next);
-                nano::renumber_from(l);
+                files::unlink_node(&next);
+                files::renumber_from(l);
                 let of = openfile_ref();
                 of.borrow_mut().current = Some(l.clone());
             }
@@ -1299,7 +1299,7 @@ fn finalize_redo(u: &UndoRef, redidmsg: Option<&str>) {
         of.borrow_mut().modified = false;
         winio::titlebar(None);
     } else {
-        nano::set_modified();
+        files::set_modified();
     }
 }
 
@@ -1473,7 +1473,7 @@ pub fn add_undo(action: UndoType, message: Option<&str>) {
             }
             UndoType::Paste => {
                 let cb = with_global(|g| g.cutbuffer.clone());
-                u.borrow_mut().cutbuffer = cb.map(|c| nano::copy_buffer(&c));
+                u.borrow_mut().cutbuffer = cb.map(|c| files::copy_buffer(&c));
                 /* Fall-through。 */
                 if Rc::ptr_eq(&thisline, &filebot) {
                     u.borrow_mut().xflags |= INCLUDED_LAST_LINE;
@@ -1647,7 +1647,7 @@ pub fn update_undo(action: UndoType) {
                 let cb = with_global(|g| g.cutbuffer.clone());
                 match cb {
                     Some(c) => {
-                        u.borrow_mut().cutbuffer = Some(nano::copy_buffer(&c));
+                        u.borrow_mut().cutbuffer = Some(files::copy_buffer(&c));
                     }
                     None => {}
                 }
@@ -1790,8 +1790,8 @@ pub fn do_enter() {
     add_undo(UndoType::Enter, None);
 
     /* 在当前行之后插入新创建的行并重新编号。 */
-    nano::splice_node(&current, &newnode);
-    nano::renumber_from(&newnode);
+    files::splice_node(&current, &newnode);
+    files::renumber_from(&newnode);
 
     /* 把光标放到新行上，在自动空白之后。 */
     {
@@ -1803,7 +1803,7 @@ pub fn do_enter() {
         of_ref.placewewant = utils::wideness(cur.borrow().data.as_bytes(), of_ref.current_x);
         of_ref.totsize += 1;
     }
-    nano::set_modified();
+    files::set_modified();
 
     if autoindent && !allblanks {
         let mut of_ref = of.borrow_mut();
@@ -2337,7 +2337,7 @@ pub fn inject(burst: &[u8], count: usize) {
         of_ref.current_x += count;
         of_ref.totsize += chars::mbstrlen(&burst_vec);
     }
-    nano::set_modified();
+    files::set_modified();
 
     /* 若文本添加到魔法行，创建新的魔法行。 */
     let is_filebot = with_global(|g| {

@@ -2,7 +2,7 @@
 
 use nano_rs::definitions::*;
 use nano_rs::global::global_init;
-use nano_rs::nano::make_new_buffer;
+use nano_rs::files::make_new_buffer;
 
 fn setup() {
     global_init();
@@ -32,7 +32,7 @@ fn current_x() -> usize {
 fn typing_sequence_handles_keys() {
     setup();
     for ch in ['h', 'e', 'l', 'l', 'o'] {
-        nano_rs::nano::handle_input_key(ch as i32);
+        nano_rs::winio::handle_input_key(ch as i32);
     }
     assert_eq!(current_text(), "hello");
     assert_eq!(current_x(), 5);
@@ -49,7 +49,7 @@ fn right_arrow_moves_cursor_only() {
         of.borrow_mut().current_x = 0;
     });
     // 按右箭头
-    let handled = nano_rs::nano::handle_input_key(KEY_RIGHT);
+    let handled = nano_rs::winio::handle_input_key(KEY_RIGHT);
     assert!(handled, "右箭头应被处理");
     assert_eq!(current_x(), 1, "右箭头应右移光标");
     assert_eq!(current_text(), "abc", "右箭头不应改变文本");
@@ -60,7 +60,7 @@ fn right_arrow_moves_cursor_only() {
 fn down_arrow_does_not_crash() {
     setup();
     nano_rs::text::inject(b"abc", 3);
-    let handled = nano_rs::nano::handle_input_key(KEY_DOWN);
+    let handled = nano_rs::winio::handle_input_key(KEY_DOWN);
     assert!(handled);
     // C 语义：最后一行按 Down 移到末尾魔法行（空行）
     assert_eq!(current_text(), "");
@@ -75,7 +75,7 @@ fn delete_removes_char_at_cursor() {
         let of = g.openfile.as_ref().unwrap().clone();
         of.borrow_mut().current_x = 1;
     });
-    nano_rs::nano::handle_input_key(KEY_DC);
+    nano_rs::winio::handle_input_key(KEY_DC);
     assert_eq!(current_text(), "ac");
 }
 
@@ -84,7 +84,7 @@ fn delete_removes_char_at_cursor() {
 fn backspace_removes_char_before_cursor() {
     setup();
     nano_rs::text::inject(b"abc", 3);
-    nano_rs::nano::handle_input_key(KEY_BACKSPACE);
+    nano_rs::winio::handle_input_key(KEY_BACKSPACE);
     assert_eq!(current_text(), "ab");
 }
 
@@ -93,7 +93,7 @@ fn backspace_removes_char_before_cursor() {
 fn enter_creates_new_line() {
     setup();
     nano_rs::text::inject(b"abc", 3);
-    nano_rs::nano::handle_input_key(KEY_ENTER);
+    nano_rs::winio::handle_input_key(KEY_ENTER);
     assert_eq!(current_text(), "");
 }
 
@@ -103,7 +103,7 @@ fn arrows_do_not_trigger_search() {
     setup();
     nano_rs::text::inject(b"line one", 8);
     for k in [KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN] {
-        nano_rs::nano::handle_input_key(k);
+        nano_rs::winio::handle_input_key(k);
     }
     // 不应进入搜索菜单
     let menu = with_global(|g| g.currmenu);

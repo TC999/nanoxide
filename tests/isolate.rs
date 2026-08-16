@@ -2,7 +2,7 @@
 
 use nano_rs::definitions::*;
 use nano_rs::global::global_init;
-use nano_rs::nano::make_new_buffer;
+use nano_rs::files::make_new_buffer;
 
 fn setup() {
     global_init();
@@ -76,7 +76,7 @@ fn handle_right_key_alone() {
         let of = g.openfile.as_ref().unwrap().clone();
         of.borrow_mut().current_x = 0;
     });
-    let handled = nano_rs::nano::handle_input_key(nano_rs::definitions::KEY_RIGHT);
+    let handled = nano_rs::winio::handle_input_key(nano_rs::definitions::KEY_RIGHT);
     assert!(handled);
     let x = with_global(|g| g.openfile.as_ref().unwrap().borrow().current_x);
     assert_eq!(x, 1);
@@ -241,21 +241,21 @@ fn linenumbers_margin() {
 fn args_after_filename_parsed() {
     setup();
     // 文件名在前，选项在后
-    let f = nano_rs::nano::parse_args(&[
+    let f = nano_rs::global::parse_args(&[
         "nano-rs".to_string(), "file.txt".to_string(), "-l".to_string(),
     ]);
     assert_eq!(f.as_deref(), Some("file.txt"));
     assert!(ISSET(LINE_NUMBERS), "-l 在文件名后应生效");
     UNSET(LINE_NUMBERS);
     // 选项在前，文件名在后（常规形式）
-    let f2 = nano_rs::nano::parse_args(&[
+    let f2 = nano_rs::global::parse_args(&[
         "nano-rs".to_string(), "--linenumbers".to_string(), "file.txt".to_string(),
     ]);
     assert_eq!(f2.as_deref(), Some("file.txt"));
     assert!(ISSET(LINE_NUMBERS));
     UNSET(LINE_NUMBERS);
     // "--" 之后不再解析选项
-    let f3 = nano_rs::nano::parse_args(&[
+    let f3 = nano_rs::global::parse_args(&[
         "nano-rs".to_string(), "--".to_string(), "file.txt".to_string(), "-l".to_string(),
     ]);
     assert_eq!(f3.as_deref(), Some("file.txt"));
@@ -305,7 +305,7 @@ fn help_close_restores_original_buffer() {
     });
     assert!(help_rows > 5, "帮助缓冲应有多行，实际 {help_rows}");
     // 模拟 Ctrl+X 退出帮助：丢弃帮助缓冲
-    nano_rs::nano::close_buffer();
+    nano_rs::files::close_buffer();
     // 应恢复原编辑缓冲，内容为 "abc"
     let (txt, rows) = with_global(|g| {
         let of = g.openfile.as_ref().unwrap().borrow();

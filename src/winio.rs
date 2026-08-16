@@ -11,6 +11,12 @@ use crate::global;
 use crate::color;
 use crate::utils;
 use crate::chars;
+use crate::movement;
+use crate::cut;
+use crate::text;
+use crate::search;
+use crate::help;
+use crate::files;
 use std::io::{self, Write};
 use crossterm::{
     cursor::{self, Hide, Show},
@@ -1277,4 +1283,146 @@ pub fn get_verbatim_kbinput(count: &mut usize) -> Vec<u8> {
     }
 
     bytes
+}
+
+// ======================== 按键分发（对应 nano.c 的主循环处理） ========================
+
+/// 不带文件名且缓冲区为空时，在状态栏显示欢迎消息。
+/// 条件与 nano.c 的 main() 一致：无文件名、缓冲区为空、
+/// 未禁用帮助、且 Ctrl+G（帮助键）未被重绑定。
+pub fn show_welcome_message() -> bool {
+    let (filename_empty, totsize_zero) = with_global(|g| match &g.openfile {
+        Some(o) => {
+            let of = o.borrow();
+            (
+                of.filename
+                    .as_deref()
+                    .map(|s| s.is_empty())
+                    .unwrap_or(true),
+                of.totsize == 0,
+            )
+        }
+        None => (true, true),
+    });
+    let not_rebound = global::first_sc_for(MMAIN, FunctionId::DoHelp)
+        .map(|k| k.borrow().keycode == 0x07)
+        .unwrap_or(false);
+    let show = filename_empty && totsize_zero && !ISSET(NO_HELP) && not_rebound;
+    if show {
+        statusbar("[ Welcome to nano.  For basic help, type Ctrl+G. ]");
+    }
+    show
+}
+
+/// 处理单个按键：执行快捷键或作为普通字符输入。
+/// 返回 TRUE 表示已处理。
+pub fn handle_input_key(key: i32) -> bool {
+    let menu = with_global(|g| g.currmenu);
+    let handled = execute_function(key, menu);
+
+    if !handled {
+        // 处理普通字符输入
+        if key > 0 && key < 256 && key != ESC_CODE as i32 {
+            let ch = char::from_u32(key as u32);
+            if let Some(c) = ch {
+                if !ISSET(VIEW_MODE) {
+                    text::insert_char(c);
+                    edit_refresh();
+                    return true;
+                }
+            }
+        }
+    }
+
+    handled
+}
+
+/// 根据键码执行对应函数。
+fn execute_function(key: i32, _menu: i32) -> bool {
+    // 使用 if/else 链替代 match，避免表达式模式的问题
+    if key == 1 { movement::do_home(); edit_refresh(); return true; }           // Ctrl+A
+    if key == 2 { movement::do_left(); edit_refresh(); return true; }           // Ctrl+B
+    if key == 3 { text::do_cancel(); return true; }                             // Ctrl+C
+    if key == 4 { cut::do_delete(); edit_refresh(); return true; }              // Ctrl+D
+    if key == 5 { movement::do_end(); edit_refresh(); return true; }            // Ctrl+E
+    if key == 6 { movement::do_right(); edit_refresh(); return true; }          // Ctrl+F
+    if key == 7 { help::do_help(); return true; }                               // Ctrl+G
+    if key == 8 { cut::do_backspace(); edit_refresh(); return true; }           // Ctrl+H
+    if key == 9 { text::do_tab(); edit_refresh(); return true; }                // Ctrl+I (Tab)
+    if key == 10 { return true; }                                               // Ctrl+J
+    if key == 11 { cut::cut_text(); edit_refresh(); return true; }              // Ctrl+K
+    if key == 12 { text::do_refresh(); edit_refresh(); return true; }           // Ctrl+L
+    if key == 13 { text::do_enter(); edit_refresh(); return true; }             // Ctrl+M (Enter)
+    if key == 14 { movement::do_down(); edit_refresh(); return true; }          // Ctrl+N
+    if key == 15 { files::do_writeout(); edit_refresh(); return true; }         // Ctrl+O
+    if key == 16 { movement::do_up(); edit_refresh(); return true; }            // Ctrl+P
+    if key == 17 { text::do_refresh(); return true; }                           // Ctrl+Q
+    if key == 18 { files::do_insertfile(); edit_refresh(); return true; }       // Ctrl+R
+    if key == 19 { text::do_suspend(); return true; }                           // Ctrl+S
+    if key == 20 { text::do_spell(); return true; }                             // Ctrl+T
+    if key == 21 { cut::paste_text(); edit_refresh(); return true; }            // Ctrl+U
+    if key == 22 { movement::do_page_down(); edit_refresh(); return true; }     // Ctrl+V
+    if key == 23 { search::do_search_forward(); edit_refresh(); return true; }  // Ctrl+W
+    if key == 24 {                                                              // Ctrl+X
+        if with_global(|g| g.inhelp) { /* 退出帮助 */ }
+        text::do_exit();
+        return true;
+    }
+    if key == 25 { movement::do_page_up(); edit_refresh(); return true; }       // Ctrl+Y
+    if key == 26 { text::do_undo(); edit_refresh(); return true; }              // Ctrl+Z (Undo)
+
+    // 功能键
+    if key == KEY_F0 + 1 { help::do_help(); return true; }                      // F1
+    if key == KEY_F0 + 2 { text::do_exit(); return true; }                      // F2
+    if key == KEY_F0 + 3 { files::do_writeout(); return true; }                 // F3
+    if key == KEY_F0 + 4 { search::do_search_forward(); return true; }          // F4
+    if key == KEY_F0 + 5 { text::do_refresh(); return true; }                   // F5
+    if key == KEY_F0 + 6 { text::do_spell(); return true; }                     // F6
+    if key == KEY_F0 + 7 { return true; }                                       // F7
+    if key == KEY_F0 + 8 { return true; }                                       // F8
+    if key == KEY_F0 + 9 { cut::cut_text(); edit_refresh(); return true; }      // F9
+    if key == KEY_F0 + 10 { cut::paste_text(); edit_refresh(); return true; }   // F10
+    if key == KEY_F0 + 11 { return true; }                                      // F11
+    if key == KEY_F0 + 12 { return true; }                                      // F12
+
+    // 方向键
+    if key == KEY_LEFT { movement::do_left(); edit_refresh(); return true; }
+    if key == KEY_RIGHT { movement::do_right(); edit_refresh(); return true; }
+    if key == KEY_UP { movement::do_up(); edit_refresh(); return true; }
+    if key == KEY_DOWN { movement::do_down(); edit_refresh(); return true; }
+    if key == KEY_HOME { movement::do_home(); edit_refresh(); return true; }
+    if key == KEY_END { movement::do_end(); edit_refresh(); return true; }
+    if key == KEY_PPAGE { movement::do_page_up(); edit_refresh(); return true; }
+    if key == KEY_NPAGE { movement::do_page_down(); edit_refresh(); return true; }
+    if key == KEY_DC { cut::do_delete(); edit_refresh(); return true; }
+    if key == KEY_BACKSPACE { cut::do_backspace(); edit_refresh(); return true; }
+    if key == KEY_ENTER { text::do_enter(); edit_refresh(); return true; }
+    if key == 9 || key == KEY_BTAB { text::do_tab(); edit_refresh(); return true; }
+
+    // 修饰键
+    if key == CONTROL_LEFT { movement::do_prev_word(); edit_refresh(); return true; }
+    if key == CONTROL_RIGHT { movement::do_next_word(false); edit_refresh(); return true; }
+    if key == CONTROL_HOME { movement::do_first_line(); edit_refresh(); return true; }
+    if key == CONTROL_END { movement::do_last_line(); edit_refresh(); return true; }
+    if key == CONTROL_DELETE { cut::do_delete(); edit_refresh(); return true; }
+    if key == CONTROL_UP { movement::do_scroll_up(); edit_refresh(); return true; }
+    if key == CONTROL_DOWN { movement::do_scroll_down(); edit_refresh(); return true; }
+
+    // Alt 组合
+    if key == ALT_LEFT { movement::do_prev_word(); edit_refresh(); return true; }
+    if key == ALT_RIGHT { movement::do_next_word(false); edit_refresh(); return true; }
+    if key == ALT_UP { movement::to_para_begin(); edit_refresh(); return true; }
+    if key == ALT_DOWN { movement::to_para_end(); edit_refresh(); return true; }
+    if key == ALT_HOME { movement::do_first_line(); edit_refresh(); return true; }
+    if key == ALT_END { movement::do_last_line(); edit_refresh(); return true; }
+    if key == ALT_PAGEUP { movement::to_prev_block(); edit_refresh(); return true; }
+    if key == ALT_PAGEDOWN { movement::to_next_block(); edit_refresh(); return true; }
+    if key == ALT_INSERT { text::do_mark(); edit_refresh(); return true; }
+
+    // 其他
+    if key == KEY_IC { text::do_mark(); edit_refresh(); return true; }
+    if key == KEY_SUSPEND { text::do_suspend(); return true; }
+    if key == ESC_CODE as i32 { return true; } // 忽略单独的 Esc
+
+    false
 }
