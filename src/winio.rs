@@ -211,10 +211,9 @@ pub fn edit_refresh() {
     refresh_screen();
 }
 
-/// 刷新屏幕。
+/// 刷新屏幕（逐行覆盖重绘，避免全屏 Clear 造成的闪烁）。
 pub fn refresh_screen() {
     let mut stdout = io::stdout();
-    let _ = execute!(stdout, Clear(ClearType::All));
 
     with_global(|g| {
         let cols = g.COLS;
@@ -238,8 +237,8 @@ pub fn refresh_screen() {
                 let data = c.borrow().data.clone();
                 let _ = execute!(stdout, cursor::MoveTo(0, 1 + row));
                 let _ = write!(stdout, "{}", data);
-                // 清除行尾
-                let _ = write!(stdout, "{:width$}", "", width = cols.saturating_sub(data.len()));
+                /* 清除该行剩余部分（比补空格更高效、闪烁更小）。 */
+                let _ = execute!(stdout, Clear(ClearType::UntilNewLine));
                 let next = c.borrow().next.clone();
                 current = next;
                 row += 1;
@@ -247,7 +246,7 @@ pub fn refresh_screen() {
             // 清空剩余编辑行
             while row < edit_rows as u16 {
                 let _ = execute!(stdout, cursor::MoveTo(0, 1 + row));
-                let _ = write!(stdout, "{:width$}", "", width = cols);
+                let _ = execute!(stdout, Clear(ClearType::UntilNewLine));
                 row += 1;
             }
         }
