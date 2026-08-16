@@ -18,6 +18,7 @@ use crate::search;
 use crate::help;
 use crate::files;
 use std::io::{self, Write};
+use std::rc::Rc;
 use crossterm::{
     cursor::{self, Hide, Show},
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
@@ -251,58 +252,59 @@ pub fn refresh_screen() {
     let mut stdout = io::stdout();
     let margin = current_margin();
 
-    with_global(|g| {
-        let cols = g.COLS;
-        let lines = g.LINES;
-        let edit_rows = lines.saturating_sub(4); // 标题栏1 + 状态栏1 + 快捷键2
+    let (cols, lines, edit_rows) =
+        with_global(|g| (g.COLS, g.LINES, g.LINES.saturating_sub(4)));
 
-        // 绘制标题栏（屏幕顶部第0行）
-        let _ = execute!(stdout, cursor::MoveTo(0, 0));
-        draw_titlebar_line(&mut stdout, cols);
+    // 绘制标题栏（屏幕顶部第0行）
+    let _ = execute!(stdout, cursor::MoveTo(0, 0));
+    draw_titlebar_line(&mut stdout, cols);
 
-        // 绘制编辑区域（从第1行开始）
-        let openfile = g.openfile.clone();
-        if let Some(of) = openfile {
-            let of_ref = of.borrow();
-            let mut current = of_ref.edittop.clone();
-            let mut row = 0u16;
-            while let Some(c) = current {
-                if row >= edit_rows as u16 {
-                    break;
-                }
-                let data = c.borrow().data.clone();
-                if margin > 0 {
-                    /* 左侧行号（对应 C 的 draw_row 中 LINE_NUMBER 配色）。 */
-                    let ln = c.borrow().lineno;
-                    let _ = execute!(stdout, cursor::MoveTo(0, 1 + row));
-                    let _ = execute!(stdout, style::SetForegroundColor(Color::DarkGrey));
-                    let _ = write!(stdout, "{:>width$} ", ln, width = margin - 1);
-                    let _ = execute!(stdout, style::SetForegroundColor(Color::Reset));
-                }
-                let _ = execute!(stdout, cursor::MoveTo(margin as u16, 1 + row));
-                let _ = write!(stdout, "{}", data);
-                /* 清除该行剩余部分（比补空格更高效、闪烁更小）。 */
-                let _ = execute!(stdout, Clear(ClearType::UntilNewLine));
-                let next = c.borrow().next.clone();
-                current = next;
-                row += 1;
-            }
-            // 清空剩余编辑行
-            while row < edit_rows as u16 {
-                let _ = execute!(stdout, cursor::MoveTo(0, 1 + row));
-                let _ = execute!(stdout, Clear(ClearType::UntilNewLine));
-                row += 1;
-            }
+    // 绘制编辑区域（从第1行开始）：逐行调用 update_line（含语法高亮）。
+    let (edittop, current, current_x) = with_global(|g| match &g.openfile {
+        Some(of) => {
+            let o = of.borrow();
+            (o.edittop.clone(), o.current.clone(), o.current_x)
         }
-
-        // 绘制状态栏（倒数第3行）
-        let status_row = (lines.saturating_sub(3)) as u16;
-        let _ = execute!(stdout, cursor::MoveTo(0, status_row));
-        draw_statusbar_line(&mut stdout, cols);
-
-        // 绘制底部快捷键（倒数第2行和倒数第1行）
-        draw_bottombars_lines(&mut stdout, cols, lines);
+        None => (None, None, 0),
     });
+
+    if let Some(edittop) = edittop {
+        let mut cur: Option<LineRef> = Some(edittop);
+        let mut row = 0u16;
+        while let Some(c) = cur {
+            if row >= edit_rows as u16 {
+                break;
+            }
+            let x = if current.as_ref().map(|cc| Rc::ptr_eq(cc, &c)).unwrap_or(false) {
+                current_x
+            } else {
+                0
+            };
+            update_line(&c, x);
+            let next = { let r = c.borrow(); r.next.clone() };
+            cur = next;
+            row += 1;
+        }
+        // 清空剩余编辑行
+        while row < edit_rows as u16 {
+            let _ = execute!(stdout, cursor::MoveTo(0, 1 + row));
+            let _ = execute!(stdout, Clear(ClearType::UntilNewLine));
+            row += 1;
+        }
+    } else {
+        for row in 0..edit_rows as u16 {
+            let _ = execute!(stdout, cursor::MoveTo(0, 1 + row));
+            let _ = execute!(stdout, Clear(ClearType::UntilNewLine));
+        }
+    }
+
+    // 绘制状态栏（倒数第3行）
+    let status_row = (lines.saturating_sub(3)) as u16;
+    let _ = execute!(stdout, cursor::MoveTo(0, status_row));
+    draw_statusbar_line(&mut stdout, cols);
+
+    // 绘制底部快捷键（倒数第2行和倒数第1行）
+    draw_bottombars_lines(&mut stdout, cols, lines);
 
     let _ = stdout.flush();
 
@@ -1081,18 +1083,298 @@ pub enum ScrollDirection {
     Backward,
 }
 
+/// 单行扫描的最大匹配数（对应 PAINT_LIMIT）。
+const PAINT_LIMIT: usize = 2000;
+
+/// 把属性（颜色对 + 样式位）应用到 stdout。
+fn apply_attributes(stdout: &mut io::Stdout, attrs: i32) {
+    let pair = color::pairnum_from(attrs);
+    if pair > 0 {
+        if let Some((fg, bg)) = color::lookup_pair(pair) {
+            let _ = execute!(
+                stdout,
+                SetForegroundColor(color::nano_to_crossterm_color(fg)),
+                SetBackgroundColor(color::nano_to_crossterm_color(bg))
+            );
+        }
+    }
+    if attrs & color::A_BOLD != 0 {
+        let _ = execute!(stdout, SetAttribute(Attribute::Bold));
+    }
+    if attrs & color::A_UNDERLINE != 0 {
+        let _ = execute!(stdout, SetAttribute(Attribute::Underlined));
+    }
+    if attrs & color::A_REVERSE != 0 {
+        let _ = execute!(stdout, SetAttribute(Attribute::Reverse));
+    }
+}
+
+/// 重置样式与颜色。
+fn reset_attributes(stdout: &mut io::Stdout) {
+    let _ = execute!(stdout, SetAttribute(Attribute::Reset));
+}
+
+/// 在 row 行绘制一行 converted 文本，并应用语法高亮（对应 C 的 `draw_row`）。
+fn draw_row(stdout: &mut io::Stdout, row: u16, converted: &[u8], line: &LineRef, from_col: usize) {
+    let margin = current_margin();
+
+    let (ln, syntax, linenum_color, cols) = with_global(|g| {
+        let of = g.openfile.as_ref();
+        let ln = line.borrow().lineno;
+        let syntax = of.and_then(|o| o.borrow().syntax.clone());
+        let linenum_color = g.interface_color_pair.get(LINE_NUMBER).copied().unwrap_or(0);
+        (ln, syntax, linenum_color, g.COLS)
+    });
+
+    /* 行号。 */
+    if margin > 0 {
+        let _ = execute!(stdout, cursor::MoveTo(0, row));
+        apply_attributes(stdout, linenum_color);
+        let _ = write!(stdout, "{:>width$} ", ln, width = margin - 1);
+        reset_attributes(stdout);
+    }
+
+    /* 正文。 */
+    let _ = execute!(stdout, cursor::MoveTo(margin as u16, row));
+    let _ = write!(stdout, "{}", String::from_utf8_lossy(converted));
+    let _ = execute!(stdout, Clear(ClearType::UntilNewLine));
+
+    /* 语法高亮。 */
+    if let Some(sntx) = syntax {
+        if !ISSET(NO_SYNTAX) {
+            paint_syntax_rules(stdout, row, converted, line, from_col, &sntx, cols, margin);
+        }
+    }
+}
+
+/// 应用当前语法的全部颜色规则到一行（对应 C 的 draw_row 中 ENABLE_COLOR 部分）。
+fn paint_syntax_rules(
+    stdout: &mut io::Stdout,
+    row: u16,
+    converted: &[u8],
+    line: &LineRef,
+    from_col: usize,
+    sntx: &SyntaxRef,
+    cols: usize,
+    margin: usize,
+) {
+    let till_x = from_col + cols.saturating_sub(margin + 1);
+    let from_x = from_col;
+    let data = line.borrow().data.clone();
+    let data_bytes = data.as_bytes();
+
+    /* 多行正则需要逐行缓存。 */
+    let multiscore = sntx.borrow().multiscore;
+    if multiscore > 0 && line.borrow().multidata.is_none() {
+        line.borrow_mut().multidata = Some(vec![0; multiscore as usize]);
+    }
+
+    /* 收集颜色规则（避免借用冲突）。 */
+    let colors: Vec<ColorRef> = {
+        let mut v = Vec::new();
+        let mut cur = sntx.borrow().color.clone();
+        while let Some(c) = cur {
+            v.push(c.clone());
+            let next = { let r = c.borrow(); r.next.clone() };
+            cur = next;
+        }
+        v
+    };
+
+    for ink in &colors {
+        let (attrs, id, is_multiline, start_pat, end_pat) = {
+            let r = ink.borrow();
+            (
+                r.attributes,
+                r.id,
+                r.end.is_some(),
+                r.start.clone(),
+                r.end.clone(),
+            )
+        };
+        let Some(start_pat) = start_pat else { continue };
+
+        /* 单行规则：循环匹配 start。 */
+        if !is_multiline {
+            let mut index = 0usize;
+            while index < PAINT_LIMIT && index < till_x {
+                let (so, eo) = match start_pat.find_from(data_bytes, index, index != 0) {
+                    Some(m) => m,
+                    None => break,
+                };
+                index = eo;
+                if so >= till_x {
+                    break;
+                }
+                /* 零宽匹配：前进。 */
+                if so == eo {
+                    if data_bytes.get(index).copied().unwrap_or(0) == 0 {
+                        break;
+                    }
+                    index = chars::step_right(data_bytes, index);
+                    continue;
+                }
+                if eo <= from_x {
+                    continue;
+                }
+                let start_col = if so > from_x {
+                    crate::utils::wideness(data_bytes, so) - from_col
+                } else {
+                    0
+                };
+                let the_start = crate::utils::actual_x(converted, start_col).min(converted.len());
+                let thetext = &converted[the_start..];
+                let paintlen = crate::utils::actual_x(
+                    thetext,
+                    crate::utils::wideness(data_bytes, eo)
+                        .saturating_sub(from_col)
+                        .saturating_sub(start_col),
+                );
+                let _ = execute!(stdout, cursor::MoveTo((margin + start_col) as u16, row));
+                apply_attributes(stdout, attrs);
+                let _ = write!(stdout, "{}", String::from_utf8_lossy(&thetext[..paintlen.min(thetext.len())]));
+                reset_attributes(stdout);
+            }
+            continue;
+        }
+
+        /* 多行规则。 */
+        let prior_state = {
+            let prev = line.borrow().prev.as_ref().and_then(|w| w.upgrade());
+            match prev {
+                Some(p) => p
+                    .borrow()
+                    .multidata
+                    .clone()
+                    .and_then(|m| m.get(id as usize).copied()),
+                None => None,
+            }
+        };
+
+        /* 假定本行初始不适用。 */
+        if let Some(md) = line.borrow_mut().multidata.as_mut() {
+            md[id as usize] = NOTHING as i16;
+        }
+
+        let mut index = 0usize;
+
+        /* 前一行有未闭合的 start。 */
+        if prior_state == Some(WHOLELINE as i16) || prior_state == Some(STARTSHERE as i16) {
+            let endmatch = end_pat.as_ref().and_then(|e| e.find_from(data_bytes, 0, false));
+            if endmatch.is_none() {
+                /* 无 end：整行着色。 */
+                let _ = execute!(stdout, cursor::MoveTo(margin as u16, row));
+                apply_attributes(stdout, attrs);
+                let _ = write!(stdout, "{}", String::from_utf8_lossy(converted));
+                reset_attributes(stdout);
+                if let Some(md) = line.borrow_mut().multidata.as_mut() {
+                    md[id as usize] = WHOLELINE as i16;
+                }
+                continue;
+            }
+            let (_, end_eo) = endmatch.unwrap();
+            if end_eo > from_x {
+                let paintlen = crate::utils::actual_x(
+                    converted,
+                    crate::utils::wideness(data_bytes, end_eo).saturating_sub(from_col),
+                )
+                .min(converted.len());
+                let _ = execute!(stdout, cursor::MoveTo(margin as u16, row));
+                apply_attributes(stdout, attrs);
+                let _ = write!(stdout, "{}", String::from_utf8_lossy(&converted[..paintlen]));
+                reset_attributes(stdout);
+            }
+            if let Some(md) = line.borrow_mut().multidata.as_mut() {
+                md[id as usize] = ENDSHERE as i16;
+            }
+            index = end_eo;
+        }
+
+        /* 在本行寻找 start 匹配。 */
+        while index < PAINT_LIMIT {
+            let (start_so, start_eo) = match start_pat.find_from(data_bytes, index, index != 0) {
+                Some(m) => m,
+                None => break,
+            };
+            if start_so >= till_x {
+                break;
+            }
+
+            let start_col = if start_so > from_x {
+                crate::utils::wideness(data_bytes, start_so) - from_col
+            } else {
+                0
+            };
+            let the_start = crate::utils::actual_x(converted, start_col).min(converted.len());
+            let thetext = &converted[the_start..];
+
+            /* 同一行有 end 匹配。 */
+            let endmatch = end_pat.as_ref().and_then(|e| e.find_from(data_bytes, start_eo, start_eo != 0));
+            if let Some((_, end_eo)) = endmatch {
+                if end_eo > from_x && end_eo > start_so {
+                    let paintlen = crate::utils::actual_x(
+                        thetext,
+                        crate::utils::wideness(data_bytes, end_eo)
+                            .saturating_sub(from_col)
+                            .saturating_sub(start_col),
+                    );
+                    let _ = execute!(stdout, cursor::MoveTo((margin + start_col) as u16, row));
+                    apply_attributes(stdout, attrs);
+                    let _ = write!(stdout, "{}", String::from_utf8_lossy(&thetext[..paintlen.min(thetext.len())]));
+                    reset_attributes(stdout);
+                    if let Some(md) = line.borrow_mut().multidata.as_mut() {
+                        md[id as usize] = JUSTONTHIS as i16;
+                    }
+                }
+                index = end_eo;
+                /* 若 start 与 end 都是零宽，强制前进。 */
+                if start_so == start_eo && end_eo == end_eo && data_bytes.get(index).copied().unwrap_or(0) == 0 {
+                    break;
+                }
+                if start_so == start_eo {
+                    index = chars::step_right(data_bytes, index);
+                }
+                continue;
+            }
+
+            /* 无 end：剩余部分着色，标记 STARTSHERE。 */
+            let _ = execute!(stdout, cursor::MoveTo((margin + start_col) as u16, row));
+            apply_attributes(stdout, attrs);
+            let _ = write!(stdout, "{}", String::from_utf8_lossy(thetext));
+            reset_attributes(stdout);
+            if let Some(md) = line.borrow_mut().multidata.as_mut() {
+                md[id as usize] = STARTSHERE as i16;
+            }
+            break;
+        }
+    }
+}
+
 /// 重绘给定行（对应 winio.c 的 `update_line`）。
 /// 返回该行占用的行数（软换行时为块数，否则为 1）。
-/// 在 crossterm 架构下，逐行渲染由 `edit_refresh` 的全量重绘完成，
-/// 这里标记需要刷新并返回正确的行数。
 pub fn update_line(line: &LineRef, index: usize) -> i32 {
-    let _ = index;
-    with_global_mut(|g| g.refresh_needed = true);
     if ISSET(SOFTWRAP) {
-        (extra_chunks_in(line) + 1) as i32
-    } else {
-        1
+        return (extra_chunks_in(line) + 1) as i32;
     }
+
+    let mut stdout = io::stdout();
+    let margin = current_margin();
+    let data = line.borrow().data.clone();
+
+    let from_col = crate::utils::get_page_start(crate::utils::wideness(data.as_bytes(), index));
+    let span = with_global(|g| g.COLS.saturating_sub(margin + 1));
+    let converted = display_string(data.as_bytes(), from_col, span, true, false);
+
+    /* 目标行号 = line.lineno - edittop.lineno（+1 因为编辑区从第 1 行开始）。 */
+    let row = with_global(|g| {
+        let of = g.openfile.as_ref().expect("no open file").borrow();
+        let edittop_lineno = of.edittop.as_ref().map(|e| e.borrow().lineno).unwrap_or(1);
+        line.borrow().lineno - edittop_lineno
+    });
+
+    draw_row(&mut stdout, (1 + row) as u16, converted.as_bytes(), line, from_col);
+    let _ = stdout.flush();
+    1
 }
 
 // ======================== 字符串显示与逐字输入（对应 winio.c） ========================

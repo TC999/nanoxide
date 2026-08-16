@@ -3,6 +3,7 @@
 #![allow(non_camel_case_types)]
 
 pub mod definitions;
+pub mod regex;
 pub mod chars;
 pub mod utils;
 pub mod global;

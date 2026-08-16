@@ -15,6 +15,8 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::sync::LazyLock;
 
+use crate::regex::Regex;
+
 // ======================== 常量 ========================
 
 pub const ROOT_UID: u32 = 0;
@@ -270,71 +272,82 @@ pub type OpenFileWeak = Weak<RefCell<OpenFileStruct>>;
 // ======================== 简单模式匹配（替代 regex） ========================
 
 /// 简单的模式匹配，替代 POSIX regex。
-/// 支持基本的 glob 通配符：* 和 ?
+/// 基于内部正则引擎的模式（替代 POSIX regex）。
+/// - `from_literal`：字面匹配（特殊字符转义）
+/// - `from_glob`：glob 匹配（`*`/`?`）
+/// - `from_regex`：真正的 GNU 风格正则（syntax 高亮等）
 #[derive(Debug, Clone)]
 pub struct MatchPattern {
     pattern: String,
-    is_glob: bool,
+    re: Regex,
 }
 
 impl MatchPattern {
-    pub fn from_glob(pattern: &str) -> Self {
-        MatchPattern { pattern: pattern.to_string(), is_glob: true }
-    }
+    /// 字面模式：把正则特殊字符全部转义。
     pub fn from_literal(pattern: &str) -> Self {
-        MatchPattern { pattern: pattern.to_string(), is_glob: false }
+        let escaped = escape_regex(pattern);
+        let re = Regex::compile(&escaped, false).expect("escaped literal must compile");
+        MatchPattern { pattern: pattern.to_string(), re }
     }
-    pub fn matches(&self, text: &str) -> bool {
-        if self.is_glob { simple_glob_match(&self.pattern, text) }
-        else { text.contains(&self.pattern) }
-    }
-    pub fn find_match(&self, text: &str) -> Option<(usize, usize)> {
-        if self.is_glob {
-            if simple_glob_match(&self.pattern, text) { Some((0, text.len())) } else { None }
-        } else {
-            text.find(&self.pattern).map(|pos| (pos, pos + self.pattern.len()))
+    /// glob 模式：`*` → `.*`，`?` → `.`，其余字符转义。
+    pub fn from_glob(pattern: &str) -> Self {
+        let mut out = String::new();
+        for c in pattern.chars() {
+            match c {
+                '*' => out.push_str(".*"),
+                '?' => out.push('.'),
+                _ => push_escaped(&mut out, c),
+            }
         }
+        let re = Regex::compile(&out, false).expect("translated glob must compile");
+        MatchPattern { pattern: pattern.to_string(), re }
+    }
+    /// 正则模式：按 GNU 风格 ERE 编译；icase 对应 REG_ICASE。
+    pub fn from_regex(pattern: &str, icase: bool) -> Result<Self, String> {
+        let re = Regex::compile(pattern, icase)?;
+        Ok(MatchPattern { pattern: pattern.to_string(), re })
+    }
+    /// 判断 text 中是否存在匹配（对应 regexec 布尔用途）。
+    pub fn matches(&self, text: &str) -> bool {
+        self.re.is_match(text)
+    }
+    /// 在 text 中查找第一个匹配，返回 (起点, 终点)。
+    pub fn find_match(&self, text: &str) -> Option<(usize, usize)> {
+        self.re.find(text, 0, false)
     }
     /// 字节串版本：在 `text` 中查找模式的第一个匹配，返回 (起点, 终点) 字节偏移。
     /// （nano 的文本是字节级存储，可能含非法 UTF-8，故提供该版本。）
     pub fn find_match_bytes(&self, text: &[u8]) -> Option<(usize, usize)> {
-        if self.is_glob {
-            if simple_glob_match_bytes(self.pattern.as_bytes(), text) { Some((0, text.len())) } else { None }
-        } else {
-            let pat = self.pattern.as_bytes();
-            if pat.is_empty() {
-                return Some((0, 0));
-            }
-            text.windows(pat.len()).position(|w| w == pat).map(|pos| (pos, pos + pat.len()))
-        }
+        self.re.find_bytes(text, 0, false)
+    }
+    /// 从指定偏移开始查找（对应 regexec(text + start)），notbol 对应 REG_NOTBOL。
+    pub fn find_from(&self, text: &[u8], start: usize, notbol: bool) -> Option<(usize, usize)> {
+        self.re.find_bytes(text, start, notbol)
+    }
+    /// 原始模式字符串。
+    pub fn pattern_str(&self) -> &str {
+        &self.pattern
     }
 }
 
-fn simple_glob_match(pattern: &str, text: &str) -> bool {
-    simple_glob_recursive(pattern.as_bytes(), text.as_bytes(), 0, 0)
-}
-
-fn simple_glob_match_bytes(pattern: &[u8], text: &[u8]) -> bool {
-    simple_glob_recursive(pattern, text, 0, 0)
-}
-
-fn simple_glob_recursive(pat: &[u8], text: &[u8], pi: usize, ti: usize) -> bool {
-    if pi >= pat.len() { return ti >= text.len(); }
-    match pat[pi] {
-        b'*' => {
-            if simple_glob_recursive(pat, text, pi + 1, ti) { return true; }
-            if ti < text.len() { return simple_glob_recursive(pat, text, pi, ti + 1); }
-            false
+/// 转义单个字符为字面量（正则引擎的转义规则）。
+fn push_escaped(out: &mut String, c: char) {
+    match c {
+        '.' | '^' | '$' | '*' | '+' | '?' | '{' | '}' | '(' | ')' | '|' | '[' | ']' | '\\' => {
+            out.push('\\');
+            out.push(c);
         }
-        b'?' => {
-            if ti < text.len() { simple_glob_recursive(pat, text, pi + 1, ti + 1) }
-            else { false }
-        }
-        _ => {
-            if ti < text.len() && pat[pi] == text[ti] { simple_glob_recursive(pat, text, pi + 1, ti + 1) }
-            else { false }
-        }
+        _ => out.push(c),
     }
+}
+
+/// 把整串转义为正则字面量。
+fn escape_regex(pattern: &str) -> String {
+    let mut out = String::new();
+    for c in pattern.chars() {
+        push_escaped(&mut out, c);
+    }
+    out
 }
 
 // ======================== 枚举类型 ========================

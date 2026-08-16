@@ -10,6 +10,7 @@ use crate::definitions::*;
 use crate::chars;
 use crate::winio;
 use crossterm::style::Color;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 /// 颜色常量。
@@ -19,7 +20,17 @@ pub const A_BOLD: i32 = 2;
 pub const A_UNDERLINE: i32 = 4;
 pub const A_BLINK: i32 = 8;
 
+/// 无效颜色（对应 C 的 BAD_COLOR）。
+pub const BAD_COLOR: i16 = -2;
+
+/// 颜色对表：pairnum → (fg, bg)。由 init_pair 填充，渲染时查表。
+thread_local! {
+    static COLOR_PAIRS: RefCell<std::collections::HashMap<i32, (i16, i16)>> =
+        RefCell::new(std::collections::HashMap::new());
+}
+
 /// 将 nano 颜色值转换为 crossterm Color。
+/// 0-7 为基础色，8-255 为 256 色（AnsiValue），-1 为默认。
 pub fn nano_to_crossterm_color(color: i16) -> Color {
     match color {
         -1 => Color::Reset,           // THE_DEFAULT
@@ -31,6 +42,15 @@ pub fn nano_to_crossterm_color(color: i16) -> Color {
         5 => Color::Magenta,
         6 => Color::Cyan,
         7 => Color::White,
+        8 => Color::DarkGrey,
+        9 => Color::Red,
+        10 => Color::Green,
+        11 => Color::Yellow,
+        12 => Color::Blue,
+        13 => Color::Magenta,
+        14 => Color::Cyan,
+        15 => Color::White,
+        16..=255 => Color::AnsiValue(color as u8),
         _ => Color::Reset,
     }
 }
@@ -40,14 +60,24 @@ pub fn set_interface_colorpairs() {
     // 使用默认颜色，在 crossterm 中动态设置
 }
 
-/// 初始化颜色对（对应 init_pair）。
+/// 初始化颜色对（对应 init_pair）：记录 pairnum → (fg, bg)，渲染时查表。
 pub fn init_pair(pairnum: i16, fg: i16, bg: i16) {
-    // crossterm 中颜色对是动态的，不需要预初始化
+    COLOR_PAIRS.with(|m| m.borrow_mut().insert(pairnum as i32, (fg, bg)));
 }
 
-/// 获取颜色对属性（对应 COLOR_PAIR）。
+/// 颜色对编号编码进属性值的高 16 位（对应 COLOR_PAIR）。
 pub fn COLOR_PAIR(pairnum: i32) -> i32 {
-    pairnum
+    pairnum << 16
+}
+
+/// 从属性值中提取颜色对编号。
+pub fn pairnum_from(attr: i32) -> i32 {
+    attr >> 16
+}
+
+/// 查询颜色对 (fg, bg)；无则返回 None。
+pub fn lookup_pair(pairnum: i32) -> Option<(i16, i16)> {
+    COLOR_PAIRS.with(|m| m.borrow().get(&pairnum).copied())
 }
 
 /// 启用颜色属性。
@@ -403,6 +433,14 @@ pub fn find_and_prime_applicable_syntax() {
             of.borrow_mut().syntax = sntx;
         }
     });
+
+    /* 有语法时准备调色板（需在 syntax 写入 openfile 之后，填充颜色对表）。 */
+    let has_syntax = with_global(|g| {
+        g.openfile.as_ref().and_then(|of| of.borrow().syntax.clone()).is_some()
+    });
+    if has_syntax {
+        prepare_palette();
+    }
 }
 
 /// 判断多行正则的匹配是否仍然相同；不同则安排屏幕刷新
@@ -637,4 +675,138 @@ pub fn precalc_multicolorinfo() {
             line_iter += 1;
         }
     }
+}
+// ======================== 颜色名解析（对应 rcfile.c 的 color_to_short/parse_combination） ========================
+
+/// 34 个可用的颜色名（对应 C 的 hues 表）。
+const HUES: [&str; 34] = [
+    "red", "green", "blue", "yellow", "cyan", "magenta",
+    "white", "black", "normal",
+    "pink", "purple", "mauve", "lagoon", "mint", "lime",
+    "peach", "orange", "latte", "rosy", "beet", "plum",
+    "sea", "sky", "slate", "teal", "sage", "brown",
+    "ocher", "sand", "tawny", "brick", "crimson",
+    "grey", "gray",
+];
+
+/// 对应每个色名的颜色值（对应 C 的 indices 表）。
+const INDICES: [i16; 34] = [
+    1, 2, 3, 4, 6, 5,
+    7, 0, -1,
+    204, 163, 134, 38, 48, 148,
+    215, 208, 137, 175, 127, 98,
+    32, 111, 66, 35, 107, 100,
+    142, 186, 136, 166, 161,
+    8, 8,
+];
+
+/// 把颜色名解析为颜色值；返回 (值, vivid, thick)（对应 `color_to_short`）。
+/// 失败时返回 Err(错误消息)。
+pub fn color_to_short(colorname: &str) -> Result<(i16, bool, bool), String> {
+    let mut vivid = false;
+    let mut thick = false;
+    let mut name = colorname;
+
+    if let Some(rest) = name.strip_prefix("bright") {
+        if !rest.is_empty() {
+            vivid = true;
+            thick = true;
+            name = rest;
+        }
+    } else if let Some(rest) = name.strip_prefix("light") {
+        if !rest.is_empty() {
+            vivid = true;
+            thick = false;
+            name = rest;
+        }
+    }
+
+    // #RGB 形式（4 字符十六进制）
+    if name.starts_with('#') && name.len() == 4 {
+        if vivid {
+            return Err(format!("Color '{}' takes no prefix", colorname));
+        }
+        let parse_hex = |c: char| c.to_digit(16);
+        let chars: Vec<char> = name[1..].chars().collect();
+        if chars.len() == 3 {
+            let r = parse_hex(chars[0]);
+            let g = parse_hex(chars[1]);
+            let b = parse_hex(chars[2]);
+            if let (Some(r), Some(g), Some(b)) = (r, g, b) {
+                let level = |v: u32| -> i32 { match v { 0..=3 => 0, 4..=7 => 1, 8..=9 => 2, 10..=11 => 3, 12..=13 => 4, _ => 5 } };
+                let value = 16 + 36 * level(r) + 6 * level(g) + level(b);
+                return Ok((value as i16, false, false));
+            }
+        }
+        return Err(format!("Color \"{}\" not understood", colorname));
+    }
+
+    for (index, hue) in HUES.iter().enumerate() {
+        if name == *hue {
+            if index > 7 && vivid {
+                return Err(format!("Color '{}' takes no prefix", colorname));
+            }
+            if index > 8 {
+                // 扩展色在少色终端退化；crossterm 一律支持 256 色。
+            }
+            return Ok((INDICES[index], vivid, thick));
+        }
+    }
+
+    Err(format!("Color \"{}\" not understood", colorname))
+}
+
+/// 解析颜色组合（对应 `parse_combination`）：返回 (fg, bg, attributes)。
+/// 组合形式：`[bold[,]][fg][,bg]`，如 "red"、"bold,red,blue"、"lightyellow"。
+pub fn parse_combination(text: &str) -> Option<(i16, i16, i32)> {
+    let mut attributes = A_NORMAL;
+    let mut s = text;
+
+    if let Some(rest) = s.strip_prefix("bold") {
+        attributes |= A_BOLD;
+        if !rest.starts_with(',') {
+            crate::rcfile::jot_error("An attribute requires a subsequent comma");
+            return None;
+        }
+        s = &rest[1..];
+    }
+    if let Some(rest) = s.strip_prefix("italic") {
+        // A_ITALIC 在 crossterm 中不单独支持；消费掉前缀。
+        if !rest.starts_with(',') {
+            crate::rcfile::jot_error("An attribute requires a subsequent comma");
+            return None;
+        }
+        s = &rest[1..];
+    }
+
+    let mut parts = s.splitn(2, ',');
+    let fg_part = parts.next().unwrap_or("");
+    let bg_part = parts.next();
+
+    let (fgv, fg_vivid, fg_thick) = match color_to_short(fg_part) {
+        Ok(v) => v,
+        Err(msg) => {
+            crate::rcfile::jot_error(&msg);
+            return None;
+        }
+    };
+    let fg = if fg_vivid && !fg_thick { fgv + 8 } else { fgv };
+    if fg_vivid && fg_thick {
+        attributes |= A_BOLD;
+    }
+
+    let bg = match bg_part {
+        None => THE_DEFAULT as i16,
+        Some(b) => match color_to_short(b) {
+            Ok((bv, b_vivid, _)) => {
+                if b_vivid { bv + 8 } else { bv }
+            }
+            Err(msg) => {
+                crate::rcfile::jot_error(&msg);
+                return None;
+            }
+        },
+    };
+
+    Some((fg, bg, attributes))
 }

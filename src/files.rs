@@ -55,6 +55,7 @@ pub fn open_buffer(filename: &str) -> bool {
             new_file.borrow_mut().current = Some(line);
             g.openfile = Some(new_file);
         });
+        crate::color::find_and_prime_applicable_syntax();
         return true;
     }
 
@@ -112,6 +113,7 @@ pub fn open_buffer(filename: &str) -> bool {
                 }));
                 g.openfile = Some(new_file);
             });
+            crate::color::find_and_prime_applicable_syntax();
             true
         }
         Err(e) => {
