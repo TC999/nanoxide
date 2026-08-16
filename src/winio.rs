@@ -216,9 +216,34 @@ pub fn edit_refresh() {
     refresh_screen();
 }
 
+/// 当前行号边距（对应 C 的 confirm_margin：digits(filebot->lineno) + 1）。
+/// 未开启行号或边距超过 COLS-4 时返回 0。
+pub fn current_margin() -> usize {
+    if !ISSET(LINE_NUMBERS) {
+        return 0;
+    }
+    with_global(|g| {
+        let cols = g.COLS;
+        let lineno = g
+            .openfile
+            .as_ref()
+            .and_then(|of| of.borrow().filebot.clone())
+            .map(|b| b.borrow().lineno)
+            .unwrap_or(1)
+            .max(1);
+        let needed = lineno.to_string().len() + 1;
+        if needed > cols.saturating_sub(4) {
+            0
+        } else {
+            needed
+        }
+    })
+}
+
 /// 刷新屏幕（逐行覆盖重绘，避免全屏 Clear 造成的闪烁）。
 pub fn refresh_screen() {
     let mut stdout = io::stdout();
+    let margin = current_margin();
 
     with_global(|g| {
         let cols = g.COLS;
@@ -240,7 +265,15 @@ pub fn refresh_screen() {
                     break;
                 }
                 let data = c.borrow().data.clone();
-                let _ = execute!(stdout, cursor::MoveTo(0, 1 + row));
+                if margin > 0 {
+                    /* 左侧行号（对应 C 的 draw_row 中 LINE_NUMBER 配色）。 */
+                    let ln = c.borrow().lineno;
+                    let _ = execute!(stdout, cursor::MoveTo(0, 1 + row));
+                    let _ = execute!(stdout, style::SetForegroundColor(Color::DarkGrey));
+                    let _ = write!(stdout, "{:>width$} ", ln, width = margin - 1);
+                    let _ = execute!(stdout, style::SetForegroundColor(Color::Reset));
+                }
+                let _ = execute!(stdout, cursor::MoveTo(margin as u16, 1 + row));
                 let _ = write!(stdout, "{}", data);
                 /* 清除该行剩余部分（比补空格更高效、闪烁更小）。 */
                 let _ = execute!(stdout, Clear(ClearType::UntilNewLine));
@@ -488,6 +521,7 @@ pub fn blank_edit() {
 /// 并更新 `cursor_row`。
 pub fn place_the_cursor() {
     let editwinrows = with_global(|g| g.editwinrows);
+    let margin = current_margin();
     with_global_mut(|g| {
         let openfile = g.openfile.clone();
         if let Some(of) = openfile {
@@ -503,11 +537,11 @@ pub fn place_the_cursor() {
             };
             of_ref.cursor_row = row;
             if row < editwinrows as isize {
-                /* 光标列用显示列宽计算（而非字节偏移）。 */
+                /* 光标列用显示列宽计算（而非字节偏移），并加上行号边距。 */
                 let data = cur.borrow().data.clone();
                 let column = crate::utils::wideness(data.as_bytes(), of_ref.current_x);
                 let mut stdout = io::stdout();
-                let _ = execute!(stdout, cursor::MoveTo(column as u16, (row + 1) as u16));
+                let _ = execute!(stdout, cursor::MoveTo((column + margin) as u16, (row + 1) as u16));
             }
         }
     });

@@ -212,3 +212,26 @@ fn bottombars_switches_currmenu() {
     nano_rs::winio::bottombars(MMAIN);
     assert_eq!(with_global(|g| g.currmenu), MMAIN, "bottombars(MMAIN) 应切回主菜单");
 }
+
+/// 行号边距：未开启 LINE_NUMBERS 时为 0，开启后为 总行数位数+1。
+#[test]
+fn linenumbers_margin() {
+    setup();
+    let m0 = nano_rs::winio::current_margin();
+    assert_eq!(m0, 0, "默认不显示行号");
+    SET(LINE_NUMBERS);
+    let m1 = nano_rs::winio::current_margin();
+    assert_eq!(m1, 2, "单行文件行号位数1 + 空格 = 2");
+    /* 构造 10 行：9 次回车 + 每行一个字符。 */
+    for _ in 0..9 {
+        nano_rs::text::inject(b"a", 1);
+        nano_rs::text::do_enter();
+    }
+    nano_rs::text::inject(b"a", 1);
+    nano_rs::files::prepare_for_display();
+    let m2 = nano_rs::winio::current_margin();
+    assert_eq!(m2, 3, "10 行文件行号位数2 + 空格 = 3");
+
+    UNSET(LINE_NUMBERS);
+    assert_eq!(nano_rs::winio::current_margin(), 0, "关闭后恢复 0");
+}

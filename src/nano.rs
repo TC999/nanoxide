@@ -52,16 +52,19 @@ pub fn main() {
     history::load_history();
 
     // 9. 打开文件
-    let filename = args.get(1).map(|s| s.as_str()).unwrap_or("");
-    if !filename.is_empty() {
-        let opened = files::open_buffer(filename);
-        if !opened {
-            // 读取失败时也创建空缓冲区，保证编辑器始终有可编辑目标
+    let filename = parse_args(&args);
+    match filename {
+        Some(f) => {
+            let opened = files::open_buffer(&f);
+            if !opened {
+                // 读取失败时也创建空缓冲区，保证编辑器始终有可编辑目标
+                files::open_buffer("");
+            }
+        }
+        None => {
+            // 创建空缓冲区
             files::open_buffer("");
         }
-    } else {
-        // 创建空缓冲区
-        files::open_buffer("");
     }
 
     // 10. 准备显示
@@ -113,7 +116,7 @@ pub fn show_welcome_message() -> bool {
 }
 
 /// 解析命令行参数。
-fn parse_args(args: &[String]) {
+fn parse_args(args: &[String]) -> Option<String> {
     let mut i = 1;
     while i < args.len() {
         let arg = &args[i];
@@ -209,16 +212,19 @@ fn parse_args(args: &[String]) {
                 "-F" | "--multibuffer" => SET(NEW_BUFFER),
                 _ => {
                     if arg == "--" {
-                        break;
+                        /* "--" 之后的参数都是文件名。 */
+                        i += 1;
+                        return args.get(i).cloned();
                     }
                 }
             }
         } else {
-            // 文件名参数
-            break;
+            /* 文件名参数（对应 C 中 getopt 循环后的 optind）。 */
+            return Some(arg.clone());
         }
         i += 1;
     }
+    None
 }
 
 /// 打印版本信息。
