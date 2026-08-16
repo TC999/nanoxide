@@ -489,7 +489,7 @@ pub struct OpenFileStruct {
     pub last_saved: Option<UndoRef>, pub last_action: UndoType,
     pub modified: bool, pub syntax: Option<SyntaxRef>,
     pub errormessage: Option<String>,
-    pub next: Option<OpenFileRef>, pub prev: Option<OpenFileWeak>,
+    pub next: Option<OpenFileRef>, pub prev: Option<OpenFileRef>,
 }
 
 impl OpenFileStruct {

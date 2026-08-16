@@ -284,3 +284,42 @@ fn help_init_and_wrap_works() {
     });
     assert!(rows > 5, "帮助缓冲应有多个换行行，实际 {rows}");
 }
+
+/// 帮助退出（close_buffer）后应恢复原编辑缓冲的内容。
+#[test]
+fn help_close_restores_original_buffer() {
+    setup();
+    nano_rs::text::inject(b"abc", 3);
+    // 组装帮助文本并换行入新缓冲（帮助缓冲的 prev = 原编辑缓冲）
+    nano_rs::help::help_init();
+    nano_rs::help::wrap_help_text_into_buffer();
+    let help_rows = with_global(|g| {
+        let of = g.openfile.as_ref().unwrap().borrow();
+        let mut n = 0;
+        let mut l = of.filetop.clone();
+        while let Some(x) = l {
+            n += 1;
+            l = { let r = x.borrow(); r.next.clone() };
+        }
+        n
+    });
+    assert!(help_rows > 5, "帮助缓冲应有多行，实际 {help_rows}");
+    // 模拟 Ctrl+X 退出帮助：丢弃帮助缓冲
+    nano_rs::nano::close_buffer();
+    // 应恢复原编辑缓冲，内容为 "abc"
+    let (txt, rows) = with_global(|g| {
+        let of = g.openfile.as_ref().unwrap().borrow();
+        let mut s = String::new();
+        let mut n = 0;
+        let mut l = of.filetop.clone();
+        while let Some(x) = l {
+            let b = x.borrow();
+            s.push_str(&b.data);
+            n += 1;
+            l = b.next.clone();
+        }
+        (s, n)
+    });
+    assert_eq!(txt, "abc", "退出帮助后应恢复原编辑内容");
+    assert_eq!(rows, 2, "原缓冲 = abc 行 + 魔法行");
+}

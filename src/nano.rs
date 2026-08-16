@@ -649,10 +649,10 @@ pub fn make_new_buffer() {
                 new_of.borrow_mut().next = next.clone();
                 new_of.borrow_mut().prev = prev;
                 if let Some(n) = &next {
-                    n.borrow_mut().prev = Some(Rc::downgrade(&new_of));
+                    n.borrow_mut().prev = Some(new_of.clone());
                 }
                 o.borrow_mut().next = Some(new_of.clone());
-                new_of.borrow_mut().prev = Some(Rc::downgrade(&o));
+                new_of.borrow_mut().prev = Some(o.clone());
                 g.openfile = Some(new_of);
             }
         }
@@ -664,15 +664,15 @@ pub fn close_buffer() {
     with_global_mut(|g| {
         let of = g.openfile.clone();
         if let Some(cur) = of {
-            let prev = { let r = cur.borrow(); r.prev.clone() }.and_then(|w| w.upgrade());
+            let prev = { let r = cur.borrow(); r.prev.clone() };
             let next = { let r = cur.borrow(); r.next.clone() };
 
-            /* 从循环链表摘除当前缓冲区。 */
+            /* 从双向链表摘除当前缓冲区。 */
             if let Some(p) = &prev {
                 p.borrow_mut().next = next.clone();
             }
             if let Some(n) = &next {
-                n.borrow_mut().prev = prev.as_ref().map(|p| Rc::downgrade(p));
+                n.borrow_mut().prev = prev.clone();
             }
 
             /* 回到前一个缓冲区；若无，则回到下一个。 */
