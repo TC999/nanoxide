@@ -195,35 +195,39 @@ pub fn shortcut_init() {
     // 主菜单快捷键（与 C 版 global.c 对应）
     add_to_sclist(MMAIN, r"^G", 7, FunctionId::DoHelp, 0);
     add_to_sclist(MMAIN, r"^O", 15, FunctionId::DoWriteOut, 0);
-    add_to_sclist(MMAIN, r"^F", 6, FunctionId::DoSearchForward, 0);
+    add_to_sclist(MMAIN | MBROWSER | MHELP, r"^F", 6, FunctionId::DoSearchForward, 0);
     add_to_sclist(MMAIN, r"^\", 28, FunctionId::DoReplace, 0);
     add_to_sclist(MMAIN, r"^K", 11, FunctionId::DoCut, 0);
     add_to_sclist(MMAIN, r"^U", 21, FunctionId::DoPaste, 0);
     add_to_sclist(MMAIN, r"^J", 10, FunctionId::DoJustify, 0);
     add_to_sclist(MMAIN, r"^T", 20, FunctionId::DoExecute, 0);
     add_to_sclist(MMAIN, r"^C", 3, FunctionId::DoReportLocation, 0);
-    add_to_sclist(MMAIN, r"^X", 24, FunctionId::DoExit, 0);
+    add_to_sclist(MMAIN | MBROWSER | MHELP, r"^X", 24, FunctionId::DoExit, 0);
     add_to_sclist(MMAIN, r"^R", 18, FunctionId::DoInsertFile, 0);
     add_to_sclist(MMAIN, r"^/", 31, FunctionId::DoGoToLine, 0);
-    add_to_sclist(MMAIN, r"^B", 2, FunctionId::DoSearchBackward, 0);
+    add_to_sclist(MMAIN | MBROWSER | MHELP, r"^B", 2, FunctionId::DoSearchBackward, 0);
     // 方向键（保留但不在底部栏显示）
-    add_to_sclist(MMAIN, r"^P", 16, FunctionId::DoUp, 0);
-    add_to_sclist(MMAIN, r"^N", 14, FunctionId::DoDown, 0);
+    add_to_sclist(MMAIN | MBROWSER | MHELP, r"^P", 16, FunctionId::DoUp, 0);
+    add_to_sclist(MMAIN | MBROWSER | MHELP, r"^N", 14, FunctionId::DoDown, 0);
     add_to_sclist(MMAIN, r"^A", 1, FunctionId::DoHome, 0);
     add_to_sclist(MMAIN, r"^E", 5, FunctionId::DoEnd, 0);
-    add_to_sclist(MMAIN, r"^V", 22, FunctionId::DoPageDown, 0);
-    add_to_sclist(MMAIN, r"^Y", 25, FunctionId::DoPageUp, 0);
+    add_to_sclist(MMAIN | MBROWSER | MHELP | MLINTER, r"^V", 22, FunctionId::DoPageDown, 0);
+    add_to_sclist(MMAIN | MBROWSER | MHELP | MLINTER, r"^Y", 25, FunctionId::DoPageUp, 0);
     add_to_sclist(MMAIN, r"^D", 4, FunctionId::DoDelete, 0);
     add_to_sclist(MMAIN, r"^H", 8, FunctionId::DoBackspace, 0);
     add_to_sclist(MMAIN, r"^I", 9, FunctionId::DoTab, 0);
     add_to_sclist(MMAIN, r"^M", 13, FunctionId::DoEnter, 0);
-    add_to_sclist(MMAIN, r"^L", 12, FunctionId::DoRefresh, 0);
+    // 全屏刷新（对应 C 的 full_refresh：MMOST|MBROWSER|MHELP|MYESNO）
+    add_to_sclist(MMAIN | MBROWSER | MHELP | MYESNO, r"^L", 12, FunctionId::DoFullRefresh, 0);
     // Alt 组合
     add_to_sclist(MMAIN, "M-U", 0, FunctionId::DoUndo, 0);
     add_to_sclist(MMAIN, "M-E", 0, FunctionId::DoRedo, 0);
     add_to_sclist(MMAIN, "M-A", 0, FunctionId::DoMark, 0);
     add_to_sclist(MMAIN, "M-6", 0, FunctionId::DoCopy, 0);
     add_to_sclist(MMAIN, "M-]", 0, FunctionId::DoFindBracket, 0);
+    // 帮助页 Previous/Next（对应 C 的 M-B/M-F → do_findprevious/do_findnext）
+    add_to_sclist(MMAIN | MBROWSER | MHELP, "M-B", 0x262, FunctionId::DoFindPrevious, 0);
+    add_to_sclist(MMAIN | MBROWSER | MHELP, "M-F", 0x266, FunctionId::DoFindNext, 0);
     // 方向键（仅用于输入匹配，不显示在底部栏）
     add_to_sclist(MMAIN, "Left", KEY_LEFT, FunctionId::DoLeft, 0);
     add_to_sclist(MMAIN, "Right", KEY_RIGHT, FunctionId::DoRight, 0);
@@ -253,6 +257,9 @@ pub fn shortcut_init() {
     add_to_sclist(MYESNO, "A", 97, FunctionId::None, 0);
     // 函数列表（按 C 版顺序，遍历时为逆序，与 C 版一致）
     add_to_funcs(FunctionId::DoHelp, (MMOST | MBROWSER) & !MFINDINHELP, "Help", "help_gist", false);
+    /* 帮助查看器专有条目（对应 C：add_to_funcs(full_refresh, MHELP, ...) 等）。 */
+    add_to_funcs(FunctionId::DoFullRefresh, MHELP, "Refresh", "x", false);
+    add_to_funcs(FunctionId::DoExit, MHELP, "Close", "x", false);
     add_to_funcs(FunctionId::DoCancel, ((MMOST & !MMAIN) | MYESNO), "Cancel", "cancel_gist", true);
     add_to_funcs(FunctionId::DoExit, MMAIN, "Exit", "exit_gist", false);
     add_to_funcs(FunctionId::DoRefresh, MMAIN | MREPLACE, "Refresh", "x", false);
@@ -260,9 +267,10 @@ pub fn shortcut_init() {
     add_to_funcs(FunctionId::DoInsertFile, MMAIN, "Read File", "insert_gist", false);
     add_to_funcs(FunctionId::DoJustify, MMAIN, "Justify", "justify_gist", false);
     add_to_funcs(FunctionId::DoSearchForward, MMAIN | MHELP, "Where Is", "whereis_gist", false);
+    add_to_funcs(FunctionId::DoSearchBackward, MMAIN | MHELP, "Where Was", "wherewas_gist", false);
     add_to_funcs(FunctionId::DoReplace, MMAIN, "Replace", "replace_gist", false);
-    add_to_funcs(FunctionId::DoFindPrevious, MMAIN | MHELP, "Find Previous", "findprev_gist", false);
-    add_to_funcs(FunctionId::DoFindNext, MMAIN | MHELP, "Find Next", "findnext_gist", false);
+    add_to_funcs(FunctionId::DoFindPrevious, MMAIN | MHELP, "Previous", "findprev_gist", false);
+    add_to_funcs(FunctionId::DoFindNext, MMAIN | MHELP, "Next", "findnext_gist", false);
     add_to_funcs(FunctionId::DoCut, MMAIN, "Cut", "cut_gist", false);
     add_to_funcs(FunctionId::DoPaste, MMAIN, "Paste", "paste_gist", false);
     add_to_funcs(FunctionId::DoExecute, MMAIN, "Execute", "execute_gist", false);
@@ -275,16 +283,15 @@ pub fn shortcut_init() {
     add_to_funcs(FunctionId::DoToggleCaseSensitive, MWHEREIS | MREPLACE, "Case Sens", "casesens_gist", true);
     add_to_funcs(FunctionId::DoToggleRegexp, MWHEREIS | MREPLACE, "Regexp", "regexp_gist", true);
     add_to_funcs(FunctionId::DoToggleBackwards, MWHEREIS | MREPLACE, "Backwards", "backwards_gist", true);
-    add_to_funcs(FunctionId::DoSearchBackward, MMAIN | MHELP, "Where Was", "wherewas_gist", false);
     add_to_funcs(FunctionId::DoFindBracket, MMAIN, "To Bracket", "bracket_gist", true);
     add_to_funcs(FunctionId::DoLeft, MMAIN, "Left", "left_gist", true);
     add_to_funcs(FunctionId::DoRight, MMAIN, "Right", "right_gist", true);
-    add_to_funcs(FunctionId::DoUp, MMAIN, "Up", "up_gist", true);
-    add_to_funcs(FunctionId::DoDown, MMAIN, "Down", "down_gist", true);
+    add_to_funcs(FunctionId::DoUp, MMAIN | MBROWSER | MHELP, "Prev Line", "prevline_gist", true);
+    add_to_funcs(FunctionId::DoDown, MMAIN | MBROWSER | MHELP, "Next Line", "nextline_gist", true);
     add_to_funcs(FunctionId::DoHome, MMAIN, "Home", "home_gist", true);
     add_to_funcs(FunctionId::DoEnd, MMAIN, "End", "end_gist", true);
-    add_to_funcs(FunctionId::DoPageUp, MMAIN, "Page Up", "pageup_gist", true);
-    add_to_funcs(FunctionId::DoPageDown, MMAIN, "Page Down", "pagedown_gist", true);
+    add_to_funcs(FunctionId::DoPageUp, MMAIN | MHELP, "Prev Page", "prevpage_gist", true);
+    add_to_funcs(FunctionId::DoPageDown, MMAIN | MHELP, "Next Page", "nextpage_gist", true);
     add_to_funcs(FunctionId::DoDelete, MMAIN, "Delete", "delete_gist", true);
     add_to_funcs(FunctionId::DoBackspace, MMAIN, "Backspace", "backspace_gist", true);
     add_to_funcs(FunctionId::DoEnter, MMAIN, "Enter", "enter_gist", true);
