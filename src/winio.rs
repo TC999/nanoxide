@@ -1007,3 +1007,193 @@ pub fn update_line(line: &LineRef, index: usize) -> i32 {
         1
     }
 }
+
+// ======================== 字符串显示与逐字输入（对应 winio.c） ========================
+
+/// 将给定文本转换为可在终端显示的字符串：控制字符显示为 ^X，
+/// 制表符展开为空格，宽字符保留，零宽字符处理等。
+/// column 是起始列，span 是可用宽度（对应 `display_string`）。
+pub fn display_string(text: &[u8], column: usize, span: usize, isdata: bool, isprompt: bool) -> String {
+    let start_x = crate::utils::actual_x(text, column);
+    let start_col = crate::utils::wideness(text, start_x);
+    let beyond = column + span;
+
+    let mut pos = start_x;
+    let mut col = start_col;
+    let mut converted: Vec<u8> = Vec::new();
+
+    /* 若第一个字符在左边缘之前开始，或被 "<" 记号覆盖，显示占位符。 */
+    if (start_col < column || (start_col > 0 && isdata && !ISSET(SOFTWRAP)))
+        && chars::byte_at(text, pos) != 0
+        && chars::byte_at(text, pos) != b'\t'
+    {
+        if chars::is_cntrl_char(&text[pos..]) {
+            if start_col < column {
+                converted.push(chars::control_mbrep(&text[pos..], isdata));
+                col += 1;
+                pos += chars::char_length(&text[pos..]);
+            }
+        } else if chars::is_doublewidth(&text[pos..]) {
+            if start_col == column {
+                converted.push(b' ');
+                col += 1;
+            }
+            /* 双宽字符的右半显示为 ']'。 */
+            converted.push(b']');
+            col += 1;
+            pos += chars::char_length(&text[pos..]);
+        }
+    }
+
+    while chars::byte_at(text, pos) != 0 && (col < beyond || chars::is_zerowidth(&text[pos..])) {
+        let c = text[pos];
+
+        /* 普通可打印 ASCII 字符占一字节一列。 */
+        if (c as i8) > 0x20 && c != DEL_CODE {
+            converted.push(c);
+            pos += 1;
+            col += 1;
+            continue;
+        }
+
+        /* 空格显示为可见字符或空格。 */
+        if c == b' ' {
+            if ISSET(WHITESPACE_DISPLAY) {
+                let (ws, (wl0, wl1)) = with_global(|g| (g.whitespace.clone(), g.whitelen));
+                if let Some(w) = ws {
+                    for i in wl0..wl0 + wl1 {
+                        if i < w.len() {
+                            converted.push(w[i]);
+                        }
+                    }
+                }
+            } else {
+                converted.push(b' ');
+            }
+            col += 1;
+            pos += 1;
+            continue;
+        }
+
+        /* 制表符显示为可见字符加空格，或仅空格。 */
+        if c == b'\t' {
+            let tabsize = with_global(|g| g.tabsize);
+            let show_ws = ISSET(WHITESPACE_DISPLAY)
+                && (converted.len() > 0 || !isdata || !ISSET(SOFTWRAP)
+                    || col % tabsize == 0 || col == start_col);
+            if show_ws {
+                let (ws, (wl0, _)) = with_global(|g| (g.whitespace.clone(), g.whitelen));
+                if let Some(w) = ws {
+                    for i in 0..wl0 {
+                        if i < w.len() {
+                            converted.push(w[i]);
+                        }
+                    }
+                }
+            } else {
+                converted.push(b' ');
+            }
+            col += 1;
+            /* 用所需数量的空格填满制表符。 */
+            while col % tabsize != 0 && col < beyond {
+                converted.push(b' ');
+                col += 1;
+            }
+            pos += 1;
+            continue;
+        }
+
+        /* 控制字符以前导脱字符表示。 */
+        if chars::is_cntrl_char(&text[pos..]) {
+            converted.push(b'^');
+            converted.push(chars::control_mbrep(&text[pos..], isdata));
+            pos += chars::char_length(&text[pos..]);
+            col += 2;
+            continue;
+        }
+
+        /* 多字节字符：转换为宽字符确定宽度。 */
+        match chars::mbtowide(&text[pos..]) {
+            Err(()) => {
+                /* 非法字符显示为替换符。 */
+                converted.extend_from_slice(b"\xEF\xBF\xBD");
+                pos += 1;
+                col += 1;
+            }
+            Ok((wc, charlen)) => {
+                let charwidth = chars::wcwidth(wc);
+                let on_vt = with_global(|g| g.on_a_vt);
+                if charwidth == 0 {
+                    /* 在 Linux 控制台上跳过零宽字符。 */
+                    if on_vt {
+                        pos += charlen;
+                        continue;
+                    }
+                }
+                for i in 0..charlen {
+                    if pos + i < text.len() {
+                        converted.push(text[pos + i]);
+                    }
+                }
+                pos += charlen;
+                col += if charwidth < 0 { 1 } else { charwidth as usize };
+            }
+        }
+    }
+
+    /* 若有更多文本无法显示，为 ">" 腾出空间。 */
+    if col > beyond || (chars::byte_at(text, pos) != 0 && (isprompt || (isdata && !ISSET(SOFTWRAP)))) {
+        /* 后退一个字符（跳过零宽字符）。 */
+        loop {
+            if converted.is_empty() {
+                break;
+            }
+            let step = chars::step_left(&converted, converted.len());
+            converted.truncate(step);
+            if converted.is_empty() || !chars::is_zerowidth(&converted[converted.len()..]) {
+                break;
+            }
+        }
+        /* 双宽字符的左半显示为 '['。 */
+        if !converted.is_empty() {
+            let clen = chars::char_length(&converted[converted.len()..]);
+            let start = converted.len() - clen;
+            if chars::is_doublewidth(&converted[start..]) {
+                converted.truncate(start);
+                converted.push(b'[');
+            }
+        }
+    }
+
+    String::from_utf8_lossy(&converted).into_owned()
+}
+
+/// 读取一个逐字按键（一个或两个转义序列），返回其字节
+/// （对应 `get_verbatim_kbinput`；基于 crossterm 按键流）。
+pub fn get_verbatim_kbinput(count: &mut usize) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    *count = 0;
+
+    let code = get_keycode();
+    if code < 0 {
+        return bytes;
+    }
+    let c = code as u8;
+    bytes.push(c);
+    *count = 1;
+
+    /* 若收到的是 UTF-8 起始字节，也读取续字节并组装成一个字符。 */
+    if (0xC0..=0xF7).contains(&c) {
+        let extras = (c / 16) % 4 + if c <= 0xCF { 1 } else { 0 };
+        for _ in 0..extras {
+            let next = get_keycode();
+            if next < 0 {
+                break;
+            }
+            bytes.push(next as u8);
+            *count += 1;
+        }
+    }
+
+    bytes
+}
