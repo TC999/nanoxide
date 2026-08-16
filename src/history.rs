@@ -1,4 +1,4 @@
-﻿/**************************************************************************
+/**************************************************************************
  * history.rs  --  GNU nano 历史记录管理（对应 history.c）
  * 版权 (C) 2003-2026 Free Software Foundation, Inc.
  * 本程序是自由软件：可根据 GPLv3+ 重新分发/修改。
@@ -397,7 +397,7 @@ pub fn load_history() {
         None => return,
     };
 
-    let mut file = match std::fs::File::open(&historyname) {
+    let file = match std::fs::File::open(&historyname) {
         /* 若读取已有文件失败（文件不存在除外），退出时不保存历史。 */
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
         Err(e) => {
@@ -566,7 +566,7 @@ pub fn restore_anchors(string: &str) {
 
     with_global_mut(|g| {
         let of = g.openfile.as_ref().expect("no open file").clone();
-        let mut of = of.borrow_mut();
+        let of = of.borrow();
         let mut line = of.filetop.clone();
 
         while !rest.is_empty() {
@@ -601,7 +601,7 @@ pub fn load_positions_register() {
         None => return,
     };
 
-    let mut file = match std::fs::File::open(&registername) {
+    let file = match std::fs::File::open(&registername) {
         /* 若读取已有文件失败（文件不存在除外），退出时不保存寄存器。 */
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
         Err(e) => {
@@ -638,7 +638,7 @@ pub fn load_positions_register() {
             continue;
         };
         let mut stanza = phrase[sp..].to_vec();
-        let mut length = length - sp;
+        let length = length - sp;
 
         /* 将 NUL 解码为内嵌换行。 */
         crate::utils::recode_NUL_to_LF(&mut stanza, length);
@@ -760,7 +760,7 @@ pub fn save_positions_register() {
         let mut path_and_place = format!("{} {} {}\n", filename, linenumber, columnnumber).into_bytes();
 
         /* 将文件名中的换行编码为 NUL。 */
-        let mut length = crate::utils::recode_LF_to_NUL(&mut path_and_place);
+        let length = crate::utils::recode_LF_to_NUL(&mut path_and_place);
         /* 恢复末尾换行。 */
         path_and_place[length - 1] = b'\n';
 
@@ -856,8 +856,8 @@ pub fn update_positions_register() {
 
     with_global_mut(|g| {
         /* 若无匹配，创建新节点；否则摘除匹配项。 */
-        let mut item = found.clone();
-        let mut item = match item {
+        let item = found.clone();
+        let item = match item {
             Some(it) => it,
             None => {
                 let newitem = Rc::new(RefCell::new(PositionStruct {
