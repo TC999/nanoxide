@@ -312,3 +312,69 @@ pub fn unbound_key(kbinput: i32) {
 pub fn epithet_of_flag(_flag: i32) -> &'static str {
     "toggle"
 }
+
+/// 在给定菜单中查找第一个绑定到给定函数的快捷键（对应 `first_sc_for`）。
+pub fn first_sc_for(menu: i32, func: FunctionId) -> Option<KeyRef> {
+    with_global(|g| {
+        let mut current = g.shortcuts.clone();
+        while let Some(s) = current {
+            let s_ref = s.borrow();
+            if (s_ref.menus & menu) != 0 && s_ref.func == func && !s_ref.keystr.is_empty() {
+                return Some(s.clone());
+            }
+            current = s_ref.next.clone();
+        }
+        None
+    });
+    None
+}
+
+const ALT_BACKSPACE: i32 = 0x40A;
+const ALT_SHIFT_COMMA: i32 = 0x43C;
+const ALT_SHIFT_DOT: i32 = 0x43E;
+
+/// 注册提示/浏览器/其他菜单的快捷键（对应 global.c 的其余部分）。
+pub fn shortcut_init_rest() {
+    // 提示菜单：方向键与编辑键
+    let mmi = MMAIN | MWHEREIS | MREPLACE | MREPLACEWITH | MGOTOLINE | MINSERTFILE
+        | MWRITEFILE | MEXECUTE | MSPELL | MLINTER;
+    add_to_sclist(mmi, "Left", KEY_LEFT, FunctionId::DoLeft, 0);
+    add_to_sclist(mmi, "Right", KEY_RIGHT, FunctionId::DoRight, 0);
+    add_to_sclist(mmi, "Up", KEY_UP, FunctionId::GetOlderItem, 0);
+    add_to_sclist(mmi, "Down", KEY_DOWN, FunctionId::GetNewerItem, 0);
+    add_to_sclist(mmi, "Home", KEY_HOME, FunctionId::DoHome, 0);
+    add_to_sclist(mmi, "End", KEY_END, FunctionId::DoEnd, 0);
+    add_to_sclist(mmi, "M-Left", ALT_LEFT, FunctionId::DoPrevWord, 0);
+    add_to_sclist(mmi, "M-Right", ALT_RIGHT, FunctionId::DoNextWord, 0);
+    add_to_sclist(mmi, "M-Backspace", ALT_BACKSPACE, FunctionId::DoBackspace, 0);
+    add_to_sclist(mmi, "M-D", ALT_DELETE, FunctionId::DoCut, 0);
+    add_to_sclist(mmi, "^V", 22, FunctionId::DoVerbatimInput, 0);
+    add_to_sclist(mmi, "^X", 24, FunctionId::DoCut, 0);
+    add_to_sclist(mmi, "^K", 11, FunctionId::DoCut, 0);
+    add_to_sclist(mmi, "^U", 21, FunctionId::DoPaste, 0);
+    add_to_sclist(mmi, "^H", 8, FunctionId::DoBackspace, 0);
+    add_to_sclist(mmi, "^I", 9, FunctionId::DoTab, 0);
+
+    // 浏览器菜单
+    add_to_sclist(MBROWSER, "^F", 6, FunctionId::DoSearchForward, 0);
+    add_to_sclist(MBROWSER, "^B", 2, FunctionId::DoSearchBackward, 0);
+    add_to_sclist(MBROWSER, "^C", 3, FunctionId::DoExit, 0);
+    add_to_sclist(MBROWSER, "^S", 19, FunctionId::DoEnter, 0);
+    add_to_sclist(MBROWSER, "^H", 8, FunctionId::DoGotoDir, 0);
+    add_to_sclist(MBROWSER, "Up", KEY_UP, FunctionId::DoUp, 0);
+    add_to_sclist(MBROWSER, "Down", KEY_DOWN, FunctionId::DoDown, 0);
+    add_to_sclist(MBROWSER, "Left", KEY_LEFT, FunctionId::DoLeft, 0);
+    add_to_sclist(MBROWSER, "Right", KEY_RIGHT, FunctionId::DoRight, 0);
+    add_to_sclist(MBROWSER, "M-<", ALT_SHIFT_COMMA, FunctionId::ToFirstFile, 0);
+    add_to_sclist(MBROWSER, "M->", ALT_SHIFT_DOT, FunctionId::ToLastFile, 0);
+    add_to_sclist(MBROWSER, "PageUp", KEY_PPAGE, FunctionId::DoPageUp, 0);
+    add_to_sclist(MBROWSER, "PageDown", KEY_NPAGE, FunctionId::DoPageDown, 0);
+
+    // 函数列表补充
+    add_to_funcs(FunctionId::GetOlderItem, MMAIN, "Get Older Item", "older_gist", false);
+    add_to_funcs(FunctionId::GetNewerItem, MMAIN, "Get Newer Item", "newer_gist", false);
+    add_to_funcs(FunctionId::ToFirstFile, MBROWSER, "First File", "firstfile_gist", false);
+    add_to_funcs(FunctionId::ToLastFile, MBROWSER, "Last File", "lastfile_gist", false);
+    add_to_funcs(FunctionId::DoGotoDir, MBROWSER, "Go To Dir", "gotodir_gist", false);
+    add_to_funcs(FunctionId::DoVerbatimInput, MMAIN, "Verbatim Input", "verbatim_gist", false);
+}
