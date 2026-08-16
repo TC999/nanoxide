@@ -116,8 +116,12 @@ pub fn show_welcome_message() -> bool {
 }
 
 /// 解析命令行参数。
-fn parse_args(args: &[String]) -> Option<String> {
+/// 解析命令行选项（对应 C 的 getopt_long 循环）。
+/// GNU getopt 默认会重排 argv，因此选项可以出现在文件名之后；
+/// 这里记录第一个文件名，同时继续解析后续选项。
+pub fn parse_args(args: &[String]) -> Option<String> {
     let mut i = 1;
+    let mut filename: Option<String> = None;
     while i < args.len() {
         let arg = &args[i];
         if arg.starts_with('-') {
@@ -212,19 +216,24 @@ fn parse_args(args: &[String]) -> Option<String> {
                 "-F" | "--multibuffer" => SET(NEW_BUFFER),
                 _ => {
                     if arg == "--" {
-                        /* "--" 之后的参数都是文件名。 */
+                        /* "--" 之后的参数都是文件名，不再解析选项。 */
                         i += 1;
-                        return args.get(i).cloned();
+                        if filename.is_none() {
+                            filename = args.get(i).cloned();
+                        }
+                        break;
                     }
                 }
             }
         } else {
-            /* 文件名参数（对应 C 中 getopt 循环后的 optind）。 */
-            return Some(arg.clone());
+            /* 文件名参数；继续解析后续选项（对应 GNU getopt 的重排）。 */
+            if filename.is_none() {
+                filename = Some(arg.clone());
+            }
         }
         i += 1;
     }
-    None
+    filename
 }
 
 /// 打印版本信息。

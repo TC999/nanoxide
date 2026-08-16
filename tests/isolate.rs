@@ -235,3 +235,29 @@ fn linenumbers_margin() {
     UNSET(LINE_NUMBERS);
     assert_eq!(nano_rs::winio::current_margin(), 0, "关闭后恢复 0");
 }
+
+/// 选项可出现在文件名之后（对应 GNU getopt 的重排 argv）。
+#[test]
+fn args_after_filename_parsed() {
+    setup();
+    // 文件名在前，选项在后
+    let f = nano_rs::nano::parse_args(&[
+        "nano-rs".to_string(), "file.txt".to_string(), "-l".to_string(),
+    ]);
+    assert_eq!(f.as_deref(), Some("file.txt"));
+    assert!(ISSET(LINE_NUMBERS), "-l 在文件名后应生效");
+    UNSET(LINE_NUMBERS);
+    // 选项在前，文件名在后（常规形式）
+    let f2 = nano_rs::nano::parse_args(&[
+        "nano-rs".to_string(), "--linenumbers".to_string(), "file.txt".to_string(),
+    ]);
+    assert_eq!(f2.as_deref(), Some("file.txt"));
+    assert!(ISSET(LINE_NUMBERS));
+    UNSET(LINE_NUMBERS);
+    // "--" 之后不再解析选项
+    let f3 = nano_rs::nano::parse_args(&[
+        "nano-rs".to_string(), "--".to_string(), "file.txt".to_string(), "-l".to_string(),
+    ]);
+    assert_eq!(f3.as_deref(), Some("file.txt"));
+    assert!(!ISSET(LINE_NUMBERS), "-- 之后 -l 应视为文件名而不生效");
+}
