@@ -50,6 +50,7 @@ pub fn open_buffer(filename: &str) -> bool {
             }));
             new_file.borrow_mut().filetop = Some(line.clone());
             new_file.borrow_mut().filebot = Some(line.clone());
+            new_file.borrow_mut().edittop = Some(line.clone());
             new_file.borrow_mut().current = Some(line);
             g.openfile = Some(new_file);
         });

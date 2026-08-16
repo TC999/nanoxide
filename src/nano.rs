@@ -54,7 +54,11 @@ pub fn main() {
     // 9. 打开文件
     let filename = args.get(1).map(|s| s.as_str()).unwrap_or("");
     if !filename.is_empty() {
-        files::open_buffer(filename);
+        let opened = files::open_buffer(filename);
+        if !opened {
+            // 读取失败时也创建空缓冲区，保证编辑器始终有可编辑目标
+            files::open_buffer("");
+        }
     } else {
         // 创建空缓冲区
         files::open_buffer("");

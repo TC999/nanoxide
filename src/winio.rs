@@ -481,9 +481,11 @@ pub fn place_the_cursor() {
         let openfile = g.openfile.clone();
         if let Some(of) = openfile {
             let mut of_ref = of.borrow_mut();
+            let (cur, edittop) = match (&of_ref.current, &of_ref.edittop) {
+                (Some(c), Some(e)) => (c.clone(), e.clone()),
+                _ => return,
+            };
             let row = {
-                let cur = of_ref.current.clone().unwrap();
-                let edittop = of_ref.edittop.clone().unwrap();
                 let cur_lineno = cur.borrow().lineno;
                 let edit_lineno = edittop.borrow().lineno;
                 cur_lineno - edit_lineno
@@ -491,7 +493,6 @@ pub fn place_the_cursor() {
             of_ref.cursor_row = row;
             if row < editwinrows as isize {
                 /* 光标列用显示列宽计算（而非字节偏移）。 */
-                let cur = of_ref.current.clone().unwrap();
                 let data = cur.borrow().data.clone();
                 let column = crate::utils::wideness(data.as_bytes(), of_ref.current_x);
                 let mut stdout = io::stdout();

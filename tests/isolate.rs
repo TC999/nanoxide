@@ -81,3 +81,29 @@ fn handle_right_key_alone() {
     let x = with_global(|g| g.openfile.as_ref().unwrap().borrow().current_x);
     assert_eq!(x, 1);
 }
+
+/// 不带文件名启动：open_buffer("") 必须设置 edittop/current，place_the_cursor 不 panic。
+#[test]
+fn empty_buffer_startup_no_panic() {
+    setup();
+    nano_rs::files::open_buffer("");
+    let (cur, edittop) = with_global(|g| {
+        let of = g.openfile.as_ref().unwrap().borrow();
+        (of.current.clone(), of.edittop.clone())
+    });
+    assert!(cur.is_some(), "空缓冲区必须设置 current");
+    assert!(edittop.is_some(), "空缓冲区必须设置 edittop（回归：曾为 None 导致启动崩溃）");
+    nano_rs::winio::place_the_cursor();
+}
+
+/// 文件不存在时启动：走新文件分支，place_the_cursor 不 panic。
+#[test]
+fn nonexistent_file_startup_no_panic() {
+    setup();
+    nano_rs::files::open_buffer("definitely_missing_file_xyz.txt");
+    let edittop = with_global(|g| g.openfile.as_ref().unwrap().borrow().edittop.clone());
+    assert!(edittop.is_some());
+    nano_rs::winio::place_the_cursor();
+    let cur = with_global(|g| g.openfile.as_ref().unwrap().borrow().current.clone());
+    assert!(cur.is_some());
+}
