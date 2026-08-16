@@ -1861,7 +1861,8 @@ pub fn break_line(textstart: &[u8], goal: isize, snap_at_nl: bool) -> isize {
         None => {
             loop {
                 if chars::byte_at(textstart, pos) == 0 {
-                    return -1;
+                    /* 文本已结束仍无空白：返回行长度（对应 C 的 pos - textstart）。 */
+                    return pos as isize;
                 }
                 if chars::is_blank_char(&textstart[pos..]) {
                     break;

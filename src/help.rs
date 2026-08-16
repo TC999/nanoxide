@@ -170,8 +170,10 @@ pub fn wrap_help_text_into_buffer() {
 
     let help_text = with_global(|g| g.help_text.clone()).unwrap_or_default();
     let end_of_intro = with_global(|g| g.help_end_of_intro);
+    /* 对应 C 的 start_of_body：跳过标题行（标题单独显示在标题栏）。 */
+    let start_of_body = with_global(|g| g.help_start_of_body);
 
-    let mut ptr = 0;
+    let mut ptr = start_of_body;
     let mut sum = 0;
 
     nano::make_new_buffer();
@@ -209,11 +211,14 @@ pub fn wrap_help_text_into_buffer() {
             length = text::break_line(&bytes[ptr..], ((if cols < 40 { 22 } else { cols - 18 }) - sidebar as usize) as isize, true) as usize;
         }
 
+        let _ = std::fs::write("diag_wrap.txt", format!("f loop ptr={} len={} total={}\n", ptr, length, bytes.len()));
         let shim = if bytes.get(ptr + length.saturating_sub(1)).copied().unwrap_or(0) == b' ' { 0 } else { 1 };
+        /* C: snprintf(oneline, length + shim, "%s", ptr) 最多写 length + shim - 1 字符。 */
+        let copylen = (length + shim).saturating_sub(1).min(bytes.len() - ptr);
         let oneline: String = if is_intro {
-            String::from_utf8_lossy(&bytes[ptr..ptr + length + shim.min(1)]).into_owned()
+            String::from_utf8_lossy(&bytes[ptr..ptr + copylen]).into_owned()
         } else {
-            format!("\t\t  {}", String::from_utf8_lossy(&bytes[ptr..ptr + length + shim.min(1)]))
+            format!("\t\t  {}", String::from_utf8_lossy(&bytes[ptr..ptr + copylen]))
         };
 
         with_global_mut(|g| {
@@ -235,9 +240,23 @@ pub fn wrap_help_text_into_buffer() {
             ptr = ptr.saturating_sub(1);
         }
 
-        /* 跳过连续的换行。 */
-        while bytes.get(ptr + 1).copied().unwrap_or(0) == b'\n' {
+        /* C: do { 创建新行 } while (*(++ptr) == '\n')——至少前进一次；
+           每再遇到一个换行就为它创建一行空行。 */
+        loop {
+            with_global_mut(|g| {
+                if let Some(of) = &g.openfile {
+                    let mut of = of.borrow_mut();
+                    let cur = of.current.clone().unwrap();
+                    let newnode = make_new_node(Some(&*cur.borrow()));
+                    newnode.borrow_mut().prev = Some(std::rc::Rc::downgrade(&cur));
+                    cur.borrow_mut().next = Some(newnode.clone());
+                    of.current = Some(newnode);
+                }
+            });
             ptr += 1;
+            if bytes.get(ptr).copied().unwrap_or(0) != b'\n' {
+                break;
+            }
         }
     }
 

@@ -261,3 +261,26 @@ fn args_after_filename_parsed() {
     assert_eq!(f3.as_deref(), Some("file.txt"));
     assert!(!ISSET(LINE_NUMBERS), "-- 之后 -l 应视为文件名而不生效");
 }
+
+/// Ctrl+G 帮助：组装帮助文本并可换行入缓冲（不应死循环/panic）。
+#[test]
+fn help_init_and_wrap_works() {
+    setup();
+    nano_rs::help::help_init();
+    let txt = with_global(|g| g.help_text.clone()).unwrap_or_default();
+    assert!(!txt.is_empty(), "帮助文本不应为空");
+    assert!(txt.contains("Main nano help text"), "应含主帮助标题");
+    // 换行入新缓冲（若死循环会卡住该测试）
+    nano_rs::help::wrap_help_text_into_buffer();
+    let rows = with_global(|g| {
+        let of = g.openfile.as_ref().unwrap().borrow();
+        let mut n = 0;
+        let mut l = of.filetop.clone();
+        while let Some(x) = l {
+            n += 1;
+            l = { let r = x.borrow(); r.next.clone() };
+        }
+        n
+    });
+    assert!(rows > 5, "帮助缓冲应有多个换行行，实际 {rows}");
+}
