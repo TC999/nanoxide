@@ -333,15 +333,18 @@ pub fn get_page_start(column: usize) -> usize {
                 } else if column < brink + CUSHION {
                     if ISSET(JUMPY_SCROLLING) {
                         if column > ew / 2 {
-                            column - ew / 2
+                            column.saturating_sub(ew / 2)
                         } else {
                             0
                         }
                     } else {
-                        column - CUSHION
+                        column.saturating_sub(CUSHION)
                     }
-                } else if column > brink + ew - CUSHION - 1 {
-                    column - ew + (if ISSET(JUMPY_SCROLLING) { ew / 2 } else { CUSHION }) + 1
+                } else if column > brink + ew.saturating_sub(CUSHION + 1) {
+                    column
+                        .saturating_sub(ew)
+                        .saturating_add(if ISSET(JUMPY_SCROLLING) { ew / 2 } else { CUSHION })
+                        .saturating_add(1)
                 } else {
                     brink
                 }
@@ -351,9 +354,11 @@ pub fn get_page_start(column: usize) -> usize {
         } else if column == 0 || column + 2 < g.editwincols || ISSET(SOFTWRAP) {
             0
         } else if g.editwincols > 8 {
-            column - 6 - (column - 6) % (g.editwincols - 8)
+            column
+                .saturating_sub(6)
+                .saturating_sub(column.saturating_sub(6) % g.editwincols.saturating_sub(8))
         } else {
-            column - (g.editwincols - 2)
+            column.saturating_sub(g.editwincols.saturating_sub(2))
         }
     })
 }

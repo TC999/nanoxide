@@ -49,6 +49,11 @@ pub fn set_windowsize(cols: usize, lines: usize) {
         g.COLS = cols;
         g.LINES = lines;
         g.editwinrows = (lines as i32).saturating_sub(4).max(1);
+        // 对应 C 版 nano.c/help.c 中 `editwincols = COLS - margin - sidebar;`。
+        // 在 Rust 版中 sidebar 被建模为 bool（C 版为宽度 int），
+        // 这里用一个最小的非零值 1 表示启用侧边栏，并保证结果不会下溢。
+        let sidebar_width = if g.sidebar { 1 } else { 0 };
+        g.editwincols = (cols as i32 - g.margin - sidebar_width).max(1) as usize;
     });
 }
 

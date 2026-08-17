@@ -941,7 +941,7 @@ pub fn do_scroll_left() {
 
         let cur = of.current.clone().unwrap();
         let data = cur.borrow().data.clone();
-        let frame_x = utils::actual_x(data.as_bytes(), of.brink + g.editwincols - CUSHION - 1);
+        let frame_x = utils::actual_x(data.as_bytes(), of.brink + g.editwincols.saturating_sub(CUSHION + 1));
 
         if of.current_x > frame_x {
             of.current_x = frame_x;

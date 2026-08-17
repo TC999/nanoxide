@@ -45,6 +45,16 @@ pub fn update_screen_size() {
             g.COLS = cols as usize;
             g.LINES = rows as usize;
             g.editwinrows = (rows as i32).saturating_sub(4).max(1);
+            let sidebar_width = if g.sidebar { 1 } else { 0 };
+            g.editwincols = (cols as i32 - g.margin - sidebar_width).max(1) as usize;
+        });
+    } else {
+        // 终端尺寸探测失败（如非 TTY / 重定向）时给出合理默认，
+        // 确保 editwincols 永不为 0，避免后续减法溢出。
+        with_global_mut(|g| {
+            if g.editwincols < 2 {
+                g.editwincols = std::cmp::max(g.COLS, 2);
+            }
         });
     }
 }
@@ -317,9 +327,16 @@ pub fn refresh_screen() {
 /// 绘制标题栏行（格式参照 C 版 titlebar）。
 fn draw_titlebar_line(stdout: &mut io::Stdout, cols: usize) {
     with_global(|g| {
+        // C 版 titlebar: openfile->filename[0] == '\0' 时显示 "New Buffer"。
+        // Rust 版 filename 为 Some("")（空串）表示"无文件名"，须同样回退。
         let filename = g.openfile.as_ref()
             .and_then(|of| of.borrow().filename.clone())
-            .unwrap_or_else(|| "New Buffer".to_string());
+            .unwrap_or_default();
+        let filename = if filename.is_empty() {
+            "New Buffer".to_string()
+        } else {
+            filename
+        };
         let modified = g.openfile.as_ref()
             .map(|of| of.borrow().modified)
             .unwrap_or(false);

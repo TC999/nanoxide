@@ -2370,7 +2370,7 @@ pub fn inject(burst: &[u8], count: usize) {
         (g.united_sidescroll, of.placewewant, of.brink)
     });
     let editwincols = with_global(|g| g.editwincols);
-    if united_sidescroll && placewewant > brink + editwincols - CUSHION - 1 {
+    if united_sidescroll && placewewant > brink + editwincols.saturating_sub(CUSHION + 1) {
         with_global_mut(|g| g.refresh_needed = true);
     }
 
