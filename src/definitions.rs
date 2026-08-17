@@ -553,7 +553,7 @@ pub struct KeyStruct {
 
 #[derive(Debug, Clone)]
 pub struct FuncStruct {
-    pub func: FunctionId, pub tag: &'static str, pub phrase: &'static str,
+    pub func: FunctionId, pub tag: String, pub phrase: &'static str,
     pub blank_after: bool, pub menus: i32, pub next: Option<FuncRef>,
 }
 

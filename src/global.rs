@@ -73,7 +73,7 @@ pub fn get_lines() -> usize {
 }
 
 /// 添加函数到函数列表（尾插法，与 C 版一致）。
-pub fn add_to_funcs(func: FunctionId, menus: i32, tag: &'static str, phrase: &'static str, blank_after: bool) {
+pub fn add_to_funcs(func: FunctionId, menus: i32, tag: String, phrase: &'static str, blank_after: bool) {
     with_global_mut(|g| {
         let new_func = Rc::new(RefCell::new(FuncStruct {
             func,
@@ -262,46 +262,46 @@ pub fn shortcut_init() {
     add_to_sclist(MYESNO, "N", 110, FunctionId::None, 0);
     add_to_sclist(MYESNO, "A", 97, FunctionId::None, 0);
     // 函数列表（按 C 版顺序，遍历时为逆序，与 C 版一致）
-    add_to_funcs(FunctionId::DoHelp, (MMOST | MBROWSER) & !MFINDINHELP, "Help", "help_gist", false);
+    add_to_funcs(FunctionId::DoHelp, (MMOST | MBROWSER) & !MFINDINHELP, crate::t!("key-help"), "help_gist", false);
     /* 帮助查看器专有条目（对应 C：add_to_funcs(full_refresh, MHELP, ...) 等）。 */
-    add_to_funcs(FunctionId::DoFullRefresh, MHELP, "Refresh", "x", false);
-    add_to_funcs(FunctionId::DoExit, MHELP, "Close", "x", false);
-    add_to_funcs(FunctionId::DoCancel, (MMOST & !MMAIN) | MYESNO, "Cancel", "cancel_gist", true);
-    add_to_funcs(FunctionId::DoExit, MMAIN, "Exit", "exit_gist", false);
-    add_to_funcs(FunctionId::DoRefresh, MMAIN | MREPLACE, "Refresh", "x", false);
-    add_to_funcs(FunctionId::DoWriteOut, MMAIN, "Write Out", "writeout_gist", false);
-    add_to_funcs(FunctionId::DoInsertFile, MMAIN, "Read File", "insert_gist", false);
-    add_to_funcs(FunctionId::DoJustify, MMAIN, "Justify", "justify_gist", false);
-    add_to_funcs(FunctionId::DoSearchForward, MMAIN | MHELP, "Where Is", "whereis_gist", false);
-    add_to_funcs(FunctionId::DoSearchBackward, MMAIN | MHELP, "Where Was", "wherewas_gist", false);
-    add_to_funcs(FunctionId::DoReplace, MMAIN, "Replace", "replace_gist", false);
-    add_to_funcs(FunctionId::DoFindPrevious, MMAIN | MHELP, "Previous", "findprev_gist", false);
-    add_to_funcs(FunctionId::DoFindNext, MMAIN | MHELP, "Next", "findnext_gist", false);
-    add_to_funcs(FunctionId::DoCut, MMAIN, "Cut", "cut_gist", false);
-    add_to_funcs(FunctionId::DoPaste, MMAIN, "Paste", "paste_gist", false);
-    add_to_funcs(FunctionId::DoExecute, MMAIN, "Execute", "execute_gist", false);
-    add_to_funcs(FunctionId::DoReportLocation, MMAIN, "Location", "location_gist", false);
-    add_to_funcs(FunctionId::DoGoToLine, MMAIN, "Go To Line", "gotoline_gist", false);
-    add_to_funcs(FunctionId::DoUndo, MMAIN, "Undo", "undo_gist", true);
-    add_to_funcs(FunctionId::DoRedo, MMAIN, "Redo", "redo_gist", true);
-    add_to_funcs(FunctionId::DoMark, MMAIN, "Set Mark", "mark_gist", true);
-    add_to_funcs(FunctionId::DoCopy, MMAIN, "Copy", "copy_gist", true);
-    add_to_funcs(FunctionId::DoToggleCaseSensitive, MWHEREIS | MREPLACE, "Case Sens", "casesens_gist", true);
-    add_to_funcs(FunctionId::DoToggleRegexp, MWHEREIS | MREPLACE, "Regexp", "regexp_gist", true);
-    add_to_funcs(FunctionId::DoToggleBackwards, MWHEREIS | MREPLACE, "Backwards", "backwards_gist", true);
-    add_to_funcs(FunctionId::DoFindBracket, MMAIN, "To Bracket", "bracket_gist", true);
-    add_to_funcs(FunctionId::DoLeft, MMAIN, "Left", "left_gist", true);
-    add_to_funcs(FunctionId::DoRight, MMAIN, "Right", "right_gist", true);
-    add_to_funcs(FunctionId::DoUp, MMAIN | MBROWSER | MHELP, "Prev Line", "prevline_gist", true);
-    add_to_funcs(FunctionId::DoDown, MMAIN | MBROWSER | MHELP, "Next Line", "nextline_gist", true);
-    add_to_funcs(FunctionId::DoHome, MMAIN, "Home", "home_gist", true);
-    add_to_funcs(FunctionId::DoEnd, MMAIN, "End", "end_gist", true);
-    add_to_funcs(FunctionId::DoPageUp, MMAIN | MHELP, "Prev Page", "prevpage_gist", true);
-    add_to_funcs(FunctionId::DoPageDown, MMAIN | MHELP, "Next Page", "nextpage_gist", true);
-    add_to_funcs(FunctionId::DoDelete, MMAIN, "Delete", "delete_gist", true);
-    add_to_funcs(FunctionId::DoBackspace, MMAIN, "Backspace", "backspace_gist", true);
-    add_to_funcs(FunctionId::DoEnter, MMAIN, "Enter", "enter_gist", true);
-    add_to_funcs(FunctionId::DoTab, MMAIN, "Tab", "tab_gist", true);
+    add_to_funcs(FunctionId::DoFullRefresh, MHELP, crate::t!("key-refresh"), "x", false);
+    add_to_funcs(FunctionId::DoExit, MHELP, crate::t!("key-close"), "x", false);
+    add_to_funcs(FunctionId::DoCancel, (MMOST & !MMAIN) | MYESNO, crate::t!("key-cancel"), "cancel_gist", true);
+    add_to_funcs(FunctionId::DoExit, MMAIN, crate::t!("key-exit"), "exit_gist", false);
+    add_to_funcs(FunctionId::DoRefresh, MMAIN | MREPLACE, crate::t!("key-refresh"), "x", false);
+    add_to_funcs(FunctionId::DoWriteOut, MMAIN, crate::t!("key-write_out"), "writeout_gist", false);
+    add_to_funcs(FunctionId::DoInsertFile, MMAIN, crate::t!("key-read_file"), "insert_gist", false);
+    add_to_funcs(FunctionId::DoJustify, MMAIN, crate::t!("key-justify"), "justify_gist", false);
+    add_to_funcs(FunctionId::DoSearchForward, MMAIN | MHELP, crate::t!("key-where_is"), "whereis_gist", false);
+    add_to_funcs(FunctionId::DoSearchBackward, MMAIN | MHELP, crate::t!("key-where_was"), "wherewas_gist", false);
+    add_to_funcs(FunctionId::DoReplace, MMAIN, crate::t!("key-replace"), "replace_gist", false);
+    add_to_funcs(FunctionId::DoFindPrevious, MMAIN | MHELP, crate::t!("key-previous"), "findprev_gist", false);
+    add_to_funcs(FunctionId::DoFindNext, MMAIN | MHELP, crate::t!("key-next"), "findnext_gist", false);
+    add_to_funcs(FunctionId::DoCut, MMAIN, crate::t!("key-cut"), "cut_gist", false);
+    add_to_funcs(FunctionId::DoPaste, MMAIN, crate::t!("key-paste"), "paste_gist", false);
+    add_to_funcs(FunctionId::DoExecute, MMAIN, crate::t!("key-execute"), "execute_gist", false);
+    add_to_funcs(FunctionId::DoReportLocation, MMAIN, crate::t!("key-location"), "location_gist", false);
+    add_to_funcs(FunctionId::DoGoToLine, MMAIN, crate::t!("key-go_to_line"), "gotoline_gist", false);
+    add_to_funcs(FunctionId::DoUndo, MMAIN, crate::t!("key-undo"), "undo_gist", true);
+    add_to_funcs(FunctionId::DoRedo, MMAIN, crate::t!("key-redo"), "redo_gist", true);
+    add_to_funcs(FunctionId::DoMark, MMAIN, crate::t!("key-set_mark"), "mark_gist", true);
+    add_to_funcs(FunctionId::DoCopy, MMAIN, crate::t!("key-copy"), "copy_gist", true);
+    add_to_funcs(FunctionId::DoToggleCaseSensitive, MWHEREIS | MREPLACE, crate::t!("key-case_sens"), "casesens_gist", true);
+    add_to_funcs(FunctionId::DoToggleRegexp, MWHEREIS | MREPLACE, crate::t!("key-regexp"), "regexp_gist", true);
+    add_to_funcs(FunctionId::DoToggleBackwards, MWHEREIS | MREPLACE, crate::t!("key-backwards"), "backwards_gist", true);
+    add_to_funcs(FunctionId::DoFindBracket, MMAIN, crate::t!("key-to_bracket"), "bracket_gist", true);
+    add_to_funcs(FunctionId::DoLeft, MMAIN, crate::t!("key-left"), "left_gist", true);
+    add_to_funcs(FunctionId::DoRight, MMAIN, crate::t!("key-right"), "right_gist", true);
+    add_to_funcs(FunctionId::DoUp, MMAIN | MBROWSER | MHELP, crate::t!("key-prev_line"), "prevline_gist", true);
+    add_to_funcs(FunctionId::DoDown, MMAIN | MBROWSER | MHELP, crate::t!("key-next_line"), "nextline_gist", true);
+    add_to_funcs(FunctionId::DoHome, MMAIN, crate::t!("key-home"), "home_gist", true);
+    add_to_funcs(FunctionId::DoEnd, MMAIN, crate::t!("key-end"), "end_gist", true);
+    add_to_funcs(FunctionId::DoPageUp, MMAIN | MHELP, crate::t!("key-prev_page"), "prevpage_gist", true);
+    add_to_funcs(FunctionId::DoPageDown, MMAIN | MHELP, crate::t!("key-next_page"), "nextpage_gist", true);
+    add_to_funcs(FunctionId::DoDelete, MMAIN, crate::t!("key-delete"), "delete_gist", true);
+    add_to_funcs(FunctionId::DoBackspace, MMAIN, crate::t!("key-backspace"), "backspace_gist", true);
+    add_to_funcs(FunctionId::DoEnter, MMAIN, crate::t!("key-enter"), "enter_gist", true);
+    add_to_funcs(FunctionId::DoTab, MMAIN, crate::t!("key-tab"), "tab_gist", true);
     /* 其余菜单的快捷键（提示/浏览器等，对应 C 的 shortcut_init 后半部分）。 */
     shortcut_init_rest();
 }
@@ -391,12 +391,12 @@ pub fn shortcut_init_rest() {
     add_to_sclist(MBROWSER, "PageDown", KEY_NPAGE, FunctionId::DoPageDown, 0);
 
     // 函数列表补充
-    add_to_funcs(FunctionId::GetOlderItem, MMAIN, "Get Older Item", "older_gist", false);
-    add_to_funcs(FunctionId::GetNewerItem, MMAIN, "Get Newer Item", "newer_gist", false);
-    add_to_funcs(FunctionId::ToFirstFile, MBROWSER, "First File", "firstfile_gist", false);
-    add_to_funcs(FunctionId::ToLastFile, MBROWSER, "Last File", "lastfile_gist", false);
-    add_to_funcs(FunctionId::DoGotoDir, MBROWSER, "Go To Dir", "gotodir_gist", false);
-    add_to_funcs(FunctionId::DoVerbatimInput, MMAIN, "Verbatim Input", "verbatim_gist", false);
+    add_to_funcs(FunctionId::GetOlderItem, MMAIN, crate::t!("key-get_older_item"), "older_gist", false);
+    add_to_funcs(FunctionId::GetNewerItem, MMAIN, crate::t!("key-get_newer_item"), "newer_gist", false);
+    add_to_funcs(FunctionId::ToFirstFile, MBROWSER, crate::t!("key-first_file"), "firstfile_gist", false);
+    add_to_funcs(FunctionId::ToLastFile, MBROWSER, crate::t!("key-last_file"), "lastfile_gist", false);
+    add_to_funcs(FunctionId::DoGotoDir, MBROWSER, crate::t!("key-go_to_dir"), "gotodir_gist", false);
+    add_to_funcs(FunctionId::DoVerbatimInput, MMAIN, crate::t!("key-verbatim_input"), "verbatim_gist", false);
 }
 
 // ======================== 命令行参数解析（对应 nano.c 的 main） ========================

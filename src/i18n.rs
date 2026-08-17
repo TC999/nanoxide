@@ -59,42 +59,34 @@ impl Ftllib {
         if template.is_empty() {
             return format!("[[{}]]", key);
         }
+        // 按 UTF-8 边界扫描 '{...}' 占位符：不能逐字节处理，否则中文等多字节
+        // 字符会被拆成乱码（原实现 out.push(bytes[i] as char) 有此缺陷）。
         let mut out = String::new();
-        let bytes = template.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] == b'{' {
-                // 找匹配的 '}'
-                let rest_start = i + 1;
-                let mut end = None;
-                for j in rest_start..bytes.len() {
-                    if bytes[j] == b'}' {
-                        end = Some(j);
-                        break;
-                    }
-                }
-                if let Some(e) = end {
-                    let arg = std::str::from_utf8(&bytes[rest_start..e]).unwrap_or("").trim();
-                    out.push_str(match args.get(arg) {
-                        Some(v) => v,
+        let mut rest = template;
+        while let Some(pos) = rest.find('{') {
+            out.push_str(&rest[..pos]);
+            rest = &rest[pos + 1..];
+            match rest.find('}') {
+                Some(end) => {
+                    let arg = rest[..end].trim();
+                    match args.get(arg) {
+                        Some(v) => out.push_str(v),
                         None => {
-                            out.push_str("<");
+                            out.push('<');
                             out.push_str(arg);
                             out.push('>');
-                            i = e + 1;
-                            continue;
                         }
-                    });
-                    i = e + 1;
-                } else {
-                    out.push('{');
-                    i += 1;
+                    }
+                    rest = &rest[end + 1..];
                 }
-            } else {
-                out.push(bytes[i] as char);
-                i += 1;
+                None => {
+                    // 未闭合的 '{'：原样输出，剩余部分不再解释占位符。
+                    out.push('{');
+                    break;
+                }
             }
         }
+        out.push_str(rest);
         out
     }
 }

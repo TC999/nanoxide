@@ -404,7 +404,7 @@ fn draw_bottombars_lines(stdout: &mut io::Stdout, cols: usize, lines: usize) {
                 while let Some(s) = current_sc {
                     let s_ref = s.borrow();
                     if (s_ref.menus & menu) != 0 && s_ref.func == f_ref.func && !s_ref.keystr.is_empty() {
-                        entries.push((s_ref.keystr.clone(), f_ref.tag.to_string()));
+                        entries.push((s_ref.keystr.clone(), f_ref.tag.clone()));
                         break;
                     }
                     current_sc = s_ref.next.clone();
