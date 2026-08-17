@@ -237,8 +237,8 @@ pub fn shortcut_init() {
     // 方向键（仅用于输入匹配，不显示在底部栏）
     add_to_sclist(MMAIN, "Left", KEY_LEFT, FunctionId::DoLeft, 0);
     add_to_sclist(MMAIN, "Right", KEY_RIGHT, FunctionId::DoRight, 0);
-    add_to_sclist(MMAIN, "Up", KEY_UP, FunctionId::DoUp, 0);
-    add_to_sclist(MMAIN, "Down", KEY_DOWN, FunctionId::DoDown, 0);
+    add_to_sclist(MMAIN | MBROWSER | MHELP, "Up", KEY_UP, FunctionId::DoUp, 0);
+    add_to_sclist(MMAIN | MBROWSER | MHELP, "Down", KEY_DOWN, FunctionId::DoDown, 0);
     add_to_sclist(MMAIN, "Home", KEY_HOME, FunctionId::DoHome, 0);
     add_to_sclist(MMAIN, "End", KEY_END, FunctionId::DoEnd, 0);
     add_to_sclist(MMAIN, "PageUp", KEY_PPAGE, FunctionId::DoPageUp, 0);
