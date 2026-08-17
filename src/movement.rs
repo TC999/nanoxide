@@ -923,7 +923,7 @@ pub fn do_right() {
 pub fn do_scroll_left() {
     if ISSET(SOFTWRAP) || ISSET(SOLO_SIDESCROLL) {
         let opt = if ISSET(SOFTWRAP) { "--softwrap" } else { "--solo" };
-        winio::statusline(MessageType::Ahem, &format!("Not possible with '{}'", opt));
+        winio::statusline(MessageType::Ahem, &crate::t!("movement-not_possible", opt = opt));
         return;
     }
 
@@ -956,7 +956,7 @@ pub fn do_scroll_left() {
 pub fn do_scroll_right() {
     if ISSET(SOFTWRAP) || ISSET(SOLO_SIDESCROLL) {
         let opt = if ISSET(SOFTWRAP) { "--softwrap" } else { "--solo" };
-        winio::statusline(MessageType::Ahem, &format!("Not possible with '{}'", opt));
+        winio::statusline(MessageType::Ahem, &crate::t!("movement-not_possible", opt = opt));
         return;
     }
 

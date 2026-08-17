@@ -275,14 +275,14 @@ fn findfile(needle: &str, forwards: bool) {
         if forwards {
             if selected + 1 == list_len {
                 set_selected(0);
-                winio::statusbar("Search Wrapped");
+                winio::statusbar(&crate::t!("browser-search_wrapped"));
             } else {
                 set_selected(selected + 1);
             }
         } else {
             if selected == 0 {
                 set_selected(list_len.saturating_sub(1));
-                winio::statusbar("Search Wrapped");
+                winio::statusbar(&crate::t!("browser-search_wrapped"));
             } else {
                 set_selected(selected - 1);
             }
@@ -295,7 +295,7 @@ fn findfile(needle: &str, forwards: bool) {
             let basename = utils::tail(t);
             if crate::chars::mbstrcasestr(basename.as_bytes(), needle.as_bytes()).is_some() {
                 if selected == began_at {
-                    winio::statusbar("This is the only occurrence");
+                    winio::statusbar(&crate::t!("browser-only_occurrence"));
                 }
                 return;
             }
@@ -303,7 +303,7 @@ fn findfile(needle: &str, forwards: bool) {
 
         /* 回到起点而无匹配时。 */
         if selected == began_at {
-            winio::statusline(MessageType::Ahem, &format!("Not found: {}", needle));
+            winio::statusline(MessageType::Ahem, &crate::t!("browser-not_found", needle = needle));
             return;
         }
     }
@@ -323,11 +323,12 @@ fn search_filename(forwards: bool) {
         String::new()
     };
 
-    let msg = format!(
-        "Search{}[{}]",
-        if !forwards { " [Backwards]" } else { "" },
-        thedefault
-    );
+    let search_msg = crate::t!("browser-search");
+    let msg = if !forwards {
+        format!("{} [{}]{}", search_msg, crate::t!("browser-backwards"), thedefault)
+    } else {
+        format!("{}{}", search_msg, thedefault)
+    };
 
     let mut search_history = with_global(|g| g.search_history.clone()).unwrap_or_else(|| make_new_node(None));
     let response = prompt::do_prompt(
@@ -341,7 +342,7 @@ fn search_filename(forwards: bool) {
 
     /* 用户取消，或空白回答且本次会话未搜索过时，退出。 */
     if response == -1 || (response == -2 && last_search.is_empty()) {
-        winio::statusbar("Cancelled");
+        winio::statusbar(&crate::t!("browser-cancelled"));
         return;
     }
 
@@ -365,7 +366,7 @@ fn research_filename(forwards: bool) {
     let last_search = with_global(|g| g.last_search.clone()).unwrap_or_default();
 
     if last_search.is_empty() {
-        winio::statusbar("No current search pattern");
+        winio::statusbar(&crate::t!("browser-no_search_pattern"));
     } else {
         winio::wipe_statusbar();
         findfile(&last_search, forwards);
@@ -409,7 +410,7 @@ pub fn browse(path: &str) -> Option<String> {
         let dir_ok = std::fs::read_dir(&path).is_ok();
 
         if !dir_ok {
-            winio::statusline(MessageType::Alert, &format!("Cannot open directory: {}", path));
+            winio::statusline(MessageType::Alert, &crate::t!("browser-cannot_open_dir", path = path));
             let filelist_exists = !get_filelist().is_empty();
             if !filelist_exists {
                 with_global_mut(|g| g.lastmessage = MessageType::Vacuum);
@@ -440,7 +441,7 @@ pub fn browse(path: &str) -> Option<String> {
 
         let list_len = get_list_length();
         if list_len == 0 {
-            winio::statusline(MessageType::Alert, "No entries");
+            winio::statusline(MessageType::Alert, &crate::t!("browser-no_entries"));
             winio::napms(1200);
         } else {
             loop {
@@ -552,10 +553,10 @@ pub fn browse(path: &str) -> Option<String> {
                             "",
                             None,
                             Some(browser_refresh),
-                            "Go To Directory",
+                            &crate::t!("browser-go_to_dir"),
                         );
                         if response < 0 {
-                            winio::statusbar("Cancelled");
+                            winio::statusbar(&crate::t!("browser-cancelled"));
                             continue;
                         }
                         let answer = with_global(|g| g.answer.clone()).unwrap_or_default();
@@ -593,13 +594,13 @@ pub fn browse(path: &str) -> Option<String> {
 
                         /* 无法从根目录向上移动。 */
                         if item == "/.." {
-                            winio::statusline(MessageType::Alert, "Can't move up a directory");
+                            winio::statusline(MessageType::Alert, &crate::t!("browser-cannot_go_up"));
                             continue;
                         }
 
                         /* 文件不可访问时抱怨。 */
                         let Ok(meta) = std::fs::metadata(&item) else {
-                            winio::statusline(MessageType::Alert, &format!("Error reading {}", item));
+                            winio::statusline(MessageType::Alert, &crate::t!("browser-error_reading", item = item));
                             continue;
                         };
 
@@ -645,7 +646,7 @@ pub fn browse_in(inpath: &str) -> Option<String> {
                     path = cwd.to_string_lossy().into_owned();
                 }
                 Err(_) => {
-                    winio::statusline(MessageType::Alert, "The working directory has disappeared");
+                    winio::statusline(MessageType::Alert, &crate::t!("browser-dir_disappeared"));
                     winio::napms(1200);
                     return None;
                 }
@@ -661,7 +662,7 @@ pub fn browse_in(inpath: &str) -> Option<String> {
                 match std::fs::canonicalize(".") {
                     Ok(cwd) => path = cwd.to_string_lossy().into_owned(),
                     Err(_) => {
-                        winio::statusline(MessageType::Alert, "The working directory has disappeared");
+                        winio::statusline(MessageType::Alert, &crate::t!("browser-dir_disappeared"));
                         winio::napms(1200);
                         return None;
                     }
@@ -671,7 +672,7 @@ pub fn browse_in(inpath: &str) -> Option<String> {
             match std::fs::canonicalize(".") {
                 Ok(cwd) => path = cwd.to_string_lossy().into_owned(),
                 Err(_) => {
-                    winio::statusline(MessageType::Alert, "The working directory has disappeared");
+                    winio::statusline(MessageType::Alert, &crate::t!("browser-dir_disappeared"));
                     winio::napms(1200);
                     return None;
                 }

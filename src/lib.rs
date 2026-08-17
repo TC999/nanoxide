@@ -2,6 +2,7 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 
+pub mod i18n;
 pub mod definitions;
 pub mod regex;
 pub mod chars;

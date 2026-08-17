@@ -116,7 +116,7 @@ pub fn open_buffer(filename: &str) -> bool {
             true
         }
         Err(e) => {
-            set_statusbar_message(&format!("Error reading {}: {}", filename, e));
+            set_statusbar_message(&crate::t!("files-error_reading", filename = filename, err = e.to_string()));
             false
         }
     }
@@ -179,15 +179,15 @@ fn save_to(answer: &str) -> i32 {
             });
             let linecount = lines.len();
             let msg = if linecount == 1 {
-                format!("Wrote {} line", linecount)
+                crate::t!("files-wrote_one_line", count = linecount.to_string())
             } else {
-                format!("Wrote {} lines", linecount)
+                crate::t!("files-wrote_lines", count = linecount.to_string())
             };
             winio::statusline(MessageType::Remark, &msg);
             content.len() as i32
         }
         Err(e) => {
-            winio::statusline(MessageType::Ahem, &format!("Error writing {}: {}", answer, e));
+            winio::statusline(MessageType::Ahem, &crate::t!("files-error_writing", filename = answer, err = e.to_string()));
             -1
         }
     }
@@ -225,11 +225,11 @@ pub fn do_writeout() {
         &filename,
         None,
         Some(winio::edit_refresh),
-        "Write to File",
+        &crate::t!("files-write_to_file"),
     );
 
     if response < 0 {
-        winio::statusbar("Cancelled");
+        winio::statusbar(&crate::t!("files-cancelled"));
         return;
     }
 
@@ -673,7 +673,7 @@ pub fn set_modified() {
 /// （对应 `in_restricted_mode`）。
 pub fn in_restricted_mode() -> bool {
     if ISSET(RESTRICTED) {
-        winio::statusline(MessageType::Ahem, "This function is disabled in restricted mode");
+        winio::statusline(MessageType::Ahem, &crate::t!("files-restricted_mode"));
         winio::beep();
         true
     } else {

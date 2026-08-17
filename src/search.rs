@@ -357,7 +357,7 @@ pub fn regexp_init_real(regexp: &str) -> bool {
             true
         }
         None => {
-            winio::statusline(MessageType::Ahem, &format!("Bad regex \"{}\"", regexp));
+            winio::statusline(MessageType::Ahem, &crate::t!("search-bad_regex", regexp = regexp));
             false
         }
     }
@@ -403,15 +403,11 @@ pub fn search_init(replacing: bool, retain_answer: bool) {
             MWHEREIS
         };
         let answer = with_global(|g| g.answer.clone()).unwrap_or_default();
-        let msg = format!(
-            "Search{}{}{}{}{}{}",
-            if ISSET(CASE_SENSITIVE) { " [Case sensitive]" } else { "" },
-            if ISSET(USE_REGEXP) { " [Reg.exp.]" } else { "" },
-            if ISSET(BACKWARDS_SEARCH) { " [Backwards]" } else { "" },
-            if replacing { " (to replace)" } else { "" },
-            "",
-            thedefault
-        );
+        let cs = if ISSET(CASE_SENSITIVE) { crate::t!("search-case_sensitive") } else { String::new() };
+        let rg = if ISSET(USE_REGEXP) { crate::t!("search-regexp") } else { String::new() };
+        let bw = if ISSET(BACKWARDS_SEARCH) { crate::t!("search-backwards") } else { String::new() };
+        let tr = if replacing { crate::t!("search-to_replace") } else { String::new() };
+        let msg = format!("{}{}{}{}{}{}", crate::t!("search-search"), cs, rg, bw, tr, thedefault);
 
         let mut search_history = with_global(|g| g.search_history.clone())
             .unwrap_or_else(|| make_new_node(None));
@@ -426,7 +422,7 @@ pub fn search_init(replacing: bool, retain_answer: bool) {
 
         /* 取消，或空白回答且本次会话尚未搜索过时，退出。 */
         if response == -1 || (response == -2 && with_global(|g| g.last_search.clone()).unwrap_or_default().is_empty()) {
-            winio::statusbar("Cancelled");
+            winio::statusbar(&crate::t!("search-cancelled"));
             break;
         }
 
@@ -561,7 +557,7 @@ pub fn findnextstr(
                     of.borrow().filetop.clone().unwrap()
                 };
                 if modus == JUSTFIND {
-                    winio::statusline(MessageType::Remark, "Search Wrapped");
+                    winio::statusline(MessageType::Remark, &crate::t!("search-search_wrapped"));
                     feedback = -2;
                 }
                 wrapped
@@ -587,14 +583,14 @@ pub fn findnextstr(
                 let input = winio::get_kbinput();
                 let function = crate::global::interpret(input);
                 if function == Some(FunctionId::DoCancel) {
-                    winio::statusbar("Cancelled");
+                    winio::statusbar(&crate::t!("search-cancelled"));
                     with_global_mut(|g| g.came_full_circle = false);
                     return -2;
                 }
             }
             feedback += 1;
             if feedback > 0 {
-                winio::statusbar("Searching...");
+                winio::statusbar(&crate::t!("search-searching"));
             }
         }
     }
@@ -661,7 +657,7 @@ fn not_found_msg(str: &str) {
     let disp = winio::display_string(str.as_bytes(), 0, (cols / 2) + 1, false, false);
     let numchars = utils::actual_x(disp.as_bytes(), utils::wideness(disp.as_bytes(), cols / 2));
     let dots = if disp.as_bytes().get(numchars).copied().unwrap_or(0) == 0 { "" } else { "..." };
-    winio::statusline(MessageType::Ahem, &format!("\"{}{}\" not found", &disp[..numchars.min(disp.len())], dots));
+    winio::statusline(MessageType::Ahem, &crate::t!("search-not_found", pattern = format!("{}{}", &disp[..numchars.min(disp.len())], dots)));
 }
 
 /// 搜索全局字符串 last_search 并报告（对应 `go_looking`）。
@@ -689,7 +685,7 @@ pub fn go_looking() {
         (same_c, of.current_x == was_x)
     });
     if didfind == 1 && same_current && same_x {
-        winio::statusline(MessageType::Remark, "This is the only occurrence");
+        winio::statusline(MessageType::Remark, &crate::t!("search-only_occurrence"));
     } else if didfind == 0 {
         not_found_msg(&last_search);
     }
@@ -714,7 +710,7 @@ pub fn do_research() {
     let last_search = with_global(|g| g.last_search.clone()).unwrap_or_default();
 
     if last_search.is_empty() {
-        winio::statusline(MessageType::Ahem, "No current search pattern");
+        winio::statusline(MessageType::Ahem, &crate::t!("search-no_search_pattern"));
         return;
     }
 
@@ -863,7 +859,7 @@ fn do_replace_loop(needle: &str, real_current: &LineRef, real_current_x: &mut us
             });
             winio::edit_refresh();
 
-            choice = crate::prompt::ask_user(true, "Replace this instance?");
+            choice = crate::prompt::ask_user(true, &crate::t!("search-replace_instance"));
 
             with_global_mut(|g| g.spotlighted = false);
 
@@ -938,7 +934,7 @@ fn do_replace_loop(needle: &str, real_current: &LineRef, real_current_x: &mut us
 /// 替换字符串（对应 `do_replace`）。
 pub fn do_replace() {
     if ISSET(VIEW_MODE) {
-        winio::statusline(MessageType::Ahem, "View mode: Replace disabled");
+        winio::statusline(MessageType::Ahem, &crate::t!("search-view_replace_disabled"));
     } else {
         UNSET(BACKWARDS_SEARCH);
         search_init(true, false);
@@ -965,7 +961,7 @@ pub fn ask_for_and_do_replacements() {
         "",
         Some(&mut replace_history),
         Some(winio::edit_refresh),
-        "Replace with",
+        &crate::t!("search-replace_with"),
     );
     with_global_mut(|g| g.replace_history = Some(replace_history));
 
@@ -981,7 +977,7 @@ pub fn ask_for_and_do_replacements() {
 
     /* 取消或执行了函数时完成。 */
     if response == -1 {
-        winio::statusbar("Cancelled");
+        winio::statusbar(&crate::t!("search-cancelled"));
         return;
     } else if response > 0 {
         return;
@@ -1003,6 +999,11 @@ pub fn ask_for_and_do_replacements() {
     });
 
     if numreplaced >= 0 {
-        winio::statusline(MessageType::Remark, &format!("Replaced {} occurrence{}", numreplaced, if numreplaced == 1 { "" } else { "s" }));
+        let msg = if numreplaced == 1 {
+            crate::t!("search-replaced_one", count = numreplaced.to_string())
+        } else {
+            crate::t!("search-replaced_many", count = numreplaced.to_string())
+        };
+        winio::statusline(MessageType::Remark, &msg);
     }
 }

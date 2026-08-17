@@ -261,7 +261,7 @@ pub fn is_cuttable(test_cliff: bool) -> bool {
     });
 
     if !cuttable {
-        winio::statusbar("Nothing was cut");
+        winio::statusbar(&crate::t!("cut-nothing_cut"));
         with_global_mut(|g| {
             if let Some(of) = &g.openfile {
                 of.borrow_mut().mark = None;
@@ -375,7 +375,7 @@ pub fn chop_previous_word() {
         }).unwrap_or(false)
     });
     if at_top_left {
-        winio::statusbar("Nothing was cut");
+        winio::statusbar(&crate::t!("cut-nothing_cut"));
     } else {
         chop_word(false);
     }
@@ -933,7 +933,7 @@ pub fn cut_till_eof() {
     });
 
     if nothing {
-        winio::statusbar("Nothing was cut");
+        winio::statusbar(&crate::t!("cut-nothing_cut"));
         return;
     }
 
@@ -996,7 +996,7 @@ pub fn copy_marked_region() {
     });
 
     if Rc::ptr_eq(&topline, &botline) && top_x == bot_x {
-        winio::statusbar("Copied nothing");
+        winio::statusbar(&crate::t!("cut-copied_nothing"));
         return;
     }
 
@@ -1087,7 +1087,7 @@ pub fn copy_text() {
     if !next_exists && at_eol && (ISSET(CUT_FROM_CURSOR) || current_x == 0
         || with_global(|g| g.cutbuffer.is_some()))
     {
-        winio::statusbar("Copied nothing");
+        winio::statusbar(&crate::t!("cut-copied_nothing"));
         return;
     }
 
@@ -1185,7 +1185,7 @@ pub fn paste_text() {
     let mut was_leftedge = 0;
 
     if with_global(|g| g.cutbuffer.is_none()) {
-        winio::statusline(MessageType::Ahem, "Cutbuffer is empty");
+        winio::statusline(MessageType::Ahem, &crate::t!("cut-buffer_empty"));
         return;
     }
 

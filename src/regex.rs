@@ -53,7 +53,7 @@ impl Regex {
         };
         let prog = parser.parse_alt()?;
         if parser.pos != parser.chars.len() {
-            return Err(format!("unexpected '{}'", parser.chars[parser.pos] as char));
+            return Err(crate::t!("regex-unexpected", ch = (parser.chars[parser.pos] as char).to_string()));
         }
         Ok(Regex { prog })
     }
@@ -451,8 +451,8 @@ impl<'a> Parser<'a> {
                 Ok(inner)
             }
             b'\\' => self.parse_escape(),
-            b'*' | b'+' | b'?' => Err(format!("dangling '{}'", c as char)),
-            b'|' | b')' | b'{' | b'}' => Err(format!("unexpected '{}'", c as char)),
+            b'*' | b'+' | b'?' => Err(crate::t!("regex-dangling", ch = (c as char).to_string())),
+            b'|' | b')' | b'{' | b'}' => Err(crate::t!("regex-unexpected", ch = (c as char).to_string())),
             _ => Ok(self.char_node(c)),
         }
     }

@@ -401,7 +401,7 @@ pub fn load_history() {
         /* 若读取已有文件失败（文件不存在除外），退出时不保存历史。 */
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
         Err(e) => {
-            crate::rcfile::jot_error(&format!("Error reading {}: {}", historyname, e));
+            crate::rcfile::jot_error(&crate::t!("history-error_reading", name = historyname, err = e.to_string()));
             UNSET(HISTORYLOG);
             return;
         }
@@ -486,7 +486,7 @@ pub fn save_history() {
 
     let mut histories = match std::fs::File::create(&historyname) {
         Err(e) => {
-            crate::rcfile::jot_error(&format!("Error writing {}: {}", historyname, e));
+            crate::rcfile::jot_error(&crate::t!("history-error_writing", name = historyname, err = e.to_string()));
             return;
         }
         Ok(f) => f,
@@ -605,7 +605,7 @@ pub fn load_positions_register() {
         /* 若读取已有文件失败（文件不存在除外），退出时不保存寄存器。 */
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
         Err(e) => {
-            crate::rcfile::jot_error(&format!("Error reading {}: {}", registername, e));
+            crate::rcfile::jot_error(&crate::t!("history-error_reading", name = registername, err = e.to_string()));
             UNSET(POSITIONLOG);
             return;
         }
@@ -704,7 +704,7 @@ pub fn save_positions_register() {
 
     let mut registry = match std::fs::File::create(&registername) {
         Err(e) => {
-            crate::rcfile::jot_error(&format!("Error writing {}: {}", registername, e));
+            crate::rcfile::jot_error(&crate::t!("history-error_writing", name = registername, err = e.to_string()));
             return;
         }
         Ok(f) => f,

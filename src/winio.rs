@@ -340,8 +340,8 @@ fn draw_titlebar_line(stdout: &mut io::Stdout, cols: usize) {
         let modified = g.openfile.as_ref()
             .map(|of| of.borrow().modified)
             .unwrap_or(false);
-        let state = if modified { " Modified" } else { "" };
-        let left_text = format!(" GNU nano {} ", VERSION);
+        let state = if modified { &crate::t!("winio-modified") } else { "" };
+        let left_text = format!(" {} nano {} ", crate::t!("version-label"), VERSION);
         let right_text = state;
 
         let left_len = left_text.len();
@@ -1608,7 +1608,7 @@ pub fn show_welcome_message() -> bool {
         .unwrap_or(false);
     let show = filename_empty && totsize_zero && !ISSET(NO_HELP) && not_rebound;
     if show {
-        statusbar("[ Welcome to nano.  For basic help, type Ctrl+G. ]");
+        statusbar(&crate::t!("welcome-message"));
     }
     show
 }

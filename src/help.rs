@@ -9,8 +9,8 @@
 //! 转换说明：
 //! - `help_text`/`start_of_body`/`end_of_intro`/`location` 等静态状态
 //!   放入 [`GlobalState`]；
-//! - 各菜单的介绍文本保留（未翻译的原字符串）；
-//! - `make_new_buffer`/`close_buffer` 委托给 [`crate::nano`]，
+//! - 各菜单的介绍文本通过 [`crate::t`] 宏读取外置 ftl 文件（en-US.ftl 默认）；
+//! - `make_new_buffer`/`close_buffer` 委托给 [`crate::files`/`crate::nano`]，
 //!   文本换行用 [`crate::text::break_line`]。
 
 use crate::definitions::*;
@@ -28,82 +28,93 @@ use crate::winio;
 pub fn help_init() {
     let currmenu = with_global(|g| g.currmenu);
 
-    /* 各菜单的帮助介绍文本。 */
-    let (htx0, htx1, htx2): (&str, &str, &str) = if currmenu & (MWHEREIS | MREPLACE) != 0 {
-        ("Search Command Help Text\n\n Enter the words or characters you would like to search for, and then press Enter.  If there is a match for the text you entered, the screen will be updated to the location of the nearest match for the search string.\n\n The previous search string will be shown in brackets after the search prompt.  Hitting Enter without entering any text will perform the previous search.  ",
-         "If you have selected text with the mark and then search to replace, \
-          only matches in the selected text will be replaced.\n\n \
-          The following function keys are available in Search mode:\n\n"
-         ,
-         "")
+    /* 各菜单的帮助介绍文本，全部通过 i18n 宏外置加载。 */
+    let (htx0, htx1, htx2): (String, String, String) = if currmenu & (MWHEREIS | MREPLACE) != 0 {
+        (
+            format!("{} \n\n {} \n\n {}",
+                crate::t!("help-search_title"),
+                crate::t!("help-search_body"),
+                crate::t!("help-search_prev")),
+            format!("{} \n\n {} \n\n {} \n\n",
+                crate::t!("help-search_select"),
+                "",
+                crate::t!("help-search_fnkeys")),
+            String::new()
+        )
     } else if currmenu == MREPLACEWITH {
-        ("=== Replacement ===\n\n ",
-         "Type the characters that should replace what you typed at the previous prompt, and press Enter.\n\n",
-         " The following function keys are available at this prompt:\n\n")
+        (
+            format!("{} \n\n ", crate::t!("help-replace_title")),
+            format!("{} \n\n", crate::t!("help-replace_body")),
+            format!(" {} \n\n", crate::t!("help-replace_fnkeys"))
+        )
     } else if currmenu == MGOTOLINE {
-        ("Go To Line Help Text\n\n ",
-         "Enter the line number that you wish to go to and hit Enter.  If there are fewer lines of text than the number you entered, you will be brought to the last line of the file.\n\n",
-         " The following function keys are available in Go To Line mode:\n\n")
+        (
+            format!("{} \n\n ", crate::t!("help-goto_line_title")),
+            format!("{} \n\n", crate::t!("help-goto_body")),
+            format!(" {} \n\n", crate::t!("help-goto_fnkeys"))
+        )
     } else if currmenu == MINSERTFILE {
-        ("Insert File Help Text\n\n ",
-         "Type in the name of a file to be inserted into the current file buffer at the current cursor location.\n\n If you have compiled nano with multiple file buffer support, and enable multiple file buffers with the -F or --multibuffer command line flags, the Meta-F toggle, or a nanorc file, inserting a file will cause it to be loaded into a separate buffer (use Meta-< and > to switch between file buffers).",
-         "If you need another blank buffer, do not enter any filename, or type in a nonexistent filename at the prompt and press Enter.\n\n The following function keys are available in Insert File mode:\n\n")
+        (
+            format!("{} \n\n ", crate::t!("help-insert_file_title")),
+            format!("{} {} \n\n", crate::t!("help-insert_body"), crate::t!("help-insert_extra")),
+            format!(" {} \n\n", crate::t!("help-insert_fnkeys"))
+        )
     } else if currmenu == MWRITEFILE {
-        ("Write File Help Text\n\n ",
-         "Type the name that you wish to save the current file as and press Enter to save the file.\n\n If you have selected text with the mark, you will be prompted to save only the selected portion to a separate file.  To reduce the chance of overwriting the current file with just a portion of it, the current filename is not the default in this mode.\n\n",
-         " The following function keys are available in Write File mode:\n\n")
+        (
+            format!("{} \n\n ", crate::t!("help-write_file_title")),
+            format!("{} \n\n", crate::t!("help-write_body")),
+            format!(" {} \n\n", crate::t!("help-write_fnkeys"))
+        )
     } else if currmenu == MBROWSER {
-        ("File Browser Help Text\n\n ",
-         "The file browser is used to visually browse the directory structure to select a file for reading or writing.  You may use the arrow keys or Page Up/Down to browse through the files, and S or Enter to choose the selected file or enter the selected directory.  To move up one level, select the directory called \"..\" at the top of the file list.\n\n",
-         " The following function keys are available in the file browser:\n\n")
+        (
+            format!("{} \n\n ", crate::t!("help-browser_title")),
+            format!("{} \n\n", crate::t!("help-browser_body")),
+            format!(" {} \n\n", crate::t!("help-browser_fnkeys"))
+        )
     } else if currmenu == MWHEREISFILE {
-        ("Browser Search Command Help Text\n\n ",
-         "Enter the words or characters you would like to search for, and then press Enter.  If there is a match for the text you entered, the screen will be updated to the location of the nearest match for the search string.\n\n The previous search string will be shown in brackets after the search prompt.  Hitting Enter without entering any text will perform the previous search.\n\n",
-         " The following function keys are available at this prompt:\n\n")
+        (
+            format!("{} \n\n ", crate::t!("help-browser_search_title")),
+            format!("{} \n\n {}", crate::t!("help-bsearch_body"), crate::t!("help-bsearch_prev")),
+            format!(" {} \n\n", crate::t!("help-replace_fnkeys"))
+        )
     } else if currmenu == MGOTODIR {
-        ("Browser Go To Directory Help Text\n\n ",
-         "Enter the name of the directory you would like to browse to.\n\n If tab completion has not been disabled, you can use the Tab key to (attempt to) automatically complete the directory name.\n\n",
-         " The following function keys are available in Browser Go To Directory mode:\n\n")
+        (
+            format!("{} \n\n ", crate::t!("help-browser_gotodir_title")),
+            format!("{} \n\n", crate::t!("help-bgotodir_body")),
+            format!(" {} \n\n", crate::t!("help-bgotodir_fnkeys"))
+        )
     } else if currmenu == MSPELL {
-        ("=== Spelling correction ===\n\n ",
-         " The following function keys are available at this prompt:\n\n",
-         "")
+        (
+            format!("{} \n\n ", crate::t!("help-spell_title")),
+            format!(" {} \n\n", crate::t!("help-spell_fnkeys")),
+            String::new()
+        )
     } else if currmenu == MEXECUTE {
-        ("Execute Command Help Text\n\n ",
-         " The following function keys are available at this prompt:\n\n",
-         "")
+        (
+            format!("{} \n\n ", crate::t!("help-execute_title")),
+            format!(" {} \n\n", crate::t!("help-spell_fnkeys")),
+            String::new()
+        )
     } else if currmenu == MLINTER {
-        ("=== Linter ===\n\n ",
-         " The following function keys are available in Linter mode:\n\n",
-         "")
+        (
+            format!("{} \n\n ", crate::t!("help-linter_title")),
+            format!(" {} \n\n", crate::t!("help-linter_fnkeys")),
+            String::new()
+        )
     } else {
         /* 默认使用主帮助列表。 */
-        ("Main nano help text\n\n \
-          The nano editor is designed to emulate the functionality and \
-          ease-of-use of the UW Pico text editor.  There are four main \
-          sections of the editor.  The top line shows the program version, \
-          the current filename being edited, and whether or not the file \
-          has been modified.  Next is the main editor window showing the \
-          file being edited.  The status line is the third line from the \
-          bottom and shows important messages.  ",
-         "The bottom two lines show the most commonly used shortcuts in \
-          the editor.\n\n Shortcuts are written as follows: Control-key \
-          sequences are notated with a '^' and can be entered either by \
-          using the Ctrl key or pressing the Esc key twice.  Meta-key \
-          sequences are notated with 'M-' and can be entered using either \
-          the Alt, Cmd, or Esc key, depending on your keyboard setup.  ",
-         "Also, pressing Esc twice and then typing a three-digit decimal \
-          number from 000 to 255 will enter the character with the \
-          corresponding value.  The following keystrokes are available in \
-          the main editor window.  Alternative keys are shown in \
-          parentheses:\n\n")
+        (
+            format!("{} \n\n {}", crate::t!("help-main_title"), crate::t!("help-main_body")),
+            format!("{} \n\n", crate::t!("help-main_keydesc")),
+            format!("{} \n\n", crate::t!("help-main_extra"))
+        )
     };
 
     let mut help_text = String::new();
-    help_text.push_str(htx0);
-    help_text.push_str(htx1);
+    help_text.push_str(&htx0);
+    help_text.push_str(&htx1);
     if !htx2.is_empty() {
-        help_text.push_str(htx2);
+        help_text.push_str(&htx2);
     }
 
     /* 记住"介绍结束、快捷键开始"的位置。 */
@@ -121,7 +132,6 @@ pub fn help_init() {
         let blank_after = f_ref.blank_after;
         drop(f_ref);
 
-        /* 显示每个函数的前两个快捷键（若有）。 */
         let mut tally = 0;
         let mut first_keys = String::new();
         let shortcuts = global::iter_shortcuts();
@@ -169,7 +179,6 @@ pub fn wrap_help_text_into_buffer() {
 
     let help_text = with_global(|g| g.help_text.clone()).unwrap_or_default();
     let end_of_intro = with_global(|g| g.help_end_of_intro);
-    /* 对应 C 的 start_of_body：跳过标题行（标题单独显示在标题栏）。 */
     let start_of_body = with_global(|g| g.help_start_of_body);
 
     let mut ptr = start_of_body;
@@ -177,7 +186,6 @@ pub fn wrap_help_text_into_buffer() {
 
     files::make_new_buffer();
 
-    /* 顶部确保有空白行（美学）。 */
     if !ISSET(MINIBAR) || !ISSET(EMPTY_LINE) {
         let lines = with_global(|g| g.LINES);
         if lines > 6 {
@@ -195,7 +203,6 @@ pub fn wrap_help_text_into_buffer() {
         }
     }
 
-    /* 把帮助文本复制到刚创建的新缓冲区。 */
     let bytes = help_text.as_bytes();
     while ptr < bytes.len() {
         if ptr == end_of_intro {
@@ -211,7 +218,6 @@ pub fn wrap_help_text_into_buffer() {
         }
 
         let shim = if bytes.get(ptr + length.saturating_sub(1)).copied().unwrap_or(0) == b' ' { 0 } else { 1 };
-        /* C: snprintf(oneline, length + shim, "%s", ptr) 最多写 length + shim - 1 字符。 */
         let copylen = (length + shim).saturating_sub(1).min(bytes.len() - ptr);
         let oneline: String = if is_intro {
             String::from_utf8_lossy(&bytes[ptr..ptr + copylen]).into_owned()
@@ -225,7 +231,6 @@ pub fn wrap_help_text_into_buffer() {
                 let cur = of.current.clone().unwrap();
                 cur.borrow_mut().data = oneline;
 
-                /* 创建新行，并为每个额外 \n 再创建一行。 */
                 let newnode = make_new_node(Some(&*cur.borrow()));
                 newnode.borrow_mut().prev = Some(std::rc::Rc::downgrade(&cur));
                 cur.borrow_mut().next = Some(newnode.clone());
@@ -238,8 +243,6 @@ pub fn wrap_help_text_into_buffer() {
             ptr = ptr.saturating_sub(1);
         }
 
-        /* C: do { 创建新行 } while (*(++ptr) == '\n')——至少前进一次；
-           每再遇到一个换行就为它创建一行空行。 */
         loop {
             with_global_mut(|g| {
                 if let Some(of) = &g.openfile {
@@ -270,7 +273,6 @@ pub fn wrap_help_text_into_buffer() {
     crate::color::find_and_prime_applicable_syntax();
     crate::files::prepare_for_display();
 
-    /* 移到之前所在的位置。 */
     let location = with_global(|g| g.help_location);
     with_global_mut(|g| {
         if let Some(of) = &g.openfile {
@@ -300,10 +302,8 @@ pub fn wrap_help_text_into_buffer() {
 pub fn show_help() {
     let oldmenu = with_global(|g| g.currmenu);
 
-    /* 保存 flag 设置。 */
     let stash_flags = with_global(|_g| clone_flags());
     let was_tabsize = with_global(|g| g.tabsize);
-    /* 确保帮助屏幕的快捷键列表能显示。 */
     let no_help_or_zero = ISSET(NO_HELP) || ISSET(ZERO);
     if no_help_or_zero {
         UNSET(NO_HELP);
@@ -311,7 +311,6 @@ pub fn show_help() {
         winio::window_init();
     }
 
-    /* 搜索时向前、不区分大小写、不使用正则。 */
     UNSET(BACKWARDS_SEARCH);
     UNSET(CASE_SENSITIVE);
     UNSET(USE_REGEXP);
@@ -323,7 +322,6 @@ pub fn show_help() {
     });
     winio::curs_set(0);
 
-    /* 从所有相关部分组装帮助文本。 */
     help_init();
 
     with_global_mut(|g| {
@@ -335,7 +333,6 @@ pub fn show_help() {
 
     winio::bottombars(with_global(|g| g.currmenu));
 
-    /* 从帮助文本头部提取标题。 */
     let help_text = with_global(|g| g.help_text.clone()).unwrap_or_default();
     let length = text::break_line(help_text.as_bytes(), usize::MAX as isize >> 1, true) as usize;
     let title = help_text[..length].to_string();
@@ -343,7 +340,6 @@ pub fn show_help() {
 
     winio::titlebar(Some(&title));
 
-    /* 跳过标题指向正文开头。 */
     let mut start_of_body = length;
     while help_text.as_bytes().get(start_of_body).copied().unwrap_or(0) == b'\n' {
         start_of_body += 1;
@@ -359,7 +355,6 @@ pub fn show_help() {
             g.focusing = true;
         });
 
-        /* 显示光标（搜索并找到内容时）。 */
         let _didfind = with_global(|g| g.didfind);
         let show_cursor = with_global(|_g| ISSET(SHOW_CURSOR));
         let kbinput = winio::get_kbinput();
@@ -401,7 +396,6 @@ pub fn show_help() {
 
         winio::edit_refresh();
 
-        /* 计算 edittop 在文件中的字节偏移。 */
         with_global_mut(|g| {
             g.help_location = 0;
             if let Some(of) = &g.openfile {
@@ -420,10 +414,8 @@ pub fn show_help() {
         });
     }
 
-    /* 丢弃帮助文本缓冲区。 */
     files::close_buffer();
 
-    /* 恢复 flag 设置。 */
     with_global_mut(|g| {
         restore_flags(stash_flags);
         g.tabsize = was_tabsize;

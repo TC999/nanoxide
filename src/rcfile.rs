@@ -357,7 +357,7 @@ fn begin_new_syntax(ptr: &str, filename: &str) {
 /// 编译正则并追加到 storage 链表（对应 `grab_and_store`）。
 fn grab_and_store(kind: &str, ptr: &str, target: StorageKind) {
     if !OPEN_SYNTAX.with(|x| x.get()) {
-        jot_error(&format!("A '{}' command requires a preceding 'syntax' command", kind));
+        jot_error(&crate::t!("rcfile-missing_command", kind = kind));
         return;
     }
 
@@ -365,12 +365,12 @@ fn grab_and_store(kind: &str, ptr: &str, target: StorageKind) {
         .map(|s| s.borrow().name.as_deref() == Some("default"))
         .unwrap_or(false);
     if is_default && !ptr.trim().is_empty() {
-        jot_error(&format!("The \"default\" syntax does not accept '{}' regexes", kind));
+        jot_error(&crate::t!("rcfile-default_no_regex", kind = kind));
         return;
     }
 
     if ptr.trim().is_empty() {
-        jot_error(&format!("Missing regex string after '{}' command", kind));
+        jot_error(&crate::t!("rcfile-missing_regex", kind = kind));
         return;
     }
 
@@ -381,7 +381,7 @@ fn grab_and_store(kind: &str, ptr: &str, target: StorageKind) {
         let pat = match MatchPattern::from_regex(&rgx_str, false) {
             Ok(p) => p,
             Err(msg) => {
-                jot_error(&format!("Bad regex \"{}\": {}", rgx_str, msg));
+                jot_error(&crate::t!("rcfile-bad_regex", expr = rgx_str, msg = msg));
                 return;
             }
         };
@@ -422,14 +422,14 @@ enum CommentTarget {
 fn pick_up_name(kind: &str, ptr: &str, target: CommentTarget) {
     let s = ptr.trim();
     if s.is_empty() {
-        jot_error(&format!("Missing argument after '{}'", kind));
+        jot_error(&crate::t!("rcfile-missing_arg", kind = kind));
         return;
     }
     let val = if s.starts_with('"') {
         match s.rfind('"') {
             Some(idx) if idx > 0 => s[1..idx].to_string(),
             _ => {
-                jot_error(&format!("Argument of '{}' lacks closing \"", kind));
+                jot_error(&crate::t!("rcfile-missing_quote", kind = kind));
                 return;
             }
         }
@@ -493,7 +493,7 @@ fn parse_rule(ptr: &str, icase: bool) {
         let start_rgx = match MatchPattern::from_regex(&rgx_str, icase) {
             Ok(r) => r,
             Err(msg) => {
-                jot_error(&format!("Bad regex \"{}\": {}", rgx_str, msg));
+                jot_error(&crate::t!("rcfile-bad_regex", expr = rgx_str, msg = msg));
                 return;
             }
         };
@@ -574,7 +574,7 @@ fn parse_extendsyntax(ptr: &str) {
         None
     });
     let Some(sntx) = found else {
-        jot_error(&format!("Could not find syntax \"{}\" to extend", syntaxname));
+        jot_error(&crate::t!("rcfile-syntax_not_found", name = syntaxname));
         return;
     };
 
@@ -687,7 +687,7 @@ pub fn jot_error(msg: &str) {
         if g.startup_problem.is_none() {
             let nanorc = NANORC_FILE.with(|n| n.borrow().clone());
             g.startup_problem = Some(match nanorc {
-                Some(nr) => format!("Mistakes in '{}'", nr),
+                Some(nr) => crate::t!("rcfile-mistakes_in", name = nr),
                 None => "Problems with history file".to_string(),
             });
         }
@@ -698,7 +698,7 @@ pub fn jot_error(msg: &str) {
     let nanorc = NANORC_FILE.with(|n| n.borrow().clone());
     let textbuf = if lineno > 0 {
         match &nanorc {
-            Some(nr) => format!("Error in {} on line {}: {}", nr, lineno, msg),
+            Some(nr) => crate::t!("rcfile-error_in", file = nr, line = lineno.to_string(), msg = msg),
             None => msg.to_string(),
         }
     } else {

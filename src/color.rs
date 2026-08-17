@@ -351,7 +351,7 @@ pub fn find_and_prime_applicable_syntax() {
             cur = next;
         }
         if sntx.is_none() && !inhelp {
-            winio::statusline(MessageType::Alert, &format!("Unknown syntax name: {}", sstr));
+            winio::statusline(MessageType::Alert, &crate::t!("color-unknown_syntax", name = sstr));
         }
     }
 
@@ -724,7 +724,7 @@ pub fn color_to_short(colorname: &str) -> Result<(i16, bool, bool), String> {
     // #RGB 形式（4 字符十六进制）
     if name.starts_with('#') && name.len() == 4 {
         if vivid {
-            return Err(format!("Color '{}' takes no prefix", colorname));
+            return Err(crate::t!("color-no_prefix_allowed", name = colorname));
         }
         let parse_hex = |c: char| c.to_digit(16);
         let chars: Vec<char> = name[1..].chars().collect();
@@ -738,13 +738,13 @@ pub fn color_to_short(colorname: &str) -> Result<(i16, bool, bool), String> {
                 return Ok((value as i16, false, false));
             }
         }
-        return Err(format!("Color \"{}\" not understood", colorname));
+        return Err(crate::t!("color-unknown_color", name = colorname));
     }
 
     for (index, hue) in HUES.iter().enumerate() {
         if name == *hue {
             if index > 7 && vivid {
-                return Err(format!("Color '{}' takes no prefix", colorname));
+                return Err(crate::t!("color-no_prefix_allowed", name = colorname));
             }
             if index > 8 {
                 // 扩展色在少色终端退化；crossterm 一律支持 256 色。
@@ -753,7 +753,7 @@ pub fn color_to_short(colorname: &str) -> Result<(i16, bool, bool), String> {
         }
     }
 
-    Err(format!("Color \"{}\" not understood", colorname))
+    Err(crate::t!("color-unknown_color", name = colorname))
 }
 
 /// 解析颜色组合（对应 `parse_combination`）：返回 (fg, bg, attributes)。
@@ -765,7 +765,7 @@ pub fn parse_combination(text: &str) -> Option<(i16, i16, i32)> {
     if let Some(rest) = s.strip_prefix("bold") {
         attributes |= A_BOLD;
         if !rest.starts_with(',') {
-            crate::rcfile::jot_error("An attribute requires a subsequent comma");
+            crate::rcfile::jot_error(&crate::t!("color-attr_needs_comma"));
             return None;
         }
         s = &rest[1..];
@@ -773,7 +773,7 @@ pub fn parse_combination(text: &str) -> Option<(i16, i16, i32)> {
     if let Some(rest) = s.strip_prefix("italic") {
         // A_ITALIC 在 crossterm 中不单独支持；消费掉前缀。
         if !rest.starts_with(',') {
-            crate::rcfile::jot_error("An attribute requires a subsequent comma");
+            crate::rcfile::jot_error(&crate::t!("color-attr_needs_comma"));
             return None;
         }
         s = &rest[1..];

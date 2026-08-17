@@ -89,14 +89,14 @@ pub fn do_mark() {
     if of_ref.mark.is_some() {
         of_ref.mark = None;
         drop(of_ref);
-        winio::statusbar("Mark Unset");
+        winio::statusbar(&crate::t!("text-mark_unset"));
         with_global_mut(|g| g.refresh_needed = true);
     } else {
         of_ref.mark = of_ref.current.clone();
         of_ref.mark_x = of_ref.current_x;
         of_ref.softmark = false;
         drop(of_ref);
-        winio::statusbar("Mark Set");
+        winio::statusbar(&crate::t!("text-mark_set"));
     }
 }
 
@@ -539,7 +539,7 @@ pub fn do_comment() {
     }).unwrap_or_else(|| GENERAL_COMMENT_CHARACTER.to_string());
 
     if comment_seq.is_empty() {
-        winio::statusline(MessageType::Ahem, "Commenting is not supported for this file type");
+        winio::statusline(MessageType::Ahem, &crate::t!("text-no_comment_syntax"));
         return;
     }
 
@@ -560,7 +560,7 @@ pub fn do_comment() {
         )
     });
     if Rc::ptr_eq(&top, &bot) && is_filebot && !no_newlines {
-        winio::statusline(MessageType::Ahem, "Cannot comment past end of file");
+        winio::statusline(MessageType::Ahem, &crate::t!("text-no_comment_past_eof"));
         return;
     }
 
@@ -762,7 +762,7 @@ pub fn do_undo() {
     };
     let Some(u) = u else {
         drop(of);
-        winio::statusline(MessageType::Ahem, "Nothing to undo");
+        winio::statusline(MessageType::Ahem, &crate::t!("text-nothing_to_undo"));
         return;
     };
 
@@ -999,7 +999,7 @@ fn finalize_undo(u: &UndoRef, undidmsg: Option<&str>, undoing: bool) {
     let pletion_active = with_global(|g| g.pletion_line.is_some());
     if let Some(msg) = undidmsg {
         if !is_zero && !pletion_active {
-            let text = if undoing { format!("Undid {}", msg) } else { format!("Redid {}", msg) };
+            let text = if undoing { crate::t!("text-undid", action = msg) } else { crate::t!("text-redid", action = msg) };
             winio::statusline(MessageType::Hush, &text);
         }
     }
@@ -1063,7 +1063,7 @@ pub fn do_redo() {
     };
     let Some(mut u) = u else {
         drop(of);
-        winio::statusline(MessageType::Ahem, "Nothing to redo");
+        winio::statusline(MessageType::Ahem, &crate::t!("text-nothing_to_redo"));
         return;
     };
 
@@ -1087,7 +1087,7 @@ pub fn do_redo() {
             Some(n) => u = n,
             None => {
                 drop(of);
-                winio::statusline(MessageType::Ahem, "Nothing to redo");
+                winio::statusline(MessageType::Ahem, &crate::t!("text-nothing_to_redo"));
                 return;
             }
         }
@@ -1263,7 +1263,7 @@ fn finalize_redo(u: &UndoRef, redidmsg: Option<&str>) {
     let is_zero = ISSET(ZERO);
     if let Some(msg) = redidmsg {
         if !is_zero {
-            let text = format!("Redid {}", msg);
+            let text = crate::t!("text-redid", action = msg);
             winio::statusline(MessageType::Hush, &text);
         }
     }

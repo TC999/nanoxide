@@ -13,6 +13,10 @@ fn main() {
     // 1. 初始化全局状态
     global::global_init();
 
+    // 1b. 初始化 i18n（按 LANG 协商语言，加载外置 ftl，放在 global_init 之后、
+    //     首次使用 i18n 之前即可；不依赖 home dir，因为 locales/ 默认位于 exe 旁）
+    nano_rs::i18n::init();
+
     // 2. 解析命令行参数
     let args: Vec<String> = std::env::args().collect();
     parse_args(&args);
