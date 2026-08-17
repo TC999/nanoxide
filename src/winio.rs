@@ -96,11 +96,21 @@ pub fn wgetch() -> i32 {
             THE_WINDOW_RESIZED
         }
         Ok(Event::Paste(data)) => {
-            // 括号粘贴
-            for _ch in data.chars() {
-                // 逐个处理粘贴的字符
+            // 括号粘贴：把粘贴文本作为普通输入插入缓冲区（支持多行）。
+            // 返回 FOREIGN_SEQUENCE 让主循环跳过（文本已在此插入）。
+            let text = data.replace("\r\n", "\n").replace('\r', "");
+            if !ISSET(VIEW_MODE) {
+                for (i, part) in text.split('\n').enumerate() {
+                    if i > 0 {
+                        crate::text::do_enter();
+                    }
+                    if !part.is_empty() {
+                        crate::text::inject(part.as_bytes(), part.len());
+                    }
+                }
+                edit_refresh();
             }
-            START_OF_PASTE
+            FOREIGN_SEQUENCE
         }
         Ok(Event::FocusGained) => FOCUS_IN,
         Ok(Event::FocusLost) => FOCUS_OUT,
@@ -377,11 +387,15 @@ fn draw_titlebar_line(stdout: &mut io::Stdout, cols: usize) {
 fn draw_statusbar_line(stdout: &mut io::Stdout, cols: usize) {
     with_global(|g| {
         let msg = &g.statusbar_msg;
+        let centered = g.statusbar_centered;
         if msg.is_empty() {
             let _ = write!(stdout, "{:width$}", "", width = cols);
-        } else if msg.len() > cols {
+        } else if display_width(msg) > cols {
             let clipped: String = msg.chars().take(cols).collect();
             let _ = write!(stdout, "{}", clipped);
+        } else if centered {
+            let pad = cols.saturating_sub(display_width(msg)) / 2;
+            let _ = write!(stdout, "{:width$}{}", "", msg, width = pad);
         } else {
             let _ = write!(stdout, "{}{:width$}", msg, "", width = cols - msg.len());
         }
@@ -454,32 +468,64 @@ fn draw_bottombars_lines(stdout: &mut io::Stdout, cols: usize, lines: usize) {
     });
 }
 
-/// 在状态栏显示消息。
-pub fn statusbar(msg: &str) {
-    with_global_mut(|g| {
-        g.lastmessage = MessageType::Info;
-        g.statusbar_msg = msg.to_string();
-    });
+/// 估算字符串的终端显示宽度：ASCII 占 1 列，其他（中文等全角字符）占 2 列。
+fn display_width(s: &str) -> usize {
+    s.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum()
+}
+
+/// 在状态栏写入消息（status_row 行）；centered 时水平居中。
+fn write_statusbar_impl(msg: &str, centered: bool) {
     let mut stdout = io::stdout();
     let lines = with_global(|g| g.LINES);
     let status_row = (lines.saturating_sub(3)) as u16;
     let _ = execute!(stdout, cursor::MoveTo(0, status_row));
+    if centered {
+        let cols = with_global(|g| g.COLS);
+        let pad = cols.saturating_sub(display_width(msg)) / 2;
+        let _ = write!(stdout, "{:width$}", "", width = pad);
+    }
     let _ = write!(stdout, "{}", msg);
     let _ = stdout.flush();
 }
 
-/// 在状态行显示消息。
+/// 在状态栏显示消息（左对齐）。
+pub fn statusbar(msg: &str) {
+    with_global_mut(|g| {
+        g.lastmessage = MessageType::Info;
+        g.statusbar_msg = msg.to_string();
+        g.statusbar_centered = false;
+    });
+    write_statusbar_impl(msg, false);
+}
+
+/// 在状态栏居中显示消息。
+pub fn statusbar_centered(msg: &str) {
+    with_global_mut(|g| {
+        g.lastmessage = MessageType::Info;
+        g.statusbar_msg = msg.to_string();
+        g.statusbar_centered = true;
+    });
+    write_statusbar_impl(msg, true);
+}
+
+/// 在状态行显示消息（左对齐）。
 pub fn statusline(typ: MessageType, msg: &str) {
     with_global_mut(|g| {
         g.lastmessage = typ;
         g.statusbar_msg = msg.to_string();
+        g.statusbar_centered = false;
     });
-    let mut stdout = io::stdout();
-    let lines = with_global(|g| g.LINES);
-    let status_row = (lines.saturating_sub(3)) as u16;
-    let _ = execute!(stdout, cursor::MoveTo(0, status_row));
-    let _ = write!(stdout, "{}", msg);
-    let _ = stdout.flush();
+    write_statusbar_impl(msg, false);
+}
+
+/// 在状态行居中显示消息。
+pub fn statusline_centered(typ: MessageType, msg: &str) {
+    with_global_mut(|g| {
+        g.lastmessage = typ;
+        g.statusbar_msg = msg.to_string();
+        g.statusbar_centered = true;
+    });
+    write_statusbar_impl(msg, true);
 }
 
 /// 在指定位置显示文本。
@@ -492,6 +538,7 @@ pub fn wipe_statusbar() {
     with_global_mut(|g| {
         g.lastmessage = MessageType::Vacuum;
         g.statusbar_msg.clear();
+        g.statusbar_centered = false;
     });
     let mut stdout = io::stdout();
     let lines = with_global(|g| g.LINES);
@@ -1608,7 +1655,7 @@ pub fn show_welcome_message() -> bool {
         .unwrap_or(false);
     let show = filename_empty && totsize_zero && !ISSET(NO_HELP) && not_rebound;
     if show {
-        statusbar(&format!("[ {} ]", crate::t!("welcome-message")));
+        statusbar_centered(&format!("[ {} ]", crate::t!("welcome-message")));
     }
     show
 }
@@ -1620,14 +1667,16 @@ pub fn handle_input_key(key: i32) -> bool {
     let handled = execute_function(key, menu);
 
     if !handled {
-        // 处理普通字符输入
-        if key > 0 && key < 256 && key != ESC_CODE as i32 {
-            let ch = char::from_u32(key as u32);
-            if let Some(c) = ch {
-                if !ISSET(VIEW_MODE) {
-                    text::insert_char(c);
-                    edit_refresh();
-                    return true;
+        // 处理普通字符输入。键码可以是任意 Unicode 码点（中文等 > 255），
+        // 但需排除：控制字符、Alt 组合键（0x200..=0x2FF，未绑定功能时忽略）。
+        if key > 0 && key != ESC_CODE as i32 {
+            if let Some(c) = char::from_u32(key as u32) {
+                if !c.is_control() && !(0x200..=0x2FF).contains(&(key as u32)) {
+                    if !ISSET(VIEW_MODE) {
+                        text::insert_char(c);
+                        edit_refresh();
+                        return true;
+                    }
                 }
             }
         }

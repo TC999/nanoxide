@@ -317,7 +317,7 @@ pub fn interpret(kbinput: i32) -> Option<FunctionId> {
 pub fn unbound_key(kbinput: i32) {
     if kbinput >= 0 {
         use crate::winio;
-        winio::statusline(
+        winio::statusline_centered(
             crate::definitions::MessageType::Ahem,
             &format!("[ {} ]", crate::t!("key-unbound")),
         );
