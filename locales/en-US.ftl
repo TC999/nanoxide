@@ -10,7 +10,7 @@
 # ============================================================
 
 # ---------- 全局/欢迎 ----------
-welcome-message = [ Welcome to nano.  For basic help, type Ctrl+G. ]
+welcome-message = Welcome to nano.  For basic help, type Ctrl+G.
 winio-modified =  Modified
 
 # ---------- browser（文件浏览器） ----------
@@ -47,9 +47,9 @@ movement-not_possible = Not possible with '{opt}'
 
 # ---------- search（搜索/替换） ----------
 search-search = Search
-search-case_sensitive = [Case sensitive]
-search-regexp = [Reg.exp.]
-search-backwards = [Backwards]
+search-case_sensitive = Case sensitive
+search-regexp = Reg.exp.
+search-backwards = Backwards
 search-to_replace = (to replace)
 search-bad_regex = Bad regex "{regexp}"
 search-search_wrapped = Search Wrapped

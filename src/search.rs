@@ -403,10 +403,10 @@ pub fn search_init(replacing: bool, retain_answer: bool) {
             MWHEREIS
         };
         let answer = with_global(|g| g.answer.clone()).unwrap_or_default();
-        let cs = if ISSET(CASE_SENSITIVE) { crate::t!("search-case_sensitive") } else { String::new() };
-        let rg = if ISSET(USE_REGEXP) { crate::t!("search-regexp") } else { String::new() };
-        let bw = if ISSET(BACKWARDS_SEARCH) { crate::t!("search-backwards") } else { String::new() };
-        let tr = if replacing { crate::t!("search-to_replace") } else { String::new() };
+        let cs = if ISSET(CASE_SENSITIVE) { format!("[ {} ]", crate::t!("search-case_sensitive")) } else { String::new() };
+        let rg = if ISSET(USE_REGEXP) { format!("[ {} ]", crate::t!("search-regexp")) } else { String::new() };
+        let bw = if ISSET(BACKWARDS_SEARCH) { format!("[ {} ]", crate::t!("search-backwards")) } else { String::new() };
+        let tr = if replacing { format!("[ {} ]", crate::t!("search-to_replace")) } else { String::new() };
         let msg = format!("{}{}{}{}{}{}", crate::t!("search-search"), cs, rg, bw, tr, thedefault);
 
         let mut search_history = with_global(|g| g.search_history.clone())

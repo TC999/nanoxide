@@ -1608,7 +1608,7 @@ pub fn show_welcome_message() -> bool {
         .unwrap_or(false);
     let show = filename_empty && totsize_zero && !ISSET(NO_HELP) && not_rebound;
     if show {
-        statusbar(&crate::t!("welcome-message"));
+        statusbar(&format!("[ {} ]", crate::t!("welcome-message")));
     }
     show
 }
