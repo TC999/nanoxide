@@ -11,7 +11,6 @@
 
 # ---------- 全局/欢迎 ----------
 welcome-message = [ Welcome to nano.  For basic help, type Ctrl+G. ]
-version-label = GNU
 winio-modified =  Modified
 
 # ---------- browser（文件浏览器） ----------
