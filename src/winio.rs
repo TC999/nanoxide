@@ -333,7 +333,7 @@ fn draw_titlebar_line(stdout: &mut io::Stdout, cols: usize) {
             .and_then(|of| of.borrow().filename.clone())
             .unwrap_or_default();
         let filename = if filename.is_empty() {
-            "New Buffer".to_string()
+            crate::t!("winio-new_buffer")
         } else {
             filename
         };

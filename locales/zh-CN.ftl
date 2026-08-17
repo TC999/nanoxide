@@ -17,6 +17,7 @@
 # ---------- 全局/欢迎 ----------
 welcome-message = 欢迎使用 nano。  如需基本帮助信息，请按下 Ctrl+G。
 winio-modified = 已更改
+winio-new_buffer = 新缓冲区
 
 # ---------- browser（文件浏览器） ----------
 browser-search = 搜索

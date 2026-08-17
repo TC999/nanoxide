@@ -12,6 +12,7 @@
 # ---------- 全局/欢迎 ----------
 welcome-message = Welcome to nano.  For basic help, type Ctrl+G.
 winio-modified =  Modified
+winio-new_buffer = New Buffer
 
 # ---------- browser（文件浏览器） ----------
 browser-search = Search
