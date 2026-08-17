@@ -211,3 +211,4 @@ key-first_file = 首文件
 key-last_file = 末文件
 key-go_to_dir = 跳至目录
 key-verbatim_input = 原形输入
+key-unbound = 按键未绑定

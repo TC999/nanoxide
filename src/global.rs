@@ -319,7 +319,7 @@ pub fn unbound_key(kbinput: i32) {
         use crate::winio;
         winio::statusline(
             crate::definitions::MessageType::Ahem,
-            "Unbound key",
+            &format!("[ {} ]", crate::t!("key-unbound")),
         );
         winio::beep();
     }

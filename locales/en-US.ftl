@@ -206,3 +206,4 @@ key-first_file = First File
 key-last_file = Last File
 key-go_to_dir = Go To Dir
 key-verbatim_input = Verbatim Input
+key-unbound = Unbound Key
