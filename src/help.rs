@@ -30,41 +30,40 @@ pub fn help_init() {
 
     /* 各菜单的帮助介绍文本。 */
     let (htx0, htx1, htx2): (&str, &str, &str) = if currmenu & (MWHEREIS | MREPLACE) != 0 {
-        ("Search Command Help Text\n\n "
-            ,
+        ("Search Command Help Text\n\n Enter the words or characters you would like to search for, and then press Enter.  If there is a match for the text you entered, the screen will be updated to the location of the nearest match for the search string.\n\n The previous search string will be shown in brackets after the search prompt.  Hitting Enter without entering any text will perform the previous search.  ",
          "If you have selected text with the mark and then search to replace, \
           only matches in the selected text will be replaced.\n\n \
           The following function keys are available in Search mode:\n\n"
-            ,
+         ,
          "")
     } else if currmenu == MREPLACEWITH {
         ("=== Replacement ===\n\n ",
-         " The following function keys are available at this prompt:\n\n",
-         "")
+         "Type the characters that should replace what you typed at the previous prompt, and press Enter.\n\n",
+         " The following function keys are available at this prompt:\n\n")
     } else if currmenu == MGOTOLINE {
         ("Go To Line Help Text\n\n ",
-         "",
-         "")
+         "Enter the line number that you wish to go to and hit Enter.  If there are fewer lines of text than the number you entered, you will be brought to the last line of the file.\n\n",
+         " The following function keys are available in Go To Line mode:\n\n")
     } else if currmenu == MINSERTFILE {
         ("Insert File Help Text\n\n ",
-         " The following function keys are available in Insert File mode:\n\n",
-         "")
+         "Type in the name of a file to be inserted into the current file buffer at the current cursor location.\n\n If you have compiled nano with multiple file buffer support, and enable multiple file buffers with the -F or --multibuffer command line flags, the Meta-F toggle, or a nanorc file, inserting a file will cause it to be loaded into a separate buffer (use Meta-< and > to switch between file buffers).",
+         "If you need another blank buffer, do not enter any filename, or type in a nonexistent filename at the prompt and press Enter.\n\n The following function keys are available in Insert File mode:\n\n")
     } else if currmenu == MWRITEFILE {
         ("Write File Help Text\n\n ",
-         "",
-         "")
+         "Type the name that you wish to save the current file as and press Enter to save the file.\n\n If you have selected text with the mark, you will be prompted to save only the selected portion to a separate file.  To reduce the chance of overwriting the current file with just a portion of it, the current filename is not the default in this mode.\n\n",
+         " The following function keys are available in Write File mode:\n\n")
     } else if currmenu == MBROWSER {
         ("File Browser Help Text\n\n ",
-         "",
-         "")
+         "The file browser is used to visually browse the directory structure to select a file for reading or writing.  You may use the arrow keys or Page Up/Down to browse through the files, and S or Enter to choose the selected file or enter the selected directory.  To move up one level, select the directory called \"..\" at the top of the file list.\n\n",
+         " The following function keys are available in the file browser:\n\n")
     } else if currmenu == MWHEREISFILE {
         ("Browser Search Command Help Text\n\n ",
-         "",
-         "")
+         "Enter the words or characters you would like to search for, and then press Enter.  If there is a match for the text you entered, the screen will be updated to the location of the nearest match for the search string.\n\n The previous search string will be shown in brackets after the search prompt.  Hitting Enter without entering any text will perform the previous search.\n\n",
+         " The following function keys are available at this prompt:\n\n")
     } else if currmenu == MGOTODIR {
         ("Browser Go To Directory Help Text\n\n ",
-         "",
-         "")
+         "Enter the name of the directory you would like to browse to.\n\n If tab completion has not been disabled, you can use the Tab key to (attempt to) automatically complete the directory name.\n\n",
+         " The following function keys are available in Browser Go To Directory mode:\n\n")
     } else if currmenu == MSPELL {
         ("=== Spelling correction ===\n\n ",
          " The following function keys are available at this prompt:\n\n",
