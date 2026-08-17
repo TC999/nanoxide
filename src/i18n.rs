@@ -149,34 +149,51 @@ thread_local! {
     static LOCALE_MAP: std::cell::RefCell<HashMap<String, Ftllib>> = std::cell::RefCell::new(HashMap::new());
 }
 
-/// 语言文件的默认根目录：可被环境变量 `NANORS_LOCALES` 覆盖，否则相对于可执行文件所在目录。
-fn default_locales_dir() -> PathBuf {
+/// 语言文件的候选根目录（按优先级依次尝试）：
+///   1. 环境变量 `NANORS_LOCALES` 显式指定；
+///   2. 可执行文件所在目录下的 locales/（发布时随程序分发）；
+///   3. 当前工作目录下的 locales/（cargo run / 开发场景）。
+/// 仅依赖 exe 旁目录会在 `cargo run`（exe 位于 target/debug/）时找不到
+/// 项目根下的 locales/，导致 t() 回退成 [[key]]。
+fn locales_dir_candidates() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
     if let Ok(override_dir) = std::env::var("NANORS_LOCALES") {
-        return PathBuf::from(override_dir);
+        dirs.push(PathBuf::from(override_dir));
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
-            return parent.join("locales");
+            dirs.push(parent.join("locales"));
         }
     }
-    PathBuf::from("locales")
+    if let Ok(cwd) = std::env::current_dir() {
+        dirs.push(cwd.join("locales"));
+    }
+    dirs
 }
 
 /// 加载指定语言代码对应的 ftl 文件（按需），并缓存。
+/// 依次尝试各候选目录，找到第一个可用的即加载；全部失败才返回错误。
 fn ensure_loaded(lang: &str) -> Result<(), std::io::Error> {
-    let locales_dir = default_locales_dir();
-    let path = locales_dir.join(format!("{}.ftl", lang));
-    LOCALE_MAP.with(|map| {
-        let mut m = map.borrow_mut();
-        if m.contains_key(lang) {
-            return;
-        }
+    if LOCALE_MAP.with(|m| m.borrow().contains_key(lang)) {
+        return Ok(());
+    }
+    let mut last_err = std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        format!("no {}.ftl found in any locales dir", lang),
+    );
+    for dir in locales_dir_candidates() {
+        let path = dir.join(format!("{}.ftl", lang));
         match Ftllib::load(&path) {
-            Ok(lib) => { m.insert(lang.to_string(), lib); }
-            Err(_) => {}
+            Ok(lib) => {
+                LOCALE_MAP.with(|m| {
+                    m.borrow_mut().insert(lang.to_string(), lib);
+                });
+                return Ok(());
+            }
+            Err(e) => last_err = e,
         }
-    });
-    Ok(())
+    }
+    Err(last_err)
 }
 
 /// 加载默认 en-US（若存在）。
