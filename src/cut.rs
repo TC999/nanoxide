@@ -139,10 +139,8 @@ pub fn expunge(action: UndoType) {
 
         /* 将下一行的内容添加到当前行的内容。 */
         {
-            let mut cdata = current.borrow().data.clone();
-            let jdata = joining.borrow().data.clone();
-            cdata.push_str(&jdata);
-            current.borrow_mut().data = cdata;
+            let joining_data = joining.borrow().data.clone();
+            current.borrow_mut().data.push_str(&joining_data);
         }
 
         files::unlink_node(&joining);
@@ -435,7 +433,7 @@ pub fn extract_segment(top: &LineRef, top_x: usize, bot: &LineRef, bot_x: usize)
     }
 
     /* 三种情况：(1) 单行；(2) 整行区域；(3) 一般区域。 */
-    let mut taken: LineRef;
+    let taken: LineRef;
     let last: LineRef;
 
     if Rc::ptr_eq(top, bot) && top_x == bot_x {
@@ -558,11 +556,12 @@ pub fn extract_segment(top: &LineRef, top_x: usize, bot: &LineRef, bot_x: usize)
         /* 把 taken 的文本合并到 cutbottom。 */
         {
             let taken_data = taken.borrow().data.clone();
-            let mut cb = cutbottom.borrow().data.clone();
-            cb.push_str(&taken_data);
-            cutbottom.borrow_mut().data = cb;
-            cutbottom.borrow_mut().has_anchor = taken_anchor && !inherited_anchor;
-            cutbottom.borrow_mut().next = taken_next.clone();
+            {
+                let mut cutbottom_ref = cutbottom.borrow_mut();
+                cutbottom_ref.data.push_str(&taken_data);
+                cutbottom_ref.has_anchor = taken_anchor && !inherited_anchor;
+                cutbottom_ref.next = taken_next.clone();
+            }
         }
 
         files::delete_node(&taken);
@@ -661,7 +660,7 @@ pub fn ingraft_buffer(topline: &LineRef) {
         }
     });
 
-    let mut length = if !Rc::ptr_eq(topline, &botline) { xpos } else { length };
+    let length = if !Rc::ptr_eq(topline, &botline) { xpos } else { length };
 
     if extralen > 0 {
         /* 在光标处插入 topline 的文本。 */
@@ -702,9 +701,7 @@ pub fn ingraft_buffer(topline: &LineRef) {
         }
 
         /* 将光标后的文本添加到 botline 末尾。 */
-        let mut bd = botline.borrow().data.clone();
-        bd.push_str(&tailtext);
-        botline.borrow_mut().data = bd;
+        botline.borrow_mut().data.push_str(&tailtext);
 
         /* 把光标放到嫁接文本的末尾。 */
         with_global_mut(|g| {
@@ -1021,10 +1018,10 @@ pub fn copy_marked_region() {
         let shifted = topdata.split_off(top_x);
         topline.borrow_mut().data = String::from_utf8_lossy(&topdata).into_owned();
         // 用裁剪后的 top 行构造副本
-        let mut tmp = make_new_node(None);
+        let tmp = make_new_node(None);
         tmp.borrow_mut().data = String::from_utf8_lossy(&shifted).into_owned();
-        let mut nodes = vec![tmp];
-        let mut n = { let r = nodes[0].borrow(); r.next.clone() };
+        let nodes = vec![tmp];
+        let _n = { let r = nodes[0].borrow(); r.next.clone() };
         // 无后继（我们只构造单节点）
         files::copy_buffer(&nodes[0])
     };
@@ -1096,8 +1093,8 @@ pub fn copy_text() {
 
     let addition = make_new_node(None);
     {
-        let d = current.borrow().data.clone();
-        addition.borrow_mut().data = d[from_x..].to_string();
+        let mut d = current.borrow().data.clone();
+        addition.borrow_mut().data = d.split_off(from_x);
     }
 
     let mut sans_newline = sans_newline;
@@ -1205,7 +1202,7 @@ pub fn paste_text() {
     /* 擦除粘贴文本中的锚点，避免它们扩散。 */
     with_global_mut(|g| {
         if let Some(of) = &g.openfile {
-            let mut of = of.borrow_mut();
+            let of = of.borrow_mut();
             let end = of.current.clone().unwrap();
             let mut line = Some(was_current.clone());
             loop {
@@ -1282,7 +1279,7 @@ pub fn less_than_a_screenful(was_lineno: isize, was_leftedge: usize) -> bool {
         let mut leftedge = firstcolumn;
         winio::go_forward_chunks(rows as i32, &mut line, &mut leftedge);
         let line_lineno = line.borrow().lineno;
-        let mut cur = current;
+        let cur = current;
         let pww = utils::xplustabs();
         if line_lineno < cur_lineno
             || (line_lineno == cur_lineno && leftedge < winio::leftedge_for(pww, &cur))

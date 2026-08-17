@@ -22,8 +22,8 @@ use std::rc::Rc;
 use crossterm::{
     cursor::{self, Hide, Show},
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
-    execute, queue,
-    style::{self, Attribute, Color, SetAttribute, SetForegroundColor, SetBackgroundColor, Print},
+    execute,
+    style::{Attribute, Color, SetAttribute, SetForegroundColor, SetBackgroundColor},
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, DisableLineWrap, EnableLineWrap},
 };
 
@@ -97,7 +97,7 @@ pub fn wgetch() -> i32 {
         }
         Ok(Event::Paste(data)) => {
             // 括号粘贴
-            for ch in data.chars() {
+            for _ch in data.chars() {
                 // 逐个处理粘贴的字符
             }
             START_OF_PASTE
@@ -260,7 +260,7 @@ pub fn current_margin() -> usize {
 /// 刷新屏幕（逐行覆盖重绘，避免全屏 Clear 造成的闪烁）。
 pub fn refresh_screen() {
     let mut stdout = io::stdout();
-    let margin = current_margin();
+    let _margin = current_margin();
 
     let (cols, lines, edit_rows) =
         with_global(|g| (g.COLS, g.LINES, g.LINES.saturating_sub(4)));

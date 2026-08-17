@@ -20,7 +20,6 @@ use crate::history;
 use crate::utils;
 use crate::winio;
 use std::cell::RefCell;
-use std::rc::Rc;
 
 // ======================== 回答与提示的全局访问 ========================
 
@@ -389,7 +388,7 @@ pub fn acquire_an_answer(
     let mut fragment_length = 0;
 
     let mut function: Option<FunctionId> = None;
-    let mut input: i32 = 0;
+    let input: i32 = 0;
 
     if get_typing_x() > get_answer().len() {
         set_typing_x(get_answer().len());
@@ -561,7 +560,7 @@ pub fn run_function(func: FunctionId) {
     use crate::cut;
     use crate::movement;
     use crate::files;
-    use crate::search;
+    
     use crate::text;
     match func {
         FunctionId::DoCancel => text::do_cancel(),

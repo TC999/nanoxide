@@ -449,7 +449,7 @@ pub fn browse(path: &str) -> Option<String> {
 
                 /* 列表本身或选中文件变化时显示列表。 */
                 let selected = get_selected();
-                let show_cursor = with_global(|g| ISSET(SHOW_CURSOR));
+                let show_cursor = with_global(|_g| ISSET(SHOW_CURSOR));
                 if old_selected != Some(selected) || show_cursor {
                     browser_refresh();
                 }
@@ -639,7 +639,7 @@ pub fn browse_in(inpath: &str) -> Option<String> {
     let mut path = files::expand_leading_tilde(inpath);
     let Ok(meta) = std::fs::metadata(&path) else {
         path = strip_last_component(&path);
-        let Ok(meta) = std::fs::metadata(&path) else {
+        let Ok(_meta) = std::fs::metadata(&path) else {
             match std::fs::canonicalize(".") {
                 Ok(cwd) => {
                     path = cwd.to_string_lossy().into_owned();

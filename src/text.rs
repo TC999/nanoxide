@@ -249,9 +249,8 @@ pub fn unindent_a_line(line: &LineRef, indent_len: usize) {
 
     /* 从该行移除第一个制表符宽度的空白。 */
     {
-        let mut data = line.borrow().data.clone().into_bytes();
+        let data = &mut line.borrow_mut().data;
         data.drain(..indent_len);
-        line.borrow_mut().data = String::from_utf8_lossy(&data).into_owned();
     }
 
     with_global_mut(|g| {
@@ -448,7 +447,7 @@ pub fn comment_line(action: UndoType, line: &LineRef, comment_seq: &str) -> bool
         None => comment_seq_len,
     };
     let post_len = match post_pos {
-        Some(p) => comment_seq_len - pre_len - 1,
+        Some(_p) => comment_seq_len - pre_len - 1,
         None => 0,
     };
     let line_len = line.borrow().data.len();
@@ -545,10 +544,10 @@ pub fn do_comment() {
     }
 
     /* 确定处理哪些行。 */
-    let (mut top, bot) = utils::get_range();
+    let (top, bot) = utils::get_range();
 
     /* 若只选中了魔法行，不做任何事。 */
-    let (is_filebot, is_current, no_newlines) = with_global(|g| {
+    let (is_filebot, _is_current, no_newlines) = with_global(|g| {
         (
             g.openfile.as_ref().map(|of| {
                 let of = of.borrow();
@@ -696,7 +695,7 @@ pub fn undo_cut(u: &UndoRef) {
     /* 清除继承的锚点但保留用户放置的锚点。 */
     let of = openfile_ref();
     {
-        let mut of_ref = of.borrow_mut();
+        let of_ref = of.borrow_mut();
         let current = of_ref.current.clone().unwrap();
         if xflags & HAD_ANCHOR_AT_START == 0 {
             current.borrow_mut().has_anchor = false;
@@ -767,7 +766,7 @@ pub fn do_undo() {
         return;
     };
 
-    let (type_, head_lineno, head_x, tail_lineno, tail_x, xflags, wassize) = {
+    let (type_, head_lineno, head_x, tail_lineno, tail_x, xflags, _wassize) = {
         let r = u.borrow();
         (r.type_, r.head_lineno, r.head_x, r.tail_lineno, r.tail_x, r.xflags, r.wassize)
     };
@@ -890,7 +889,7 @@ pub fn do_undo() {
             let of = openfile_ref();
             let u2 = of.borrow().current_undo.clone();
             if let Some(u2) = u2 {
-                let of = openfile_ref();
+                let _of = openfile_ref();
                 let head = { let r = u2.borrow(); (r.head_lineno, r.head_x) };
                 crate::search::goto_line_posx(head.0, head.1);
             }
@@ -1058,7 +1057,7 @@ fn finalize_undo(u: &UndoRef, undidmsg: Option<&str>, undoing: bool) {
 /// 重做最后撤销的（若干）事情（对应 `do_redo`）。
 pub fn do_redo() {
     let of = openfile_ref();
-    let mut u = {
+    let u = {
         let of_ref = of.borrow();
         of_ref.undotop.clone()
     };
@@ -1190,7 +1189,7 @@ pub fn do_redo() {
                 drop(of);
                 do_redo();
             }
-            let of = openfile_ref();
+            let _of = openfile_ref();
             let head = { let r = u.borrow(); (r.head_lineno, r.head_x) };
             crate::search::goto_line_posx(head.0, head.1);
             ensure_firstcolumn_is_aligned();
@@ -1343,7 +1342,7 @@ pub fn add_undo(action: UndoType, message: Option<&str>) {
         let of_ref = of.borrow();
         of_ref.current.clone().unwrap()
     };
-    let (lineno, current_x, totsize, undotop) = {
+    let (lineno, current_x, totsize, _undotop) = {
         let of_ref = of.borrow();
         (
             thisline.borrow().lineno,
@@ -1573,7 +1572,7 @@ pub fn update_multiline_undo(lineno: isize, indentation: &str) {
 
 /// 用（除其他外）给定动作后的文件大小和光标位置更新 undo 项
 /// （对应 `update_undo`）。
-pub fn update_undo(action: UndoType) {
+pub fn update_undo(_action: UndoType) {
     let of = openfile_ref();
     let u = {
         let of_ref = of.borrow();
@@ -1706,7 +1705,7 @@ pub fn update_undo(action: UndoType) {
 /// 在光标位置断开当前行（对应 `do_enter`）。
 pub fn do_enter() {
     let of = openfile_ref();
-    let (current, current_x, autoindent) = {
+    let (current, current_x, _autoindent) = {
         let of_ref = of.borrow();
         (
             of_ref.current.clone().unwrap(),
@@ -1975,7 +1974,7 @@ pub fn do_wrap() {
         cut::expunge(UndoType::Del);
 
         /* 若本行的前置部分等于原下一行的前置部分，则剥除第二个。 */
-        let mut of_ref = of.borrow_mut();
+        let of_ref = of.borrow_mut();
         let cur_x = of_ref.current_x;
         let lead_ok = line.borrow().data.as_bytes().get(..lead_len).unwrap_or(&[])
             == line.borrow().data.as_bytes().get(cur_x..cur_x + lead_len).unwrap_or(&[]);
@@ -2081,7 +2080,7 @@ pub fn do_wrap() {
                 let prev_data = prev.as_ref().and_then(|w| w.upgrade()).map(|p| p.borrow().data.clone()).unwrap_or_default();
                 let lead = prev_data.as_bytes().get(..lead_len).unwrap_or(&[]).to_vec();
 
-                let mut nd = line.borrow().data.clone().into_bytes();
+                let nd = line.borrow().data.clone().into_bytes();
                 let mut combined = lead.clone();
                 combined.extend_from_slice(&nd);
                 line.borrow_mut().data = String::from_utf8_lossy(&combined).into_owned();
@@ -2236,7 +2235,7 @@ pub fn ensure_firstcolumn_is_aligned() {
 /// 在当前位置设置锚点（对应 `do_anchor`）。
 pub fn do_anchor() {
     let of = openfile_ref();
-    let mut of_ref = of.borrow_mut();
+    let of_ref = of.borrow_mut();
     if let Some(cur) = &of_ref.current {
         let mut data = cur.borrow_mut();
         data.has_anchor = !data.has_anchor;

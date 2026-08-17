@@ -49,11 +49,11 @@ pub fn parse_rcfile(filename: &str) -> bool {
             let reader = BufReader::new(file);
             for (lineno, line) in reader.lines().enumerate() {
                 if let Ok(line) = line {
-                    let line = line.trim().to_string();
+                    let line = line.trim();
                     if line.is_empty() || line.starts_with('#') {
                         continue;
                     }
-                    parse_rcfile_line(&line, filename, lineno + 1);
+                    parse_rcfile_line(line, filename, lineno + 1);
                 }
             }
             true

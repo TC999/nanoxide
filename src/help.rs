@@ -302,7 +302,7 @@ pub fn show_help() {
     let oldmenu = with_global(|g| g.currmenu);
 
     /* 保存 flag 设置。 */
-    let stash_flags = with_global(|g| clone_flags());
+    let stash_flags = with_global(|_g| clone_flags());
     let was_tabsize = with_global(|g| g.tabsize);
     /* 确保帮助屏幕的快捷键列表能显示。 */
     let no_help_or_zero = ISSET(NO_HELP) || ISSET(ZERO);
@@ -361,8 +361,8 @@ pub fn show_help() {
         });
 
         /* 显示光标（搜索并找到内容时）。 */
-        let didfind = with_global(|g| g.didfind);
-        let show_cursor = with_global(|g| ISSET(SHOW_CURSOR));
+        let _didfind = with_global(|g| g.didfind);
+        let show_cursor = with_global(|_g| ISSET(SHOW_CURSOR));
         let kbinput = winio::get_kbinput();
         with_global_mut(|g| g.didfind = 0);
 

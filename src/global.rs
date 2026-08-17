@@ -151,6 +151,7 @@ pub fn find_shortcut(keycode: i32, menu: i32) -> Option<KeyRef> {
         while let Some(s) = current {
             let s_ref = s.borrow();
             if s_ref.keycode == keycode && (s_ref.menus & menu) != 0 {
+                drop(s_ref);
                 return Some(s.clone());
             }
             current = s_ref.next.clone();
@@ -265,7 +266,7 @@ pub fn shortcut_init() {
     /* 帮助查看器专有条目（对应 C：add_to_funcs(full_refresh, MHELP, ...) 等）。 */
     add_to_funcs(FunctionId::DoFullRefresh, MHELP, "Refresh", "x", false);
     add_to_funcs(FunctionId::DoExit, MHELP, "Close", "x", false);
-    add_to_funcs(FunctionId::DoCancel, ((MMOST & !MMAIN) | MYESNO), "Cancel", "cancel_gist", true);
+    add_to_funcs(FunctionId::DoCancel, (MMOST & !MMAIN) | MYESNO, "Cancel", "cancel_gist", true);
     add_to_funcs(FunctionId::DoExit, MMAIN, "Exit", "exit_gist", false);
     add_to_funcs(FunctionId::DoRefresh, MMAIN | MREPLACE, "Refresh", "x", false);
     add_to_funcs(FunctionId::DoWriteOut, MMAIN, "Write Out", "writeout_gist", false);

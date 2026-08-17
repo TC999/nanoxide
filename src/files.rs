@@ -11,7 +11,6 @@ use crate::winio;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::fs;
-use std::io::{BufReader, Write, Read};
 use std::path::Path;
 
 /// 获取 COLS 全局变量。
@@ -252,7 +251,7 @@ pub fn prepare_for_display() {
     with_global_mut(|g| {
         let openfile = g.openfile.clone();
         if let Some(of) = openfile {
-            let mut of_ref = of.borrow_mut();
+            let of_ref = of.borrow_mut();
             // 更新行号
             let mut lineno = 1;
             let mut current = of_ref.filetop.clone();
@@ -272,7 +271,7 @@ pub fn get_openfile() -> Option<OpenFileRef> {
 }
 
 /// 设置状态栏消息。
-pub fn set_statusbar_message(msg: &str) {
+pub fn set_statusbar_message(_msg: &str) {
     with_global_mut(|g| {
         g.lastmessage = MessageType::Info;
         // 状态栏消息存储在全局状态中

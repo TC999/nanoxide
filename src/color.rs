@@ -164,7 +164,7 @@ pub fn prepare_color_pair(fg: i16, bg: i16, attributes: i32) -> i32 {
 /// 初始化 nano 界面元素的颜色对（对应 `set_interface_colorpairs`）。
 /// crossterm 架构下颜色对映射为属性值。
 pub fn set_interface_colorpairs_full() {
-    let mut defaults_allowed = false;
+    let defaults_allowed = false;
     /* crossterm 无 use_default_colors 概念；默认颜色由 Color::Reset 表示。 */
     let _ = defaults_allowed;
 
@@ -556,7 +556,7 @@ pub fn precalc_multicolorinfo() {
     /* 为每行分配多行正则信息的缓存空间。 */
     with_global_mut(|g| {
         if let Some(of) = &g.openfile {
-            let mut of = of.borrow_mut();
+            let of = of.borrow_mut();
             let mut line = of.filetop.clone();
             while let Some(l) = line {
                 if l.borrow().multidata.is_none() {

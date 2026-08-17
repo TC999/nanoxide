@@ -10,7 +10,6 @@ use crate::definitions::*;
 use crate::chars;
 use crate::utils;
 use crate::history;
-use crate::global;
 use crate::files;
 use crate::winio;
 use std::rc::Rc;
@@ -23,7 +22,7 @@ fn openfile_ref() -> OpenFileRef {
 /// 初始化正则表达式（模式匹配）。
 pub fn regexp_init(pattern: &str) -> bool {
     with_global_mut(|g| {
-        let case_sensitive = ISSET(CASE_SENSITIVE);
+        let _case_sensitive = ISSET(CASE_SENSITIVE);
         let pat = if pattern.contains('*') || pattern.contains('?') {
             MatchPattern::from_glob(pattern)
         } else {
@@ -149,7 +148,7 @@ pub fn replace_all(needle: &str, replacement: &str) -> usize {
 }
 
 /// 设置状态栏消息。
-fn set_statusbar_message(msg: &str) {
+fn set_statusbar_message(_msg: &str) {
     with_global_mut(|g| {
         g.lastmessage = MessageType::Info;
     });
@@ -483,7 +482,7 @@ pub fn findnextstr(
     begin: Option<&LineRef>,
     begin_x: usize,
 ) -> i32 {
-    let mut found_len = needle.len();
+    let found_len = needle.len();
     let mut feedback = 0;
     let inhelp = with_global(|g| g.inhelp);
 

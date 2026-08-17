@@ -13,7 +13,6 @@
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
-use std::sync::LazyLock;
 
 use crate::regex::Regex;
 
@@ -566,7 +565,7 @@ pub struct CompletionStruct {
 // ======================== 安全全局状态 ========================
 
 /// 全局标志位容器。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct GlobalFlags {
     flags: [Flagword; 4],
 }

@@ -670,7 +670,7 @@ pub fn do_end() {
     if ISSET(SOFTWRAP) {
         let mut kickoff = true;
         let mut last_chunk = false;
-        let mut leftedge = winio::leftedge_for(was_column, &was_current);
+        let leftedge = winio::leftedge_for(was_column, &was_current);
         let data = was_current.borrow().data.clone();
         let mut rightedge = winio::get_softwrap_breakpoint(data.as_bytes(), leftedge, &mut kickoff, &mut last_chunk);
 
