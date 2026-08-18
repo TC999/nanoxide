@@ -128,8 +128,9 @@ pub fn translate_keycode(key: KeyEvent) -> i32 {
     match key.code {
         KeyCode::Char(c) => {
             if key.modifiers == KeyModifiers::CONTROL {
-                // Ctrl + 字母
-                if c.is_ascii_alphabetic() {
+                // Ctrl + ASCII 字符：按 nano 原语义 c & 0x1F 编码。
+                // 例如 Ctrl+A → 1, Ctrl+\ → 28, Ctrl+[ → 27 (等价 ESC)。
+                if c.is_ascii() {
                     (c as u8 & 0x1F) as i32
                 } else {
                     c as i32
