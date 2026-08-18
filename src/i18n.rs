@@ -142,13 +142,18 @@ thread_local! {
 }
 
 /// 语言文件的默认根目录：可被环境变量 `NANORS_LOCALES` 覆盖，否则相对于可执行文件所在目录。
+/// 可执行文件旁没有 locales 目录时（例如测试二进制位于 target/debug/deps/ 下），
+/// 回退到当前工作目录下的 locales/（cargo 运行测试时 cwd 为 crate 根目录）。
 fn default_locales_dir() -> PathBuf {
     if let Ok(override_dir) = std::env::var("NANORS_LOCALES") {
         return PathBuf::from(override_dir);
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
-            return parent.join("locales");
+            let beside = parent.join("locales");
+            if beside.is_dir() {
+                return beside;
+            }
         }
     }
     PathBuf::from("locales")
@@ -306,8 +311,9 @@ mod tests {
     }
 
     #[test]
-    fn test_lang_negotiation_zh_cn_falls_back() {
-        // 关键验收：即使 LANG 协商出 "zh-CN"，当无 zh-CN.ftl 时，所有消息回退到 en-US.ftl。
+    fn test_lang_negotiation_loads_or_falls_back() {
+        // 关键验收：LANG 协商出 "zh-CN" 时加载仓库自带的 zh-CN.ftl；
+        // 协商出未安装的语言（如 fr-FR）时回退到 en-US.ftl。
         let empty: HashMap<&str, &str> = HashMap::new();
 
         // 模拟 LANG=zh_CN.UTF-8，并调用 init() 触发语言协商（会刷新 CURRENT_LANG）。
@@ -315,14 +321,23 @@ mod tests {
         super::init();
         assert_eq!(super::current_lang(), "zh-CN");
 
-        // 由于无 zh-CN.ftl，welcome.message / cut.nothing_cut 都必须回退到 en-US.ftl。
+        // 仓库有 zh-CN.ftl，welcome-message 应加载中文。
+        let welcome = super::t("welcome-message", &empty);
+        assert!(welcome.contains("欢迎使用 nano"), "expected zh-CN, got: {}", welcome);
+
+        // 模拟 LANG=fr_FR.UTF-8（无 fr-FR.ftl）：welcome-message / cut-nothing_cut
+        // 都必须回退到 en-US.ftl。
+        std::env::set_var("LANG", "fr_FR.UTF-8");
+        super::init();
+        assert_eq!(super::current_lang(), "fr-FR");
         let welcome = super::t("welcome-message", &empty);
         assert!(welcome.contains("Welcome to nano"), "expected en-US fallback, got: {}", welcome);
 
         let cut = super::t("cut-nothing_cut", &empty);
         assert!(cut.contains("Nothing was cut"), "expected en-US fallback, got: {}", cut);
 
-        // 恢复。
+        // 恢复，避免影响同一进程内其它测试。
         std::env::remove_var("LANG");
+        super::init();
     }
 }
