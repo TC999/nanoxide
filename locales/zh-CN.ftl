@@ -48,8 +48,8 @@ files-error_writing = 写入{filename} 出错：{err}
 files-write_to_file = 写入到文件
 files-cancelled = 已取消
 files-restricted_mode = 在限制模式中此功能被禁用
-files-is_a_directory = '{filename}' is a directory
-files-new_file = New File
+files-is_a_directory = '{filename}' 是一个目录
+files-new_file = 新文件
 
 # ---------- movement（光标移动） ----------
 movement-not_possible = 使用 "{opt}" 时无法做到
