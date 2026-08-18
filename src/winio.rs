@@ -1783,6 +1783,7 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     if key == 21 { cut::paste_text(); edit_refresh(); return true; }            // Ctrl+U
     if key == 22 { movement::do_page_down(); edit_refresh(); return true; }     // Ctrl+V
     if key == 23 { search::do_search_forward(); edit_refresh(); return true; }  // Ctrl+W
+    if key == 28 { search::do_replace(); edit_refresh(); return true; }          // Ctrl+\: 替换（对应 C 版 MMAIN "^\\", do_replace）
     if key == 24 {                                                              // Ctrl+X
         if with_global(|g| g.inhelp) { /* 退出帮助 */ }
         text::do_exit();
