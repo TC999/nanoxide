@@ -28,30 +28,81 @@ pub fn global_init() {
     });
 }
 
-/// 报告光标位置。
+/// 报告光标位置（对应 winio.c 的 `report_cursor_position`）。
+/// 格式：line X/Y (Z%), col X/Y (Z%), char X/Y (Z%)，居中显示。
 pub fn report_cursor_position() {
+    use crate::utils;
     use crate::winio;
+
     let report: Option<String> = with_global(|g| {
         g.openfile.as_ref().and_then(|of| {
             let of_ref = of.borrow();
             let current = of_ref.current.as_ref()?;
-            let cur_x = of_ref.current_x;
+            let filebot = of_ref.filebot.as_ref()?;
+            let filetop = of_ref.filetop.as_ref()?;
+            let filebot_lineno = filebot.borrow().lineno.max(1);
+            let totsize = of_ref.totsize;
+
             let c_ref = current.borrow();
             let lineno = c_ref.lineno;
-            /* 列号：从 1 开始，且按字符数（不是字节数）计，与 C 版 keyreport 一致。 */
             let data = c_ref.data.as_bytes();
-            let mut char_pos = 0usize;
-            let mut byte_idx = 0usize;
-            while byte_idx < cur_x && byte_idx < data.len() {
-                let clen = crate::chars::char_length(&data[byte_idx..]);
-                byte_idx += clen;
-                char_pos += 1;
+            let cur_x = of_ref.current_x;
+
+            /* fullwidth = breadth(current->data) + 1；column = xplustabs() + 1。
+             * Rust 版 breadth = mbstrlen，xplustabs 在 current_x 处计算列号，
+             * 与原版 keyreport 一致。 */
+            let fullwidth = crate::chars::mbstrlen(data) + 1;
+            let column = utils::wideness(data, cur_x.min(data.len())) + 1;
+
+            /* sum = number_of_characters_in(filetop, current)：累计每行
+             * 字符数加一个换行，最后减 1（不计末尾换行）。 */
+            let sum = utils::number_of_characters_in(filetop, current);
+
+            drop(c_ref);
+            drop(of_ref);
+
+            let linepct = if filebot_lineno > 0 {
+                100 * lineno / filebot_lineno
+            } else {
+                0
+            };
+            let colpct = if fullwidth > 0 {
+                100 * column / fullwidth
+            } else {
+                0
+            };
+            let charpct = if totsize > 0 {
+                100 * sum / totsize
+            } else {
+                0
+            };
+
+            /* 数字宽度：与 C 版 digits() 一致。 */
+            fn digits(n: usize) -> usize {
+                if n == 0 {
+                    1
+                } else {
+                    let mut w = 0;
+                    let mut m = n;
+                    while m > 0 {
+                        m /= 10;
+                        w += 1;
+                    }
+                    w
+                }
             }
-            Some(format!("Line {}, column {}", lineno, char_pos + 1))
+
+            let line_w = digits(filebot_lineno);
+            let char_w = digits(totsize);
+
+            Some(format!(
+                "line {lineno:>line_w$}/{filebot_lineno} ({linepct:>2}%), col {column:>2}/{fullwidth:>2} ({colpct:>3}%), char {sum:>char_w$}/{totsize} ({charpct:>2}%)"
+            ))
         })
     });
+
     if let Some(msg) = report {
-        winio::statusbar(&msg);
+        winio::statusline_centered(MessageType::Info, &msg);
     }
 }
 
