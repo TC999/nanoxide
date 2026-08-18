@@ -95,8 +95,20 @@ pub fn report_cursor_position() {
             let line_w = digits(filebot_lineno.try_into().unwrap());
             let char_w = digits(totsize);
 
-            Some(format!(
-                "line {lineno:>line_w$}/{filebot_lineno} ({linepct:>2}%), col {column:>2}/{fullwidth:>2} ({colpct:>3}%), char {sum:>char_w$}/{totsize} ({charpct:>2}%)"
+            /* ftl 模板只支持 {argname} 占位符（无宽度语法），
+             * 因此把带对齐宽度的数字在 Rust 侧预格式化后再传入，
+             * 输出与原版格式串逐字符一致。 */
+            Some(crate::t!(
+                "winio-cursor_position",
+                lineno = format!("{:>line_w$}", lineno),
+                filebot_lineno = filebot_lineno,
+                linepct = format!("{:>2}", linepct),
+                column = format!("{:>2}", column),
+                fullwidth = format!("{:>2}", fullwidth),
+                colpct = format!("{:>3}", colpct),
+                sum = format!("{:>char_w$}", sum),
+                totsize = totsize,
+                charpct = format!("{:>2}", charpct),
             ))
         })
     });

@@ -13,6 +13,7 @@
 welcome-message = Welcome to nano.  For basic help, type Ctrl+G.
 winio-modified =  Modified
 winio-new_buffer = New Buffer
+winio-cursor_position = line {lineno}/{filebot_lineno} ({linepct}%), col {column}/{fullwidth} ({colpct}%), char {sum}/{totsize} ({charpct}%)
 
 # ---------- browser（文件浏览器） ----------
 browser-search = Search
