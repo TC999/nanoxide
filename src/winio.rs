@@ -1754,7 +1754,15 @@ fn execute_function(key: i32, _menu: i32) -> bool {
         edit_refresh();
         return true;
     }                                                              // Ctrl+B: MMAIN/MBROWSER/MHELP 向后搜索；其余菜单向左
-    if key == 3 { text::do_cancel(); return true; }                             // Ctrl+C
+    if key == 3 {
+        let menu = with_global(|g| g.currmenu);
+        if menu == MMAIN {
+            global::report_cursor_position();
+        } else {
+            text::do_cancel();
+        }
+        return true;
+    }                                                              // Ctrl+C: MMAIN 报告光标位置；其余菜单取消
     if key == 4 { cut::do_delete(); edit_refresh(); return true; }              // Ctrl+D
     if key == 5 { movement::do_end(); edit_refresh(); return true; }            // Ctrl+E
     if key == 6 {

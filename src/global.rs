@@ -30,7 +30,31 @@ pub fn global_init() {
 
 /// 报告光标位置。
 pub fn report_cursor_position() {
-    // 简化的光标位置报告
+    use crate::winio;
+    with_global(|g| {
+        let of = g.openfile.as_ref();
+        if let Some(of) = of {
+            let of_ref = of.borrow();
+            let current = of_ref.current.as_ref();
+            let cur_x = of_ref.current_x;
+            if let Some(c) = current {
+                let c_ref = c.borrow();
+                let lineno = c_ref.lineno;
+                /* 列号：从 1 开始，且按字符数（不是字节数）计，与 C 版 keyreport 一致。 */
+                let data = c_ref.data.as_bytes();
+                let mut char_pos = 0usize;
+                let mut byte_idx = 0usize;
+                while byte_idx < cur_x && byte_idx < data.len() {
+                    let clen = crate::chars::char_length(&data[byte_idx..]);
+                    byte_idx += clen;
+                    char_pos += 1;
+                }
+                let col = char_pos + 1;
+                let msg = format!("Line {}, column {}", lineno, col);
+                winio::statusbar(&msg);
+            }
+        }
+    });
 }
 
 /// 设置当前菜单。
