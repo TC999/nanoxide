@@ -1689,11 +1689,29 @@ pub fn handle_input_key(key: i32) -> bool {
 fn execute_function(key: i32, _menu: i32) -> bool {
     // 使用 if/else 链替代 match，避免表达式模式的问题
     if key == 1 { movement::do_home(); edit_refresh(); return true; }           // Ctrl+A
-    if key == 2 { movement::do_left(); edit_refresh(); return true; }           // Ctrl+B
+    if key == 2 {
+        let menu = with_global(|g| g.currmenu);
+        if menu == MMAIN || menu == MBROWSER || menu == MHELP {
+            search::do_search_backward();
+            return true;
+        }
+        movement::do_left();
+        edit_refresh();
+        return true;
+    }                                                              // Ctrl+B: MMAIN/MBROWSER/MHELP 向后搜索；其余菜单向左
     if key == 3 { text::do_cancel(); return true; }                             // Ctrl+C
     if key == 4 { cut::do_delete(); edit_refresh(); return true; }              // Ctrl+D
     if key == 5 { movement::do_end(); edit_refresh(); return true; }            // Ctrl+E
-    if key == 6 { movement::do_right(); edit_refresh(); return true; }          // Ctrl+F
+    if key == 6 {
+        let menu = with_global(|g| g.currmenu);
+        if menu == MMAIN || menu == MBROWSER || menu == MHELP {
+            search::do_search_forward();
+            return true;
+        }
+        movement::do_right();
+        edit_refresh();
+        return true;
+    }                                                              // Ctrl+F: MMAIN/MBROWSER/MHELP 搜索；其余菜单向右
     if key == 7 { help::do_help(); return true; }                               // Ctrl+G
     if key == 8 { cut::do_backspace(); edit_refresh(); return true; }           // Ctrl+H
     if key == 9 { text::do_tab(); edit_refresh(); return true; }                // Ctrl+I (Tab)

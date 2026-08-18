@@ -246,7 +246,16 @@ pub fn do_statusbar_verbatim_input() {
     }
 }
 
-/// 当输入是普通字节时加入输入缓冲，就绪时把收集的字节注入回答
+/// 把给定的 Unicode 码点转成 UTF-8 字节并压入字节缓冲（对应 `absorb_character` 的合法字符分支）。
+fn push_codepoint_into(bytes: &mut Vec<u8>, codepoint: i32) {
+    if let Some(c) = char::from_u32(codepoint as u32) {
+        let mut buf = [0u8; 4];
+        let encoded = c.encode_utf8(&mut buf);
+        bytes.extend_from_slice(encoded.as_bytes());
+    }
+}
+
+/// 当输入是普通字节/字符时加入输入缓冲，就绪时把收集的字节注入回答
 /// （对应 `absorb_character`）。
 pub fn absorb_character(input: i32, function: Option<FunctionId>) {
     thread_local! {
@@ -263,10 +272,15 @@ pub fn absorb_character(input: i32, function: Option<FunctionId>) {
     /* 若不是命令，丢弃任何非普通字符字节。 */
     if function.is_none() {
         let meta_key = with_global(|g| g.meta_key);
-        if (input < 0x20 && input != b'\t' as i32) || meta_key || input > 0xFF {
+        if (input < 0x20 && input != b'\t' as i32) || meta_key {
             winio::beep();
         } else if !ISSET(RESTRICTED) || currmenu != MWRITEFILE || filename_blank {
-            PUDDLE.with(|p| p.borrow_mut().push(input as u8));
+            /* 输入可能是单字节 ASCII，也可能是多字节 Unicode 码点（中文等）。 */
+            if input <= 0xFF {
+                PUDDLE.with(|p| p.borrow_mut().push(input as u8));
+            } else {
+                PUDDLE.with(|p| push_codepoint_into(&mut p.borrow_mut(), input));
+            }
         }
     }
 
