@@ -650,6 +650,7 @@ pub fn do_prompt(
     /* 保存当前状态栏 x 位置和提示。 */
     let was_typing_x = get_typing_x();
     let saved_prompt = with_global(|g| g.prompt.clone());
+    let was_currmenu = with_global(|g| g.currmenu);
 
     /* 立即切换到该菜单的底部快捷键（对应 C 的 bottombars(menu)）。 */
     winio::bottombars(menu);
@@ -677,8 +678,10 @@ pub fn do_prompt(
 
     /* 恢复之前的提示和可能的输入位置。 */
     with_global_mut(|g| g.prompt = saved_prompt);
-    /* 提示结束，切回主菜单（对应 C 中主循环用 MMAIN 恢复底部快捷键）。 */
-    with_global_mut(|g| g.currmenu = MMAIN);
+    /* 提示结束，切回原始菜单（对应 C 中主循环根据 currmenu 恢复底部快捷键）。 */
+    if with_global(|g| g.currmenu != was_currmenu) {
+        winio::bottombars(was_currmenu);
+    }
     if function == Some(FunctionId::DoCancel) || function == Some(FunctionId::DoEnter)
         || function == Some(FunctionId::ToFirstFile) || function == Some(FunctionId::ToLastFile)
         || function == Some(FunctionId::DoFirstLine) || function == Some(FunctionId::DoLastLine)
