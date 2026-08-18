@@ -1179,6 +1179,55 @@ fn reset_attributes(stdout: &mut io::Stdout) {
 }
 
 /// 在 row 行绘制一行 converted 文本，并应用语法高亮（对应 C 的 `draw_row`）。
+/// 对当前行上匹配到的搜索字符串进行聚光高亮（对应 winio.c 的 spotlight）。
+/// 仅在 spotlighted 已设置且该行是当前行时生效。
+fn spotlight_line(stdout: &mut io::Stdout, row: u16, converted: &[u8], line: &LineRef, from_col: usize, margin: usize) {
+    let (spotlighted, light_from_col, light_to_col) = with_global(|g| (g.spotlighted, g.light_from_col, g.light_to_col));
+    if !spotlighted {
+        return;
+    }
+
+    let is_current = with_global(|g| {
+        g.openfile.as_ref().and_then(|of| of.borrow().current.as_ref())
+            .map(|c| Rc::ptr_eq(c, line)).unwrap_or(false)
+    });
+    if !is_current {
+        return;
+    }
+
+    /* 与 C 版一致：绘制后清除 spotlight，避免重复绘制（draw_row 会在
+     * paint_syntax 后调用；C 版在 redraw_line 中置 FALSE）。 */
+    with_global_mut(|g| g.spotlighted = false);
+
+    /* light_from_col/light_to_col 是绝对列号；转换为相对屏幕行（converted）的列号。 */
+    let conv_start_col = light_from_col.saturating_sub(from_col);
+    let conv_end_col = light_to_col.saturating_sub(from_col);
+    if conv_start_col >= conv_end_col || conv_start_col >= converted.len() {
+        return;
+    }
+
+    /* 把列号转成 converted 里的字节偏移，得到要绘制的字节范围。 */
+    let start_x = crate::utils::actual_x(converted, conv_start_col).min(converted.len());
+    let end_x = crate::utils::actual_x(converted, conv_end_col).min(converted.len());
+    if start_x >= end_x {
+        return;
+    }
+    let paint_conv = &converted[start_x..end_x];
+    if paint_conv.is_empty() {
+        return;
+    }
+
+    let color = with_global(|g| *g.interface_color_pair.get(SPOTLIGHTED).unwrap_or(&0));
+    if color == 0 {
+        return;
+    }
+
+    let _ = execute!(stdout, cursor::MoveTo((margin + conv_start_col) as u16, row));
+    apply_attributes(stdout, color);
+    let _ = write!(stdout, "{}", String::from_utf8_lossy(paint_conv));
+    reset_attributes(stdout);
+}
+
 fn draw_row(stdout: &mut io::Stdout, row: u16, converted: &[u8], line: &LineRef, from_col: usize) {
     let margin = current_margin();
 
@@ -1209,6 +1258,9 @@ fn draw_row(stdout: &mut io::Stdout, row: u16, converted: &[u8], line: &LineRef,
             paint_syntax_rules(stdout, row, converted, line, from_col, &sntx, cols, margin);
         }
     }
+
+    /* 搜索匹配聚光高亮（对应 C 版 draw_row 中的 spotlight 分支，绘制于语法高亮之后）。 */
+    spotlight_line(stdout, row, converted, line, from_col, margin);
 }
 
 /// 应用当前语法的全部颜色规则到一行（对应 C 的 draw_row 中 ENABLE_COLOR 部分）。
