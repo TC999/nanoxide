@@ -92,7 +92,7 @@ pub fn report_cursor_position() {
                 }
             }
 
-            let line_w = digits(filebot_lineno);
+            let line_w = digits(filebot_lineno.try_into().unwrap());
             let char_w = digits(totsize);
 
             Some(format!(
