@@ -43,6 +43,8 @@ files-error_writing = Error writing {filename}: {err}
 files-write_to_file = Write to File
 files-cancelled = Cancelled
 files-restricted_mode = This function is disabled in restricted mode
+files-is_a_directory = '{filename}' is a directory
+files-new_file = New File
 
 # ---------- movement（光标移动） ----------
 movement-not_possible = Not possible with '{opt}'

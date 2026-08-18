@@ -160,7 +160,7 @@ fn syntax_binding_primes_colorpairs() {
 
     // 打开一个 .c 文件并注入代码
     let ok = nano_rs::files::open_buffer("test_syntax.c");
-    assert!(ok);
+    assert!(matches!(ok, nano_rs::files::OpenBufferResult::NewFile | nano_rs::files::OpenBufferResult::FileLoaded));
     nano_rs::text::inject(b"int main(void) { return 0; }", 28);
     nano_rs::files::prepare_for_display();
 

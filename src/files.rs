@@ -13,21 +13,78 @@ use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
 
-/// 获取 COLS 全局变量。
-pub fn COLS() -> usize {
-    with_global(|g| g.COLS)
-}
-
-/// 获取 LINES 全局变量。
-pub fn LINES() -> usize {
-    with_global(|g| g.LINES)
+/// open_buffer 打开文件后的结果（对应 C 的 open_buffer/open_file 返回值）。
+/// 与原版 nano.c 一致：
+///   - Ok(FileLoaded)  = 成功加载已有文件
+///   - Ok(NewFile)     = 指定了文件名但文件不存在，视为新文件（状态栏应显示 "[ New File ]"）
+///   - Ok(Directory)   = 指定的是目录（状态栏应显示 "[ '<name>' is a directory ]"，且不创建缓冲区）
+///   - Ok(ErrorRead)   = 文件存在但读取失败（状态栏已显示错误）
+///   - Err            = 内部错误
+pub enum OpenBufferResult {
+    FileLoaded,
+    NewFile,
+    Directory,
+    ErrorRead,
 }
 
 /// 打开文件并加载到缓冲区。
-pub fn open_buffer(filename: &str) -> bool {
+///
+/// 对应原版 C 的 open_buffer + open_file：
+/// * 如果 filename 为空，则创建一个空的新缓冲区（不带文件名）。
+/// * 如果 filename 非空，路径指向一个目录，则显示 ALERT 并返回 Directory（不创建缓冲区）。
+/// * 如果 filename 非空但文件不存在，则创建一个新缓冲区并返回 NewFile。
+/// * 否则读取文件内容。
+pub fn open_buffer(filename: &str) -> OpenBufferResult {
     let path = Path::new(filename);
+
+    // 空路径：创建一个不带文件名的空缓冲区（与 C 的 open_buffer("") 一致）。
+    if filename.is_empty() {
+        with_global_mut(|g| {
+            let new_file = Rc::new(RefCell::new(OpenFileStruct {
+                filename: None,
+                filetop: None, filebot: None, edittop: None,
+                current: None, totsize: 0, firstcolumn: 0,
+                current_x: 0, placewewant: 0, brink: 0, cursor_row: 0,
+                statinfo: None, spillage_line: None,
+                mark: None, mark_x: 0, softmark: false,
+                fmt: FormatType::NixFile, lock_filename: None,
+                undotop: None, current_undo: None, last_saved: None,
+                last_action: UndoType::Other, modified: false,
+                syntax: None, errormessage: None,
+                next: None, prev: None,
+            }));
+            let line = Rc::new(RefCell::new(LineStruct {
+                data: String::new(), lineno: 1,
+                next: None, prev: None,
+                multidata: None, has_anchor: false,
+            }));
+            new_file.borrow_mut().filetop = Some(line.clone());
+            new_file.borrow_mut().filebot = Some(line.clone());
+            new_file.borrow_mut().edittop = Some(line.clone());
+            new_file.borrow_mut().current = Some(line);
+            g.openfile = Some(new_file);
+        });
+        crate::color::find_and_prime_applicable_syntax();
+        return OpenBufferResult::FileLoaded;
+    }
+
+    // 路径存在且是目录：显示 ALERT 提示。对应 files.c 的
+    //   statusline(ALERT, _("'%s' is a directory"), realname);
+    // C 版 statusline 对短消息会居中显示并自动加上 "[ ]" 方括号，
+    // 因此这里用 statusline_centered 并以 "[ {} ]" 包裹，显示为
+    //   [ '目录' is a directory ]
+    // 与原版一致：目录不创建缓冲区（open_buffer 返回 FALSE），由调用方
+    // （nano.c main）最终打开空白缓冲区。
+    if path.exists() && path.is_dir() {
+        winio::statusline_centered(
+            crate::definitions::MessageType::Alert,
+            &format!("[ {} ]", crate::t!("files-is_a_directory", filename = filename)),
+        );
+        return OpenBufferResult::Directory;
+    }
+
+    // 文件不存在：视为新文件。
     if !path.exists() {
-        // 创建新文件
         with_global_mut(|g| {
             let new_file = Rc::new(RefCell::new(OpenFileStruct {
                 filename: Some(filename.to_string()),
@@ -42,7 +99,6 @@ pub fn open_buffer(filename: &str) -> bool {
                 syntax: None, errormessage: None,
                 next: None, prev: None,
             }));
-            // 创建初始空行
             let line = Rc::new(RefCell::new(LineStruct {
                 data: String::new(), lineno: 1,
                 next: None, prev: None,
@@ -55,10 +111,10 @@ pub fn open_buffer(filename: &str) -> bool {
             g.openfile = Some(new_file);
         });
         crate::color::find_and_prime_applicable_syntax();
-        return true;
+        return OpenBufferResult::NewFile;
     }
 
-    // 读取文件
+    // 文件存在：读取内容。
     match fs::read_to_string(path) {
         Ok(content) => {
             with_global_mut(|g| {
@@ -79,7 +135,6 @@ pub fn open_buffer(filename: &str) -> bool {
                     lineno += 1;
                 }
 
-                // 如果文件为空，添加一个空行
                 if lines.is_empty() {
                     let line = Rc::new(RefCell::new(LineStruct {
                         data: String::new(), lineno: 1,
@@ -113,11 +168,11 @@ pub fn open_buffer(filename: &str) -> bool {
                 g.openfile = Some(new_file);
             });
             crate::color::find_and_prime_applicable_syntax();
-            true
+            OpenBufferResult::FileLoaded
         }
         Err(e) => {
             set_statusbar_message(&crate::t!("files-error_reading", filename = filename, err = e.to_string()));
-            false
+            OpenBufferResult::ErrorRead
         }
     }
 }
@@ -271,10 +326,12 @@ pub fn get_openfile() -> Option<OpenFileRef> {
 }
 
 /// 设置状态栏消息。
-pub fn set_statusbar_message(_msg: &str) {
+pub fn set_statusbar_message(msg: &str) {
     with_global_mut(|g| {
         g.lastmessage = MessageType::Info;
-        // 状态栏消息存储在全局状态中
+        // 状态栏消息存储在全局状态中，供重绘时保留显示。
+        g.statusbar_msg = msg.to_string();
+        g.statusbar_centered = false;
     });
 }
 

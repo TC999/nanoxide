@@ -42,12 +42,26 @@ fn main() {
 
     // 9. 打开文件
     let filename = parse_args(&args);
+    let has_filename = filename.is_some();
     match filename {
         Some(f) => {
-            let opened = files::open_buffer(&f);
-            if !opened {
-                // 读取失败时也创建空缓冲区，保证编辑器始终有可编辑目标
-                files::open_buffer("");
+            let result = files::open_buffer(&f);
+            match result {
+                files::OpenBufferResult::NewFile => {
+                    // 文件不存在：在原来显示 welcome-message 的位置显示 "[ New File ]"
+                    winio::statusbar_centered(&format!("[ {} ]", nano_rs::t!("files-new_file")));
+                }
+                files::OpenBufferResult::Directory => {
+                    // 与原版 nano.c 一致：目录不加载（open_buffer 返回 FALSE 后
+                    // main 继续处理下一个文件），最终打开空白缓冲区让编辑器可用。
+                    // 状态栏已显示 "[ '目录' is a directory ]"（对应 statusline(ALERT)）。
+                    files::open_buffer("");
+                }
+                files::OpenBufferResult::ErrorRead => {
+                    // 读取失败：创建空缓冲区保证编辑器可继续工作
+                    files::open_buffer("");
+                }
+                files::OpenBufferResult::FileLoaded => {}
             }
         }
         None => {
@@ -59,8 +73,12 @@ fn main() {
     // 10. 准备显示
     files::prepare_for_display();
 
-    // 10.5 不带文件名且缓冲区为空时显示欢迎消息（对应 nano.c 的 statusbar 欢迎提示）
-    show_welcome_message();
+    // 10.5 仅在不带文件名时显示欢迎消息（对应 nano.c 的 statusbar 欢迎提示）。
+    // 已带文件名且判定为新文件 / 目录时，状态栏信息已在 open_buffer 分支中输出，
+    // 避免欢迎消息覆盖。
+    if !has_filename {
+        show_welcome_message();
+    }
 
     // 11. 标记正在运行
     with_global_mut(|g| g.we_are_running = true);
