@@ -114,7 +114,7 @@ pub fn report_cursor_position() {
     });
 
     if let Some(msg) = report {
-        winio::statusline_centered(MessageType::Info, &msg);
+        winio::statusline_centered(MessageType::Info, &format!("[ {} ]", msg));
     }
 }
 
