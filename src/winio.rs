@@ -1188,8 +1188,10 @@ fn spotlight_line(stdout: &mut io::Stdout, row: u16, converted: &[u8], line: &Li
     }
 
     let is_current = with_global(|g| {
-        g.openfile.as_ref().and_then(|of| of.borrow().current.as_ref())
-            .map(|c| Rc::ptr_eq(c, line)).unwrap_or(false)
+        g.openfile.as_ref()
+            .and_then(|of| of.borrow().current.clone())
+            .map(|c| Rc::ptr_eq(&c, line))
+            .unwrap_or(false)
     });
     if !is_current {
         return;
