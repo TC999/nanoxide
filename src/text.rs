@@ -52,8 +52,32 @@ pub fn put_cursor_at_end_of_answer() {
 pub fn do_cancel() {}
 
 /// 退出编辑器。
+/// 缓冲区已修改时先询问是否保存（对应 C 版 `do_exit`）：
+/// - "是"：跳转到 Write to File 逻辑，保存成功（清除修改标记）后退出；
+/// - "否"：直接退出；
+/// - 取消（^C）：返回编辑器，不退出。
 pub fn do_exit() {
-    with_global_mut(|g| g.we_are_running = false);
+    /* 未修改时直接退出。 */
+    if !files::is_modified() {
+        with_global_mut(|g| g.we_are_running = false);
+        return;
+    }
+
+    let choice = crate::prompt::ask_user(false, &crate::t!("prompt-save_modified_buffer"));
+
+    match choice {
+        /* "是"：跳转到 Write to File 逻辑；保存成功（修改标记被清除）后退出。 */
+        YES => {
+            files::do_writeout();
+            if !files::is_modified() {
+                with_global_mut(|g| g.we_are_running = false);
+            }
+        }
+        /* "否"：直接退出。 */
+        NO => with_global_mut(|g| g.we_are_running = false),
+        /* 取消：留在编辑器中。 */
+        _ => winio::statusbar(&crate::t!("files-cancelled")),
+    }
 }
 
 /// 刷新屏幕。

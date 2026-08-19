@@ -729,6 +729,7 @@ pub fn ask_user(withall: bool, question: &str) -> i32 {
     let yesstr = "Yy";
     let nostr = "Nn";
     let allstr = "Aa";
+    let was_currmenu = with_global(|g| g.currmenu);
 
     while choice == UNDECIDED {
         let kbinput: i32;
@@ -738,14 +739,13 @@ pub fn ask_user(withall: bool, question: &str) -> i32 {
             if cols < 32 {
                 _width = cols / 2;
             }
-            /* 简化：快捷键列表的显示由 winio 渲染层处理。 */
+            /* 显示 Yes/No/Cancel 快捷键（对应 C 版 ask_user 的 post_one_key 布局，
+             * 由 winio 的 MYESNO 分支绘制）。 */
+            winio::bottombars(MYESNO);
         }
 
-        /* 显示问题。 */
-        let cols = with_global(|g| g.COLS);
-        let truncated: String = question.chars().take(cols.saturating_sub(1)).collect();
-        with_global_mut(|g| g.currmenu = MYESNO);
-        winio::statusline(MessageType::Info, &format!("{:width$}", truncated, width = cols));
+        /* 显示问题（截断与对齐由 winio 状态栏渲染统一处理）。 */
+        winio::statusline(MessageType::Info, question);
 
         /* 等待按键。 */
         kbinput = winio::get_kbinput();
@@ -804,6 +804,11 @@ pub fn ask_user(withall: bool, question: &str) -> i32 {
         } else {
             winio::beep();
         }
+    }
+
+    /* 询问结束，切回原菜单并恢复其底部快捷键（对应 C 版主循环刷新）。 */
+    if with_global(|g| g.currmenu != was_currmenu) {
+        winio::bottombars(was_currmenu);
     }
 
     choice

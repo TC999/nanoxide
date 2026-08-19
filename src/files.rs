@@ -379,8 +379,7 @@ pub fn do_execute() {
 pub fn is_modified() -> bool {
     with_global(|g| {
         g.openfile.as_ref().map(|of| of.borrow().modified).unwrap_or(false)
-    });
-    false
+    })
 }
 
 // ======================== 路径处理（对应 files.c） ========================

@@ -384,29 +384,117 @@ fn draw_titlebar_line(stdout: &mut io::Stdout, cols: usize) {
     });
 }
 
-/// 绘制状态栏行。
+/// 把消息按显示宽度截断到 cols 列（ASCII 占 1 列，其他如中文占 2 列），
+/// 返回截断后的文本及其显示宽度。
+fn clip_to_width(msg: &str, cols: usize) -> (String, usize) {
+    let mut clipped = String::new();
+    let mut width = 0usize;
+    for ch in msg.chars() {
+        let w = if ch.is_ascii() { 1 } else { 2 };
+        if width + w > cols {
+            break;
+        }
+        clipped.push(ch);
+        width += w;
+    }
+    (clipped, width)
+}
+
+/// 绘制状态栏行（先清空整行再写入，避免短消息覆盖长消息时残留）。
 fn draw_statusbar_line(stdout: &mut io::Stdout, cols: usize) {
     with_global(|g| {
         let msg = &g.statusbar_msg;
         let centered = g.statusbar_centered;
+
+        /* 先清空整行。 */
+        let _ = write!(stdout, "{:width$}", "", width = cols);
         if msg.is_empty() {
-            let _ = write!(stdout, "{:width$}", "", width = cols);
-        } else if display_width(msg) > cols {
-            let clipped: String = msg.chars().take(cols).collect();
-            let _ = write!(stdout, "{}", clipped);
-        } else if centered {
-            let pad = cols.saturating_sub(display_width(msg)) / 2;
-            let _ = write!(stdout, "{:width$}{}", "", msg, width = pad);
+            return;
+        }
+
+        let (clipped, width) = clip_to_width(msg, cols);
+        if centered {
+            let pad = cols.saturating_sub(width) / 2;
+            let _ = write!(stdout, "{:width$}{}", "", clipped, width = pad);
         } else {
-            let _ = write!(stdout, "{}{:width$}", msg, "", width = cols - msg.len());
+            let _ = write!(stdout, "{}", clipped);
         }
     });
+}
+
+/// 在底部快捷键栏绘制单个"键 + 说明"条目（对应 C 版 `post_one_key`）。
+/// 键串按显示宽度截断到 width；剩余空间不足 2 列时省略说明文字。
+fn post_one_key(
+    stdout: &mut io::Stdout,
+    row: u16,
+    col: u16,
+    keystroke: &str,
+    tag: &str,
+    width: usize,
+) {
+    let _ = execute!(stdout, cursor::MoveTo(col, row));
+
+    /* 键串本身截断到 width。 */
+    let mut key_part: String = String::new();
+    let mut key_width = 0usize;
+    for ch in keystroke.chars() {
+        let w = if ch.is_ascii() { 1 } else { 2 };
+        if key_width + w > width {
+            break;
+        }
+        key_part.push(ch);
+        key_width += w;
+    }
+    let _ = write!(stdout, "{}", key_part);
+
+    /* 剩余空间太小则省略说明。 */
+    if width < key_width + 2 {
+        return;
+    }
+    let _ = write!(stdout, " ");
+
+    /* 说明文字截断到剩余宽度。 */
+    let tag_max = width - key_width - 1;
+    let mut tag_part: String = String::new();
+    let mut tag_width = 0usize;
+    for ch in tag.chars() {
+        let w = if ch.is_ascii() { 1 } else { 2 };
+        if tag_width + w > tag_max {
+            break;
+        }
+        tag_part.push(ch);
+        tag_width += w;
+    }
+    let _ = write!(stdout, "{}", tag_part);
 }
 
 /// 绘制底部快捷键（两行，参照 C 版 bottombars 实现）。
 fn draw_bottombars_lines(stdout: &mut io::Stdout, cols: usize, lines: usize) {
     with_global(|g| {
         let menu = g.currmenu;
+
+        /* MYESNO 菜单（Yes/No 询问）：与 C 版 ask_user 一致，手动绘制
+         * "Y Yes"、"N No" 与 "^C Cancel"。All 场景（替换确认）暂不在
+         * 快捷键栏显示 "A All"，但 A 键的应答逻辑仍可用。 */
+        if menu == MYESNO {
+            let mut width = 16;
+            if cols < 32 {
+                width = cols / 2;
+            }
+            let bottom_row1 = (lines.saturating_sub(2)) as u16;
+            let bottom_row2 = (lines.saturating_sub(1)) as u16;
+
+            /* 先清空两行，避免旧快捷键残影。 */
+            let _ = execute!(stdout, cursor::MoveTo(0, bottom_row1));
+            let _ = write!(stdout, "{:width$}", "", width = cols);
+            let _ = execute!(stdout, cursor::MoveTo(0, bottom_row2));
+            let _ = write!(stdout, "{:width$}", "", width = cols);
+
+            post_one_key(stdout, bottom_row1, 0, " Y", &crate::t!("key-yes"), width);
+            post_one_key(stdout, bottom_row2, 0, " N", &crate::t!("key-no"), width);
+            post_one_key(stdout, bottom_row2, width as u16, "^C", &crate::t!("key-cancel"), width);
+            return;
+        }
 
         // 收集所有匹配当前菜单的函数条目
         let mut entries: Vec<(String, String)> = Vec::new();
@@ -469,23 +557,29 @@ fn draw_bottombars_lines(stdout: &mut io::Stdout, cols: usize, lines: usize) {
     });
 }
 
-/// 估算字符串的终端显示宽度：ASCII 占 1 列，其他（中文等全角字符）占 2 列。
-fn display_width(s: &str) -> usize {
-    s.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum()
-}
-
 /// 在状态栏写入消息（status_row 行）；centered 时水平居中。
+/// 先清空整行并按显示宽度截断，避免短消息覆盖长消息时旧文本残留、
+/// 或中文内容按字符数 pad 后超出终端宽度折行。
 fn write_statusbar_impl(msg: &str, centered: bool) {
     let mut stdout = io::stdout();
-    let lines = with_global(|g| g.LINES);
+    let (lines, cols) = with_global(|g| (g.LINES, g.COLS));
     let status_row = (lines.saturating_sub(3)) as u16;
     let _ = execute!(stdout, cursor::MoveTo(0, status_row));
+    /* 先清空整行。 */
+    let _ = write!(stdout, "{:width$}", "", width = cols);
+    let _ = execute!(stdout, cursor::MoveTo(0, status_row));
+
+    if msg.is_empty() {
+        let _ = stdout.flush();
+        return;
+    }
+
+    let (clipped, width) = clip_to_width(msg, cols);
     if centered {
-        let cols = with_global(|g| g.COLS);
-        let pad = cols.saturating_sub(display_width(msg)) / 2;
+        let pad = cols.saturating_sub(width) / 2;
         let _ = write!(stdout, "{:width$}", "", width = pad);
     }
-    let _ = write!(stdout, "{}", msg);
+    let _ = write!(stdout, "{}", clipped);
     let _ = stdout.flush();
 }
 
@@ -1855,4 +1949,51 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     if key == ESC_CODE as i32 { return true; } // 忽略单独的 Esc
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::files::make_new_buffer;
+
+    /// MYESNO 菜单（Yes/No 询问）的快捷键栏应能绘制 Y/N/^C 三项且不崩溃。
+    #[test]
+    fn yesno_bottombars_draws_three_items() {
+        crate::global::global_init();
+        make_new_buffer();
+        with_global_mut(|g| {
+            g.COLS = 80;
+            g.LINES = 24;
+            g.currmenu = MYESNO;
+        });
+        let mut out = io::stdout();
+        draw_bottombars_lines(&mut out, 80, 24);
+    }
+
+    /// post_one_key 在宽度不足时不应越界（截断逻辑冒烟）。
+    #[test]
+    fn post_one_key_narrow_width_ok() {
+        let mut out = io::stdout();
+        post_one_key(&mut out, 23, 0, "Y", "Yes", 3);
+        post_one_key(&mut out, 23, 0, "^C", "Cancel", 2);
+        post_one_key(&mut out, 23, 0, "^C", "Cancel", 1);
+    }
+
+    /// clip_to_width 按显示宽度截断：全角字符计 2 列，不应劈开字符。
+    #[test]
+    fn clip_to_width_respects_double_width() {
+        let msg = "保存已修改的缓冲区？";
+        // 10 个全角字符 = 20 列，恰好放得下。
+        let (s, w) = clip_to_width(msg, 20);
+        assert_eq!(w, 20);
+        assert_eq!(s, msg);
+        // 19 列只能容纳 9 个全角字符（18 列），第 10 个字符被截掉。
+        let (s, w) = clip_to_width(msg, 19);
+        assert_eq!(w, 18);
+        assert_eq!(s.chars().count(), 9);
+        // 混合 ASCII 与中文。
+        let (s, w) = clip_to_width("a中文b", 4);
+        assert_eq!(w, 3);
+        assert_eq!(s, "a中");
+    }
 }
