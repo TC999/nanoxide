@@ -61,7 +61,7 @@ fn render_uses_current_buffer_data() {
     // 模拟打开已有文件：第一行有内容
     let of = nano_rs::files::get_openfile().unwrap();
     {
-        let mut of = of.borrow_mut();
+        let of = of.borrow_mut();
         let cur = of.current.clone().unwrap();
         cur.borrow_mut().data = "original".to_string();
     }
