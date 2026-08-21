@@ -23,7 +23,7 @@ pub const A_BLINK: i32 = 8;
 /// 无效颜色（对应 C 的 BAD_COLOR）。
 pub const BAD_COLOR: i16 = -2;
 
-/// 颜色对表：pairnum → (fg, bg)。由 init_pair 填充，渲染时查表。
+// 颜色对表：pairnum → (fg, bg)。由 init_pair 填充，渲染时查表。
 thread_local! {
     static COLOR_PAIRS: RefCell<std::collections::HashMap<i32, (i16, i16)>> =
         RefCell::new(std::collections::HashMap::new());

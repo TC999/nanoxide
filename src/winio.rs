@@ -802,7 +802,7 @@ pub fn edit_redraw(old_current: &LineRef, manner: UpdateType) {
 
 use std::cell::Cell;
 
-/// `get_softwrap_breakpoint` 的静态状态（对应 C 的 static text/column）。
+// `get_softwrap_breakpoint` 的静态状态（对应 C 的 static text/column）。
 thread_local! {
     static SW_LINE_START: Cell<usize> = const { Cell::new(0) };
     static SW_INDEX: Cell<usize> = const { Cell::new(0) };

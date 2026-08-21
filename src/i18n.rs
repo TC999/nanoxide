@@ -135,7 +135,7 @@ pub fn normalize_lang(raw: &str) -> Option<String> {
 
 // ================ 加载器 ================
 
-/// 当前进程的语言代码（由 init 确定一次）。
+// 当前进程的语言代码（由 init 确定一次）。
 thread_local! {
     static CURRENT_LANG: std::cell::RefCell<String> = std::cell::RefCell::new("en-US".to_string());
     static LOCALE_MAP: std::cell::RefCell<HashMap<String, Ftllib>> = std::cell::RefCell::new(HashMap::new());

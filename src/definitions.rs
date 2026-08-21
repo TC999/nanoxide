@@ -767,7 +767,7 @@ impl GlobalState {
     }
 }
 
-/// 全局状态单例（线程安全，单线程使用）。
+// 全局状态单例（线程安全，单线程使用）。
 thread_local! {
     pub static GLOBAL: RefCell<GlobalState> = RefCell::new(GlobalState::new());
 }

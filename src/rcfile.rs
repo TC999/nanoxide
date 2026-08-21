@@ -199,7 +199,7 @@ fn parse_unset_command(args: &str) {
 
 // ======================== 语法命令解析（对应 rcfile.c） ========================
 
-/// syntax 解析的会话状态（对应 rcfile.c 的 static 变量）。
+// syntax 解析的会话状态（对应 rcfile.c 的 static 变量）。
 thread_local! {
     static LIVE_SYNTAX: RefCell<Option<SyntaxRef>> = const { RefCell::new(None) };
     static LAST_COLOR: RefCell<Option<ColorRef>> = const { RefCell::new(None) };
@@ -649,7 +649,7 @@ pub fn get_comment_string() -> Option<String> {
 
 use std::cell::Cell;
 
-/// nanorc 文件状态（对应 rcfile.c 的 static 变量 nanorc、lineno）。
+// nanorc 文件状态（对应 rcfile.c 的 static 变量 nanorc、lineno）。
 thread_local! {
     static ERRORS_HEAD: RefCell<Option<LineRef>> = const { RefCell::new(None) };
     static ERRORS_TAIL: RefCell<Option<LineRef>> = const { RefCell::new(None) };
