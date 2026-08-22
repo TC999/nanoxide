@@ -315,7 +315,11 @@ pub fn shortcut_init() {
     add_to_sclist(MMAIN, "M-E", 0, FunctionId::DoRedo, 0);
     add_to_sclist(MMAIN, "M-A", 0, FunctionId::DoMark, 0);
     add_to_sclist(MMAIN, "M-6", 0, FunctionId::DoCopy, 0);
-    add_to_sclist(MMAIN, "M-]", 0, FunctionId::DoFindBracket, 0);
+    add_to_sclist(MMAIN, "M-]", 0x25D, FunctionId::DoFindBracket, 0);
+    add_to_sclist(MMAIN, "^]", 29, FunctionId::DoWordCompletion, 0);
+    // 多缓冲区切换（对应 C 版 rcfile 中常见的 prevfile/nextfile 绑定）
+    add_to_sclist(MMAIN, "M-,", 0x22C, FunctionId::DoPrevFile, 0);
+    add_to_sclist(MMAIN, "M-.", 0x22E, FunctionId::DoNextFile, 0);
     // 帮助页 Previous/Next（对应 C 的 M-B/M-F → do_findprevious/do_findnext）
     add_to_sclist(MMAIN | MBROWSER | MHELP, "M-B", 0x262, FunctionId::DoFindPrevious, 0);
     add_to_sclist(MMAIN | MBROWSER | MHELP, "M-F", 0x266, FunctionId::DoFindNext, 0);
@@ -554,7 +558,9 @@ pub fn parse_args(args: &[String]) -> Option<String> {
                 "-K" | "--rebinddelete" => SET(REBIND_DELETE),
                 "-s" | "--speller" => {
                     i += 1;
-                    // 设置拼写检查器
+                    if let Some(v) = args.get(i) {
+                        with_global_mut(|g| g.speller = Some(v.clone()));
+                    }
                 }
                 "-Y" | "--syntax" => {
                     i += 1;
@@ -607,6 +613,46 @@ pub fn parse_args(args: &[String]) -> Option<String> {
     filename
 }
 
+/// 解析命令行中的文件参数，返回 (文件名, 行号, 列号) 列表。
+/// 支持 `+LINE[,COLUMN]` 定位参数（作用于其后的文件）与多个文件名
+/// （对应 C 版 main() 的多文件处理）。
+pub fn parse_file_args(args: &[String]) -> Vec<(String, isize, isize)> {
+    use crate::winio;
+    let mut result = Vec::new();
+    let mut i = 1;
+    let mut givenline: isize = 0;
+    let mut givencol: isize = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if let Some(rest) = arg.strip_prefix('+') {
+            /* +LINE[,COLUMN]：作用于其后的文件。 */
+            if rest.is_empty() {
+                givenline = -1;
+            } else {
+                let mut line = givenline;
+                let mut col = givencol;
+                if crate::utils::parse_line_column(rest, &mut line, &mut col) {
+                    givenline = line;
+                    givencol = col;
+                } else {
+                    winio::statusline(
+                        MessageType::Alert,
+                        &crate::t!("search-invalid_line_or_column"),
+                    );
+                }
+            }
+        } else if !arg.starts_with('-') {
+            /* 文件名（"-" 表示 stdin，Rust 版简化为跳过）。 */
+            if arg != "-" {
+                result.push((arg.clone(), givenline, givencol));
+            }
+            givenline = 0;
+            givencol = 0;
+        }
+        i += 1;
+    }
+    result
+}
 /// 打印版本信息。
 fn print_version() {
     println!("nano-rs version {}", VERSION);

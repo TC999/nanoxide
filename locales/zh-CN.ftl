@@ -19,6 +19,8 @@ welcome-message = 欢迎使用 nano。  如需基本帮助信息，请按下 Ctr
 winio-modified = 已更改
 winio-new_buffer = 新缓冲区
 winio-cursor_position = 行 {lineno}/{filebot_lineno} ({linepct}%)，列 {column}/{fullwidth} ({colpct}%)，字符 {sum}/{totsize} ({charpct}%)
+winio-view_warning = 该键在查看模式中无效
+winio-nameless = (未命名)
 
 # ---------- browser（文件浏览器） ----------
 browser-search = 搜索
@@ -51,6 +53,33 @@ prompt-save_modified_buffer = 保存已修改的缓冲区？
 files-restricted_mode = 在限制模式中此功能被禁用
 files-is_a_directory = '{filename}' 是一个目录
 files-new_file = 新文件
+files-insert_file = 插入文件
+files-insert_new_buffer = 读取文件到新缓冲区
+files-execute_command = 要执行的命令
+files-execute_new_buffer = 在新缓冲区中执行的命令
+files-executing = 正在执行...
+files-pipe_failed = 管道传输失败
+files-command_failed = 错误：{err}
+files-command_cancelled = 已取消
+files-error_reading_stdin = 从管道读取出错：{err}
+files-no_temp_file = 创建临时文件出错：{err}
+files-error_writing_temp = 写入临时文件出错：{err}
+files-spell_check_failed = 拼写检查失败：{err}
+files-linter_failed = 检查失败：{err}
+files-no_linter_defined = 未为此文件类型定义检查器
+files-no_formatter_defined = 未为此文件类型定义格式化器
+files-no_speller_defined = 未定义拼写检查器
+files-no_more_open_buffers = 没有更多打开的文件缓冲区
+files-lines_one = {name} -- {count} 行
+files-lines_many = {name} -- {count} 行
+files-making_backup = 正在备份...
+files-too_many_backups = 现有备份文件过多
+files-cannot_write_backup = 写入备份文件 {filename} 出错：{err}
+files-error_deleting_lockfile = 删除锁文件 {filename} 出错：{err}
+files-error_writing_lockfile = 写入锁文件 {filename} 出错：{err}
+files-couldnt_determine_identity = 无法确定我的身份以创建锁文件
+files-couldnt_determine_hostname = 无法确定主机名：{err}
+files-someone_else_editing = 其他人也在编辑此文件
 
 # ---------- movement（光标移动） ----------
 movement-not_possible = 使用 "{opt}" 时无法做到
@@ -73,6 +102,10 @@ search-replace_with = 替换为
 search-view_replace_disabled = 查看模式：已禁用替换
 search-replaced_one = 已替换 {count} 处
 search-replaced_many = 已替换 {count} 处
+search-enter_line_column = 输入行号，列号
+search-invalid_line_or_column = 无效的行号或列号
+search-not_a_bracket = 不是括号
+search-no_matching_bracket = 没有匹配的括号
 
 # ---------- text（编辑操作） ----------
 text-mark_unset = 标记解除
@@ -82,6 +115,24 @@ text-no_comment_past_eof = 无法注释越过文件末尾
 text-nothing_to_undo = 没有可撤销的操作
 text-nothing_to_redo = 没有可重做的操作
 text-undid = 已撤销 {action}
+text-redid = 已重做 {action}
+text-verbatim_input = 逐字输入
+text-invalid_code = 无效代码
+text-buffer_is_empty = 缓冲区为空
+text-selection_is_empty = 选区为空
+text-nothing_changed = 没有变化
+text-invoking_formatter = 正在调用格式化器...
+text-finished_checking_spelling = 拼写检查完成
+text-error_invoking = 调用 '{program}' 出错
+text-no_word_fragment = 光标左侧没有单词片段
+text-no_further_matches = 没有更多匹配
+text-no_matches = 没有匹配
+text-justified = 已对齐
+text-justified_paragraph = 已对齐段落
+text-justified_file = 已对齐文件
+text-justified_selection = 已对齐选区
+text-no_paragraph = 没有可对齐的段落
+text-use_fg = 使用 "fg" 返回 nano。
 text-redid = 已重做 {action}
 
 # ---------- color（颜色/语法） ----------

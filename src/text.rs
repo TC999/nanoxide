@@ -85,8 +85,49 @@ pub fn do_refresh() {
     with_global_mut(|g| g.refresh_needed = true);
 }
 
-/// 挂起编辑器（终端不支持下时无操作）。
-pub fn do_suspend() {}
+/// 挂起编辑器（对应 nano.c 的 `do_suspend`）：受限模式时拒绝；
+/// 否则恢复终端、显示提示，并把 SIGSTOP 发送给自己（Unix）。
+/// Windows 平台没有 SIGSTOP，仅恢复终端后立即重绘。
+pub fn do_suspend() {
+    if files::in_restricted_mode() {
+        return;
+    }
+
+    suspend_nano();
+    with_global_mut(|g| g.ran_a_tool = true);
+}
+
+/// 实际执行挂起（对应 nano.c 的 `suspend_nano`）。
+#[cfg(unix)]
+fn suspend_nano() {
+    winio::leave_terminal();
+    println!("\n\n{}", crate::t!("text-use_fg"));
+    let _ = std::io::stdout().flush();
+    with_global_mut(|g| g.lastmessage = MessageType::Hush);
+    unsafe {
+        libc::signal(libc::SIGTSTP, libc::SIG_DFL);
+        libc::raise(libc::SIGTSTP);
+    }
+    /* 从挂起恢复后：重新初始化终端并重绘。 */
+    winio::enter_terminal();
+    winio::full_refresh();
+    with_global_mut(|g| {
+        g.refresh_needed = true;
+        g.focusing = true;
+    });
+}
+
+/// 非 Unix 平台：恢复终端后立即重绘（无真正的挂起能力）。
+#[cfg(not(unix))]
+fn suspend_nano() {
+    winio::leave_terminal();
+    winio::enter_terminal();
+    winio::full_refresh();
+    with_global_mut(|g| {
+        g.refresh_needed = true;
+        g.focusing = true;
+    });
+}
 
 /// 复数形式辅助（对应 `P_`）。
 pub fn P_<'a>(singular: &'a str, _plural: &'a str, number: usize) -> &'a str {
@@ -2249,6 +2290,657 @@ pub fn inpar(line: &LineRef) -> bool {
     data.as_bytes().get(quot_len + indent_len).copied().unwrap_or(0) != 0
 }
 
+// ======================== 段落对齐（对应 justify_paragraph / justify_text） ========================
+
+/// 从给定行开始查找下一个段落，返回其首行与行数；找不到返回 None
+/// （对应 `find_paragraph`）。
+fn find_paragraph(firstline: &LineRef) -> Option<(LineRef, usize)> {
+    let mut line = firstline.clone();
+
+    /* 不在段落中时，前进到段落的行。 */
+    while !inpar(&line) {
+        let next = { let r = line.borrow(); r.next.clone() };
+        match next {
+            Some(n) => line = n,
+            None => break,
+        }
+    }
+
+    /* 前进到段落的最后一行。 */
+    let mut last = line.clone();
+    movement_para_end(&mut last);
+
+    /* 仍不在段落中时，没有剩余段落。 */
+    if !inpar(&last) {
+        return None;
+    }
+
+    let count = {
+        let last_lineno = last.borrow().lineno;
+        let first_lineno = line.borrow().lineno;
+        (last_lineno - first_lineno + 1) as usize
+    };
+    Some((line, count))
+}
+
+/// 前进到段落末尾（对应 C 的 do_para_end；供对齐使用）。
+fn movement_para_end(line: &mut LineRef) {
+    loop {
+        let next = { let r = line.borrow(); r.next.clone() };
+        match next {
+            Some(n) => {
+                if begpar(&n, 0) {
+                    break;
+                }
+                *line = n;
+            }
+            None => break,
+        }
+    }
+}
+
+/// 把以 *line 开头、共 count 行的段落拼接为一行，跳过其后各行的
+/// 引用与缩进（对应 `concat_paragraph`）。
+fn concat_paragraph(line: &LineRef, count: usize) {
+    let mut count = count;
+    while count > 1 {
+        let next_line = { let r = line.borrow(); r.next.clone() }.unwrap();
+        let next_data = next_line.borrow().data.clone();
+        let next_quot_len = quote_length(&next_data);
+        let next_lead_len =
+            next_quot_len + indent_length(&next_data.as_bytes()[next_quot_len..]);
+        let mut line_data = line.borrow().data.clone();
+
+        /* 把下一行接到本行后：本行非空且不以空格结尾时补一个空格。 */
+        if !line_data.is_empty() && !line_data.ends_with(' ') {
+            line_data.push(' ');
+        }
+        line_data.push_str(&next_data[next_lead_len..]);
+
+        /* 合并锚点。 */
+        let anchor = next_line.borrow().has_anchor;
+        if anchor {
+            line.borrow_mut().has_anchor = true;
+        }
+
+        line.borrow_mut().data = line_data;
+        files::unlink_node(&next_line);
+        files::renumber_from(line);
+        count -= 1;
+    }
+}
+
+/// 在给定行中把连续空白替换为单个空格，但任何结尾标点后保留两个空格
+/// （若有两个），并去掉行尾全部空白。前 skip 个字符不处理
+/// （对应 `squeeze`）。
+fn squeeze(line: &LineRef, skip: usize) {
+    let data = line.borrow().data.clone().into_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(data.len());
+    out.extend_from_slice(&data[..skip.min(data.len())]);
+
+    let mut i = skip.min(data.len());
+    let n = data.len();
+    while i < n {
+        if chars::is_blank_char(&data[i..]) {
+            /* 空白 → 单个空格。 */
+            out.push(b' ');
+            i += chars::char_length(&data[i..]);
+            while i < n && chars::is_blank_char(&data[i..]) {
+                i += chars::char_length(&data[i..]);
+            }
+        } else if is_punctuation(&data[i..]) {
+            /* 标点：复制它及可能的后续括号，最多两个后续空白变空格。 */
+            let clen = chars::char_length(&data[i..]);
+            out.extend_from_slice(&data[i..i + clen]);
+            i += clen;
+            if i < n && is_bracket(&data[i..]) {
+                let blen = chars::char_length(&data[i..]);
+                out.extend_from_slice(&data[i..i + blen]);
+                i += blen;
+            }
+            let mut spaces = 0;
+            while i < n && chars::is_blank_char(&data[i..]) && spaces < 2 {
+                out.push(b' ');
+                i += chars::char_length(&data[i..]);
+                spaces += 1;
+            }
+            while i < n && chars::is_blank_char(&data[i..]) {
+                i += chars::char_length(&data[i..]);
+            }
+        } else {
+            let clen = chars::char_length(&data[i..]);
+            out.extend_from_slice(&data[i..i + clen]);
+            i += clen;
+        }
+    }
+
+    /* 去掉行尾空格。 */
+    while out.len() > skip && out.last() == Some(&b' ') {
+        out.pop();
+    }
+
+    line.borrow_mut().data = String::from_utf8_lossy(&out).into_owned();
+}
+
+/// 是否为标点字符（对应 C 的 punct 集合）。
+fn is_punctuation(data: &[u8]) -> bool {
+    let c = data.first().copied().unwrap_or(0);
+    matches!(
+        c,
+        b'.' | b',' | b';' | b':' | b'!' | b'?' | b'\'' | b'"' | b')'
+    )
+}
+
+/// 是否为括号字符（对应 C 的 brackets 集合）。
+fn is_bracket(data: &[u8]) -> bool {
+    let c = data.first().copied().unwrap_or(0);
+    matches!(c, b')' | b']' | b'}' | b'>')
+}
+
+/// 把给定行（以 lead_string/lead_len 开头）重排为不超过 wrap_at 宽度的
+/// 多行（对应 `rewrap_paragraph`）。
+fn rewrap_paragraph(line: &mut LineRef, lead_string: &str, lead_len: usize) {
+    let wrap_at = with_global(|g| g.wrap_at);
+
+    while utils::breadth(line.borrow().data.as_bytes()) > wrap_at {
+        let line_data = line.borrow().data.clone();
+        let line_len = line_data.len();
+
+        /* 在行中找可断点。 */
+        let break_pos = break_line(
+            line_data.as_bytes(),
+            wrap_at as isize - utils::wideness(line_data.as_bytes(), lead_len) as isize,
+            false,
+        );
+
+        /* 无法断开或不需要断开时结束。 */
+        if break_pos < 0 || lead_len + break_pos as usize == line_len {
+            break;
+        }
+
+        let mut break_pos = lead_len + break_pos as usize + 1;
+
+        /* 在当前行后插入新行，把前导部分与断点后的文本复制进去。 */
+        let newnode = make_new_node(Some(&*line.borrow()));
+        let mut ndata = String::new();
+        ndata.push_str(lead_string);
+        ndata.push_str(&line_data[break_pos..]);
+        newnode.borrow_mut().data = ndata;
+        files::splice_node(line, &newnode);
+
+        /* 请求时剪掉一或两个尾随空格。 */
+        if ISSET(TRIM_BLANKS) {
+            while break_pos > 0 && line.borrow().data.as_bytes().get(break_pos - 1) == Some(&b' ') {
+                break_pos -= 1;
+            }
+        }
+
+        /* 实际断开当前行并移到下一行。 */
+        {
+            let mut d = line.borrow().data.clone().into_bytes();
+            d.truncate(break_pos);
+            line.borrow_mut().data = String::from_utf8_lossy(&d).into_owned();
+        }
+        *line = newnode;
+    }
+
+    files::renumber_from(line);
+
+    /* 可能时，移到重排段落之后的行。 */
+    let next = { let r = line.borrow(); r.next.clone() };
+    if let Some(n) = next {
+        *line = n;
+    }
+}
+
+/// 对齐以 *line 开头、共 count 行的段落，使各行适配 wrap_at 宽度并
+/// 规范化空白（对应 `justify_paragraph`）。
+fn justify_paragraph(line: &mut LineRef, count: usize) {
+    /* 样板行是唯一一行或第二行。 */
+    let sampleline = if count == 1 {
+        line.clone()
+    } else {
+        { let r = line.borrow(); r.next.clone() }.unwrap()
+    };
+
+    /* 复制样板行的前导部分（引用 + 缩进）。 */
+    let sample_data = sampleline.borrow().data.clone();
+    let quot_len = quote_length(&sample_data);
+    let lead_len = quot_len + indent_length(&sample_data.as_bytes()[quot_len..]);
+    let lead_string: String = sample_data.chars().take(lead_len).collect();
+
+    /* 把段落所有行拼接为一行。 */
+    concat_paragraph(line, count);
+
+    /* 规范化空白。 */
+    let line_data = line.borrow().data.clone();
+    let lq = quote_length(&line_data);
+    let li = indent_length(&line_data.as_bytes()[lq..]);
+    squeeze(line, lq + li);
+
+    /* 按前导部分重排。 */
+    rewrap_paragraph(line, &lead_string, lead_len);
+}
+
+/// 对齐当前段落（对应 `do_justify`）。
+pub fn do_justify() {
+    justify_text(false);
+}
+
+/// 对齐整个文件（对应 `do_full_justify`）。
+pub fn do_full_justify() {
+    justify_text(true);
+    with_global_mut(|g| {
+        g.ran_a_tool = true;
+        g.recook = true;
+    });
+}
+
+/// 对齐当前段落（whole_buffer=FALSE）或整个缓冲区（whole_buffer=TRUE）；
+/// 标记存在时只对齐标记区域（对应 `justify_text`）。
+pub fn justify_text(whole_buffer: bool) {
+    let was_cutbuffer = with_global(|g| g.cutbuffer.clone());
+    let was_the_linenumber = with_global(|g| {
+        g.openfile.as_ref().and_then(|of| {
+            let r = of.borrow();
+            r.current.as_ref().map(|c| c.borrow().lineno)
+        }).unwrap_or(1)
+    });
+
+    add_undo(UndoType::CoupleBegin, Some("justification"));
+
+    let has_mark = with_global(|g| {
+        g.openfile.as_ref().map(|of| of.borrow().mark.is_some()).unwrap_or(false)
+    });
+
+    let (startline, start_x, endline, end_x) = if has_mark {
+        /* 标记区域当作一个段落。 */
+        let (s, sx, e, ex) = utils::get_region();
+        /* 空区域不做任何事。 */
+        if std::rc::Rc::ptr_eq(&s, &e) && sx == ex {
+            winio::statusline(MessageType::Ahem, &crate::t!("text-selection_is_empty"));
+            discard_until(with_global(|g| {
+                g.openfile.as_ref().and_then(|of| {
+                    let r = of.borrow();
+                    r.undotop.clone()
+                })
+            }).as_ref().and_then(|u| u.borrow().next.clone()).as_ref());
+            return;
+        }
+        (s, sx, e, ex)
+    } else {
+        /* 对齐整个缓冲区时从顶部开始；否则在段落中时回到段落开头。 */
+        let mut current = with_global(|g| {
+            g.openfile.as_ref().and_then(|of| {
+                let r = of.borrow();
+                r.current.clone()
+            }).unwrap()
+        });
+        if whole_buffer {
+            let top = with_global(|g| {
+                g.openfile.as_ref().and_then(|of| {
+                    let r = of.borrow();
+                    r.filetop.clone()
+                }).unwrap()
+            });
+            with_global_mut(|g| {
+                if let Some(of) = &g.openfile {
+                    of.borrow_mut().current = Some(top.clone());
+                }
+            });
+            current = top;
+        } else if inpar(&current) && !begpar(&current, 0) {
+            crate::movement::do_para_begin(&mut current);
+            with_global_mut(|g| {
+                if let Some(of) = &g.openfile {
+                    of.borrow_mut().current = Some(current.clone());
+                }
+            });
+        }
+
+        /* 找第一个要对齐的段落。 */
+        let Some((first, linecount)) = find_paragraph(&current) else {
+            /* 没有可对齐的段落：光标移到文件末尾。 */
+            let bot = with_global(|g| {
+                g.openfile.as_ref().and_then(|of| {
+                    let r = of.borrow();
+                    r.filebot.clone()
+                }).unwrap()
+            });
+            let bot_len = bot.borrow().data.len();
+            with_global_mut(|g| {
+                if let Some(of) = &g.openfile {
+                    let mut of = of.borrow_mut();
+                    of.current = Some(bot);
+                    of.current_x = bot_len;
+                }
+            });
+            discard_until(with_global(|g| {
+                g.openfile.as_ref().and_then(|of| {
+                    let r = of.borrow();
+                    r.undotop.clone()
+                })
+            }).as_ref().and_then(|u| u.borrow().next.clone()).as_ref());
+            with_global_mut(|g| g.refresh_needed = true);
+            return;
+        };
+        with_global_mut(|g| {
+            if let Some(of) = &g.openfile {
+                let mut of = of.borrow_mut();
+                of.current = Some(first.clone());
+                of.current_x = 0;
+            }
+        });
+
+        let start = first.clone();
+        let start_x = 0;
+
+        /* 段落末尾。 */
+        let (end, end_x) = if whole_buffer {
+            let bot = with_global(|g| {
+                g.openfile.as_ref().and_then(|of| {
+                    let r = of.borrow();
+                    r.filebot.clone()
+                }).unwrap()
+            });
+            let bx = bot.borrow().data.len();
+            (bot, bx)
+        } else {
+            let mut e = start.clone();
+            for _ in 1..linecount {
+                let next = { let r = e.borrow(); r.next.clone() }.unwrap();
+                e = next;
+            }
+            match { let r = e.borrow(); r.next.clone() } {
+                Some(n) => (n, 0),
+                None => {
+                    let len = e.borrow().data.len();
+                    (e, len)
+                }
+            }
+        };
+        (start, start_x, end, end_x)
+    };
+
+    /* 剪出段落区域。 */
+    add_undo(UndoType::Cut, None);
+    with_global_mut(|g| {
+        g.cutbuffer = None;
+        g.cutbottom = None;
+    });
+    cut::extract_segment(&startline, start_x, &endline, end_x);
+    update_undo(UndoType::Cut);
+
+    /* 对齐剪出的文本。 */
+    let cutbuffer = with_global(|g| g.cutbuffer.clone()).unwrap();
+    let mut jusline = cutbuffer.clone();
+    let count = {
+        let start_lineno = startline.borrow().lineno;
+        let end_lineno = endline.borrow().lineno;
+        (end_lineno - start_lineno) as usize + if end_x > 0 { 1 } else { 0 }
+    };
+    justify_paragraph(&mut jusline, count.max(1));
+
+    if whole_buffer && !has_mark {
+        /* 对齐整个文件：继续对齐后续段落。 */
+        let mut first = jusline.clone();
+        loop {
+            let next = { let r = first.borrow(); r.next.clone() };
+            match next {
+                Some(n) => {
+                    if let Some((f, lc)) = find_paragraph(&n) {
+                        first = f.clone();
+                        let mut jl = f;
+                        justify_paragraph(&mut jl, lc);
+                        if { let r = jl.borrow(); r.next.is_none() } {
+                            break;
+                        }
+                        continue;
+                    }
+                    break;
+                }
+                None => break,
+            }
+        }
+    }
+
+    /* 把对齐后的文本嫁回缓冲区。 */
+    add_undo(UndoType::Paste, None);
+    cut::ingraft_buffer(&cutbuffer);
+    update_undo(UndoType::Paste);
+
+    /* 整段对齐后回到原来的行。 */
+    if whole_buffer && !has_mark {
+        crate::search::goto_line_posx(was_the_linenumber as isize, 0);
+    }
+
+    add_undo(UndoType::CoupleEnd, Some("justification"));
+
+    /* 报告对齐结果。 */
+    let msg = if has_mark {
+        crate::t!("text-justified_selection")
+    } else if whole_buffer {
+        crate::t!("text-justified_file")
+    } else {
+        crate::t!("text-justified_paragraph")
+    };
+    winio::statusline(MessageType::Remark, &msg);
+
+    /* 恢复剪贴板（注意：free_lines 内部会访问全局，须在闭包外调用）。 */
+    let old_cb = with_global(|g| g.cutbuffer.clone());
+    files::free_lines(old_cb);
+    with_global_mut(|g| g.cutbuffer = was_cutbuffer);
+
+    files::set_modified();
+    with_global_mut(|g| {
+        g.refresh_needed = true;
+        g.focusing = false;
+    });
+}
+
+// ======================== 单词补全（对应 complete_a_word） ========================
+
+/// 返回给定位置开始的补全候选词（复制到下一个非单词字符前）
+/// （对应 `copy_completion`）。
+fn copy_completion(text: &[u8]) -> String {
+    let mut length = 0;
+    while length < text.len() && chars::is_word_char(&text[length..], false) {
+        let step = chars::step_right(text, length).min(text.len());
+        if step <= length {
+            break;
+        }
+        length = step;
+    }
+    String::from_utf8_lossy(&text[..length.min(text.len())]).into_owned()
+}
+
+/// 查看用户输入的单词片段，然后搜索当前缓冲区中以此片段开头的单词，
+/// 并暂时代补全该片段。再次按补全键则撤销上次补全并搜索下一个候选
+/// （对应 `complete_a_word`）。
+pub fn complete_a_word() {
+    let was_set_wrapping = ISSET(BREAK_LONG_LINES);
+
+    /* 全新补全尝试。 */
+    let fresh = with_global(|g| g.pletion_line.is_none());
+    if fresh {
+        /* 清除上次补全运行的候选列表。 */
+        with_global_mut(|g| {
+            let mut cur = g.completion_list.take();
+            while let Some(c) = cur {
+                let next = { let r = c.borrow(); r.next.clone() };
+                cur = next;
+            }
+            /* 防止补全被并入已输入的文本。 */
+            if let Some(of) = &g.openfile {
+                of.borrow_mut().last_action = UndoType::Other;
+            }
+            /* 从缓冲区顶部开始搜索。 */
+            g.pletion_line = g.openfile.as_ref().and_then(|of| {
+                let r = of.borrow();
+                r.filetop.clone()
+            });
+            g.pletion_x = 0;
+        });
+        winio::wipe_statusbar();
+    } else {
+        /* 撤销上次尝试的补全。 */
+        do_undo();
+    }
+
+    /* 找到用户输入的片段起点。 */
+    let (mut start_of_shard, current_x, current_data) = with_global(|g| {
+        let of = g.openfile.as_ref().expect("no open file").borrow();
+        let cur = of.current.clone().unwrap();
+        let data = cur.borrow().data.clone();
+        (of.current_x, of.current_x, data)
+    });
+    while start_of_shard > 0 {
+        let oneleft = chars::step_left(current_data.as_bytes(), start_of_shard);
+        if !chars::is_word_char(&current_data.as_bytes()[oneleft..], false) {
+            break;
+        }
+        start_of_shard = oneleft;
+    }
+
+    /* 光标前没有单词片段时不做任何事。 */
+    if start_of_shard == current_x {
+        winio::statusline(MessageType::Ahem, &crate::t!("text-no_word_fragment"));
+        with_global_mut(|g| g.pletion_line = None);
+        return;
+    }
+
+    /* 复制要搜索的片段。 */
+    let shard: String = current_data[start_of_shard..current_x].to_string();
+    let shard_length = shard.len();
+
+    /* 搜索整个缓冲区，寻找 shard。 */
+    loop {
+        let (pletion_line, pletion_x) = with_global(|g| {
+            (g.pletion_line.clone(), g.pletion_x)
+        });
+        let Some(pletion_line) = pletion_line else { break };
+
+        let pletion_data = pletion_line.borrow().data.clone();
+        let threshold = pletion_data.len().saturating_sub(shard_length);
+
+        let mut i = pletion_x;
+        while i < threshold {
+            /* 首字节不匹配则继续。 */
+            if pletion_data.as_bytes()[i] != shard.as_bytes()[0] {
+                i += 1;
+                continue;
+            }
+
+            /* 比较 shard 的其余字节。 */
+            let mut j = 1;
+            while j < shard_length
+                && pletion_data.as_bytes().get(i + j) == shard.as_bytes().get(j)
+            {
+                j += 1;
+            }
+
+            /* 未完全匹配则继续搜索。 */
+            if j < shard_length {
+                i += 1;
+                continue;
+            }
+
+            /* 匹配不比 shard 长时跳过。 */
+            if !chars::is_word_char(&pletion_data.as_bytes()[i + j..], false) {
+                i += 1;
+                continue;
+            }
+
+            /* 匹配不是独立单词时跳过。 */
+            if i > 0 && chars::is_word_char(
+                &pletion_data.as_bytes()[chars::step_left(pletion_data.as_bytes(), i)..],
+                false,
+            ) {
+                i += 1;
+                continue;
+            }
+
+            /* 该匹配就是 shard 本身时忽略。 */
+            if with_global(|g| {
+                g.openfile.as_ref().map(|of| {
+                    let r = of.borrow();
+                    r.current.as_ref().map(|c| {
+                        Rc::ptr_eq(&pletion_line, c) && i == r.current_x - shard_length
+                    }).unwrap_or(false)
+                }).unwrap_or(false)
+            }) {
+                i += 1;
+                continue;
+            }
+
+            let completion = copy_completion(&pletion_data.as_bytes()[i..]);
+
+            /* 在之前的候选列表中查找重复。 */
+            let dup = with_global(|g| {
+                let mut some_word = g.completion_list.clone();
+                let mut is_dup = false;
+                while let Some(w) = some_word {
+                    if w.borrow().word.as_deref() == Some(completion.as_str()) {
+                        is_dup = true;
+                        break;
+                    }
+                    let next = { let r = w.borrow(); r.next.clone() };
+                    some_word = next;
+                }
+                is_dup
+            });
+
+            /* 已尝试过这个词则跳过。 */
+            if dup {
+                i += 1;
+                continue;
+            }
+
+            /* 把找到的词加入候选列表。 */
+            with_global_mut(|g| {
+                let node = Rc::new(RefCell::new(CompletionStruct {
+                    word: Some(completion.clone()),
+                    next: g.completion_list.clone(),
+                }));
+                g.completion_list = Some(node);
+            });
+
+            /* 临时禁用换行，使只添加一个撤销项。 */
+            if was_set_wrapping {
+                UNSET(BREAK_LONG_LINES);
+            }
+            /* 把补全注入缓冲区。 */
+            let extra = &completion.as_bytes()[shard_length..];
+            inject(extra, extra.len());
+            /* 需要时重新启用换行并换行。 */
+            if was_set_wrapping {
+                SET(BREAK_LONG_LINES);
+                do_wrap();
+            }
+
+            /* 为下次搜索设置位置。 */
+            with_global_mut(|g| g.pletion_x = i + 1);
+            return;
+        }
+
+        /* 移到下一行。 */
+        with_global_mut(|g| {
+            let next = { let r = pletion_line.borrow(); r.next.clone() };
+            g.pletion_line = next;
+            g.pletion_x = 0;
+        });
+    }
+
+    /* 搜索遍历了所有行。 */
+    let tried = with_global(|g| g.completion_list.is_some());
+    if tried {
+        winio::edit_refresh();
+        winio::statusline(MessageType::Ahem, &crate::t!("text-no_further_matches"));
+    } else {
+        winio::statusline(MessageType::Ahem, &crate::t!("text-no_matches"));
+    }
+}
+
 // ======================== 界面辅助（保留接口） ========================
 
 /// 确保 firstcolumn 对齐（对应 winio.c；由渲染层处理）。
@@ -2266,16 +2958,318 @@ pub fn do_anchor() {
     }
 }
 
-/// 清除所有剪贴板（保留接口）。
-pub fn zap_all_cutbuffer() {}
+/// 清除所有剪贴板内容（对应 C 版在剪切操作前 `free_lines(cutbuffer);
+/// cutbuffer = NULL` 的集中清理）。
+pub fn zap_all_cutbuffer() {
+    /* free_lines 内部会访问全局，须在闭包外调用。 */
+    let old_cb = with_global(|g| g.cutbuffer.clone());
+    files::free_lines(old_cb);
+    with_global_mut(|g| {
+        g.cutbuffer = None;
+        g.cutbottom = None;
+    });
+}
 
-/// 拼写检查（保留接口，待实现）。
-pub fn do_spell() {}
+/// 拼写检查：把（标记区域或整个）缓冲区写入临时文件，调用拼写器处理，
+/// 再把结果读回替换原文本（对应 text.c 的 `do_spell`）。
+pub fn do_spell() {
+    if files::in_restricted_mode() {
+        return;
+    }
+    with_global_mut(|g| g.ran_a_tool = true);
 
-/// 格式化（保留接口，待实现）。
-pub fn do_formatter() {}
+    /* 拼写器：-s/--speller 指定的值，其次环境变量 SPELL，最后系统 spell。 */
+    let speller = with_global(|g| g.speller.clone())
+        .or_else(|| std::env::var("SPELL").ok())
+        .unwrap_or_else(|| "spell".to_string());
+
+    let temp_name = safe_tempfile_name();
+    let Some(temp_name) = temp_name else {
+        return;
+    };
+
+    let okay = write_buffer_to_file(&temp_name);
+    if !okay {
+        winio::statusline(
+            MessageType::Alert,
+            &crate::t!("files-error_writing_temp", err = "write failed"),
+        );
+        let _ = std::fs::remove_file(&temp_name);
+        return;
+    }
+
+    treat(&temp_name, &speller, true);
+
+    let _ = std::fs::remove_file(&temp_name);
+}
+
+/// 格式化：运行当前语法定义的 formatter 命令处理整个缓冲区，
+/// 并把输出读回替换（对应 text.c 的 `do_formatter`）。
+pub fn do_formatter() {
+    if files::in_restricted_mode() {
+        return;
+    }
+    with_global_mut(|g| g.ran_a_tool = true);
+
+    let formatter = with_global(|g| {
+        g.openfile.as_ref().and_then(|of| {
+            let r = of.borrow();
+            r.syntax.as_ref().and_then(|s| s.borrow().formatter.clone())
+        })
+    });
+
+    let Some(formatter) = formatter else {
+        winio::statusline(MessageType::Ahem, &crate::t!("files-no_formatter_defined"));
+        return;
+    };
+
+    /* 格式化整个缓冲区，清除标记。 */
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            of.borrow_mut().mark = None;
+        }
+    });
+
+    let temp_name = safe_tempfile_name();
+    let Some(temp_name) = temp_name else {
+        return;
+    };
+
+    let okay = write_buffer_to_file(&temp_name);
+    if !okay {
+        winio::statusline(
+            MessageType::Alert,
+            &crate::t!("files-error_writing_temp", err = "write failed"),
+        );
+        let _ = std::fs::remove_file(&temp_name);
+        return;
+    }
+
+    treat(&temp_name, &formatter, false);
+
+    let _ = std::fs::remove_file(&temp_name);
+}
+
+/// 获取逐字输入并插入缓冲区（对应 text.c 的 `do_verbatim_input`）。
+pub fn do_verbatim_input() {
+    /* 无状态栏且光标在底行时，先滚动一行腾出反馈空间。 */
+    if ISSET(ZERO) {
+        let (cursor_row, editwinrows) = with_global(|g| {
+            let row = g.openfile.as_ref().map(|of| of.borrow().cursor_row).unwrap_or(0);
+            (row, g.editwinrows)
+        });
+        if cursor_row == (editwinrows - 1) as isize && with_global(|g| g.LINES) > 1 {
+            winio::edit_scroll(winio::ScrollDirection::Forward);
+            winio::edit_refresh();
+        }
+    }
+
+    winio::statusline(MessageType::Info, &crate::t!("text-verbatim_input"));
+    winio::place_the_cursor();
+
+    let mut count = 0usize;
+    let bytes = winio::get_verbatim_kbinput(&mut count);
+
+    /* 获得有效输入时，插入缓冲区并清空状态栏。 */
+    if count > 0 {
+        if ISSET(CONSTANT_SHOW) || ISSET(MINIBAR) {
+            with_global_mut(|g| g.lastmessage = MessageType::Vacuum);
+        }
+        inject(&bytes, count);
+        winio::wipe_statusbar();
+    } else {
+        winio::statusline(MessageType::Ahem, &crate::t!("text-invalid_code"));
+    }
+}
 
 // ======================== 内部辅助 ========================
+
+/// 创建唯一的临时文件名（对应 C 版的 `safe_tempfile`，但只返回文件名；
+/// 文件由调用者用 `write_buffer_to_file` 写入）。
+fn safe_tempfile_name() -> Option<String> {
+    let dir = std::env::temp_dir();
+    let pid = std::process::id();
+    for attempt in 0..100u32 {
+        let name = dir.join(format!("nano.{}.{}.tmp", pid, attempt));
+        let path = name.to_string_lossy().into_owned();
+        /* 用 create_new 确保唯一性。 */
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(_) => return Some(path),
+            Err(_) => continue,
+        }
+    }
+    winio::statusline(
+        MessageType::Alert,
+        &crate::t!("files-no_temp_file", err = "cannot create unique file"),
+    );
+    None
+}
+
+/// 把当前缓冲区内容写入给定文件（对应 C 版 `write_file(..., SPECIAL, NONOTES)`，
+/// 不显示状态栏消息）。
+fn write_buffer_to_file(path: &str) -> bool {
+    let mut content = String::new();
+    with_global(|g| {
+        let of = g.openfile.clone();
+        if let Some(of) = of {
+            let r = of.borrow();
+            let mut cur = r.filetop.clone();
+            let mut first = true;
+            while let Some(c) = cur {
+                let (data, next) = {
+                    let r = c.borrow();
+                    (r.data.clone(), r.next.clone())
+                };
+                if first {
+                    content.push_str(&data);
+                    first = false;
+                } else {
+                    content.push('\n');
+                    content.push_str(&data);
+                }
+                cur = next;
+            }
+        }
+    });
+    std::fs::write(path, content).is_ok()
+}
+
+/// 执行给定程序（拼写器或格式化器）处理临时文件，然后把处理结果
+/// 读回替换（标记区域或整个）缓冲区（对应 text.c 的 `treat`）。
+fn treat(tempfile_name: &str, theprogram: &str, spelling: bool) {
+    /* 空缓冲区时无事可做。 */
+    let (size, marked) = with_global(|g| {
+        let of = g.openfile.as_ref().map(|o| o.borrow());
+        let sz = of.as_ref().map(|r| {
+            r.filebot.as_ref().map(|b| b.borrow().data.len()).unwrap_or(0)
+        }).unwrap_or(0);
+        let marked = of.as_ref().map(|r| r.mark.is_some()).unwrap_or(false);
+        (sz, marked)
+    });
+    if size == 0 && !marked {
+        let msg = if marked {
+            crate::t!("text-selection_is_empty")
+        } else {
+            crate::t!("text-buffer_is_empty")
+        };
+        winio::statusline(MessageType::Ahem, &msg);
+        return;
+    }
+
+    if spelling {
+        winio::leave_terminal();
+    } else {
+        winio::statusbar(&crate::t!("text-invoking_formatter"));
+    }
+
+    /* 运行 program tempfile_name。 */
+    let program = theprogram.to_string();
+    let result = run_program_with_file(&program, tempfile_name);
+
+    if spelling {
+        winio::enter_terminal();
+        winio::full_refresh();
+    } else {
+        winio::full_refresh();
+    }
+
+    match result {
+        Err(_e) => {
+            winio::statusline(
+                MessageType::Alert,
+                &crate::t!("text-error_invoking", program = theprogram),
+            );
+            return;
+        }
+        Ok(exit_code) => {
+            if exit_code > 2 {
+                winio::statusline(
+                    MessageType::Alert,
+                    &crate::t!("text-error_invoking", program = theprogram),
+                );
+                return;
+            }
+            if exit_code != 0 {
+                winio::statusline(
+                    MessageType::Alert,
+                    &crate::t!("text-error_invoking", program = theprogram),
+                );
+            }
+        }
+    }
+
+    /* 读回处理后的临时文件并替换（标记区域或整个）缓冲区。 */
+    let Ok(new_text) = std::fs::read_to_string(tempfile_name) else {
+        winio::statusline(MessageType::Alert, &crate::t!("files-error_reading", filename = tempfile_name, err = "read back"));
+        return;
+    };
+
+    if new_text.is_empty() && size > 0 {
+        /* 程序清空了文件——按 C 版语义，空输出不替换。 */
+        winio::statusline(MessageType::Remark, &crate::t!("text-nothing_changed"));
+        return;
+    }
+
+    replace_buffer_with_text(&new_text);
+
+    if spelling {
+        winio::statusline(MessageType::Remark, &crate::t!("text-finished_checking_spelling"));
+    } else {
+        winio::statusline(MessageType::Remark, &crate::t!("text-justified"));
+    }
+}
+
+/// 在 shell 中运行 "program filename"（程序可能带参数，按空格拆分）。
+fn run_program_with_file(program: &str, filename: &str) -> Result<i32, String> {
+    use std::process::Command;
+
+    let mut parts = program.split_whitespace();
+    let Some(prog) = parts.next() else {
+        return Err("empty program".to_string());
+    };
+    let mut cmd = Command::new(prog);
+    cmd.args(parts);
+    cmd.arg(filename);
+
+    let status = cmd.status().map_err(|e| e.to_string())?;
+    Ok(status.code().unwrap_or(-1))
+}
+
+/// 用给定文本替换（标记区域或整个）缓冲区（对应 C 版 `replace_buffer`）：
+/// 把原内容剪掉丢弃，再把新文本插入光标处。
+fn replace_buffer_with_text(new_text: &str) {
+    /* 保存剪贴板并临时清空。 */
+    let was_cutbuffer = with_global(|g| g.cutbuffer.clone());
+    with_global_mut(|g| {
+        g.cutbuffer = None;
+        g.cutbottom = None;
+    });
+
+    add_undo(UndoType::CoupleBegin, Some("spelling correction"));
+
+    /* 从顶部开始剪（整个缓冲区）。 */
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            let mut of = of.borrow_mut();
+            of.current = of.filetop.clone();
+            of.current_x = 0;
+        }
+    });
+
+    add_undo(UndoType::Cut, None);
+    cut::do_snip(false, true, false);
+    update_undo(UndoType::Cut);
+
+    /* 丢弃剪下的内容，恢复原剪贴板。 */
+    let old_cb = with_global(|g| g.cutbuffer.clone());
+    files::free_lines(old_cb);
+    with_global_mut(|g| g.cutbuffer = was_cutbuffer);
+
+    /* 把新文本插入到已清空的缓冲区。 */
+    files::insert_text_into_buffer(new_text);
+
+    add_undo(UndoType::CoupleEnd, Some("spelling correction"));
+}
 
 /// 将 String 泄漏为 &'static str（用于 undo 消息；等价于 C 中复制后不释放）。
 fn leak_string(s: String) -> &'static str {
@@ -2283,6 +3277,8 @@ fn leak_string(s: String) -> &'static str {
 }
 
 /// do_undo 中 JOIN 特殊情况分支的辅助。
+/// 原版 C 代码在该分支只做 `break`（不恢复文本，仅定位光标），
+/// 因此这里保持空实现，与 C 版行为一致。
 fn break_case(_u: &UndoRef, _undidmsg: &mut Option<&'static str>) {}
 
 // ======================== 文本注入（对应 nano.c 的 inject） ========================

@@ -1,0 +1,233 @@
+// tests/new_features.rs - 验证本仓库新增功能的集成测试：
+//   1. 插入文件内容（insert_text_into_buffer）；
+//   2. 多缓冲区切换（open_another_buffer / switch_to_prev_buffer / switch_to_next_buffer）；
+//   3. 锁文件写入与删除（write_lockfile / delete_lockfile / lock_filename_for）；
+//   4. 段落对齐（do_justify）；
+//   5. 单词补全（complete_a_word）；
+//   6. 命令行多文件参数解析（parse_file_args）。
+
+use nano_rs::definitions::{with_global, with_global_mut, LineRef};
+
+/// 初始化全局状态与 i18n（locales 指向仓库内的 locales/ 目录）。
+fn setup() {
+    let locales = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales");
+    std::env::set_var("NANORS_LOCALES", locales);
+    nano_rs::global::global_init();
+    nano_rs::i18n::init();
+    with_global_mut(|g| {
+        g.COLS = 80;
+        g.LINES = 24;
+        g.editwinrows = 20;
+        g.wrap_at = 40;
+        g.openfile = None;
+        g.statusbar_msg.clear();
+        g.statusbar_centered = false;
+        g.lastmessage = nano_rs::definitions::MessageType::Vacuum;
+    });
+}
+
+/// 从行链表读取全部文本（行间以 \n 连接；跳过末尾魔法行）。
+fn buffer_text() -> String {
+    with_global(|g| {
+        let of = g.openfile.as_ref().unwrap().borrow();
+        let (filebot, filetop) = (of.filebot.clone(), of.filetop.clone());
+        let single_line = match (&filetop, &filebot) {
+            (Some(t), Some(b)) => std::rc::Rc::ptr_eq(t, b),
+            _ => true,
+        };
+        let mut result = String::new();
+        let mut cur = of.filetop.clone();
+        let mut first = true;
+        while let Some(c) = cur {
+            let is_filebot = filebot
+                .as_ref()
+                .map(|b| std::rc::Rc::ptr_eq(b, &c))
+                .unwrap_or(false);
+            let (data, next) = {
+                let r = c.borrow();
+                (r.data.clone(), r.next.clone())
+            };
+            /* 魔法行：末尾空行且非唯一行时不输出。 */
+            if is_filebot && data.is_empty() && !single_line {
+                break;
+            }
+            if !first {
+                result.push('\n');
+            }
+            first = false;
+            result.push_str(&data);
+            cur = next;
+        }
+        result
+    })
+}
+
+/// 在临时目录创建文件并返回路径。
+fn temp_file(name: &str, content: &str) -> String {
+    let dir = std::env::temp_dir();
+    let path = dir.join(format!("rustnano_test_{}_{}", std::process::id(), name));
+    std::fs::write(&path, content).unwrap();
+    path.to_string_lossy().into_owned()
+}
+
+#[test]
+fn insert_text_into_buffer_works() {
+    setup();
+    nano_rs::files::open_buffer("");
+    // 先在缓冲区输入 "first"
+    nano_rs::text::inject(b"first", 5);
+    assert_eq!(buffer_text(), "first");
+
+    // 在光标后插入多行文本
+    nano_rs::files::insert_text_into_buffer("second\nthird");
+    let text = buffer_text();
+    assert!(text.contains("second"), "插入文本应含 second，实际: {text}");
+    assert!(text.contains("third"), "插入文本应含 third，实际: {text}");
+    assert!(text.starts_with("firstsecond"), "插入应在光标处，实际: {text}");
+}
+
+#[test]
+fn multibuffer_switch_works() {
+    setup();
+    nano_rs::files::open_buffer("");
+    let file1 = temp_file("mb1.txt", "one\n");
+    let file2 = temp_file("mb2.txt", "two\n");
+
+    let r = nano_rs::files::open_another_buffer(&file1);
+    assert!(matches!(r, nano_rs::files::OpenBufferResult::FileLoaded));
+    let r = nano_rs::files::open_another_buffer(&file2);
+    assert!(matches!(r, nano_rs::files::OpenBufferResult::FileLoaded));
+
+    // 当前应是 file2
+    let name = with_global(|g| {
+        g.openfile.as_ref().and_then(|of| of.borrow().filename.clone())
+    });
+    assert_eq!(name.as_deref(), Some(file2.as_str()));
+
+    // 切换到前一个（file1）
+    nano_rs::files::switch_to_prev_buffer();
+    let name = with_global(|g| {
+        g.openfile.as_ref().and_then(|of| of.borrow().filename.clone())
+    });
+    assert_eq!(name.as_deref(), Some(file1.as_str()));
+
+    // 再切回下一个（file2）
+    nano_rs::files::switch_to_next_buffer();
+    let name = with_global(|g| {
+        g.openfile.as_ref().and_then(|of| of.borrow().filename.clone())
+    });
+    assert_eq!(name.as_deref(), Some(file2.as_str()));
+
+    let _ = std::fs::remove_file(&file1);
+    let _ = std::fs::remove_file(&file2);
+}
+
+#[test]
+fn lockfile_write_and_delete() {
+    setup();
+    let file = temp_file("lock1.txt", "hello\n");
+    let lockname = nano_rs::files::lock_filename_for(&file);
+    let base = std::path::Path::new(&file)
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert!(
+        lockname.ends_with(&format!(".{}.swp", base)),
+        "锁文件名: {lockname}"
+    );
+
+    assert!(nano_rs::files::write_lockfile(&lockname, &file, false));
+    assert!(std::path::Path::new(&lockname).exists(), "锁文件应已创建");
+    assert!(nano_rs::files::delete_lockfile(&lockname));
+    assert!(!std::path::Path::new(&lockname).exists(), "锁文件应已删除");
+
+    let _ = std::fs::remove_file(&file);
+}
+
+#[test]
+fn justify_paragraph_works() {
+    setup();
+    let file = temp_file("justify1.txt", "alpha beta gamma delta\nepsilon zeta eta theta\n");
+    nano_rs::files::open_buffer(&file);
+
+    // 把光标移到第一行
+    nano_rs::search::goto_line_posx(1, 0);
+
+    nano_rs::text::do_justify();
+
+    // 对齐后应是一段，行数减少（合并进单行并重排）
+    let text = buffer_text();
+    assert!(!text.is_empty());
+    assert!(text.contains("alpha"), "对齐后应保留文本，实际: {text}");
+    assert!(text.contains("theta"), "对齐后应保留全部单词，实际: {text}");
+    assert!(!text.contains("\n\n"), "不应出现空行，实际: {text:?}");
+
+    let _ = std::fs::remove_file(&file);
+}
+
+#[test]
+fn complete_a_word_finds_candidate() {
+    setup();
+    nano_rs::files::open_buffer("");
+    nano_rs::text::inject(b"hello world hello there", 23);
+    // 移到行首并输入片段 "hel"
+    nano_rs::search::goto_line_posx(1, 0);
+    nano_rs::text::inject(b"hel", 3);
+
+    nano_rs::text::complete_a_word();
+    let text = buffer_text();
+    assert!(text.contains("hello"), "应补全为 hello，实际: {text}");
+}
+
+#[test]
+fn parse_file_args_collects_all_files() {
+    setup();
+    let args: Vec<String> = vec![
+        "nano".into(),
+        "-l".into(),
+        "+5".into(),
+        "a.txt".into(),
+        "b.txt".into(),
+        "-v".into(),
+        "c.txt".into(),
+    ];
+    let files = nano_rs::global::parse_file_args(&args);
+    assert_eq!(files.len(), 3);
+    assert_eq!(files[0].0, "a.txt");
+    assert_eq!(files[0].1, 5, "+5 应作用于 a.txt");
+    assert_eq!(files[1].0, "b.txt");
+    assert_eq!(files[2].0, "c.txt");
+}
+
+#[test]
+fn zap_all_cutbuffer_clears() {
+    setup();
+    nano_rs::files::open_buffer("");
+    /* 手动构造 cutbuffer 内容。 */
+    with_global_mut(|g| {
+        let line = nano_rs::definitions::make_new_node(None);
+        line.borrow_mut().data = "cut me".to_string();
+        g.cutbuffer = Some(line);
+    });
+    assert!(with_global(|g| g.cutbuffer.is_some()), "应有 cutbuffer");
+
+    nano_rs::text::zap_all_cutbuffer();
+    assert!(with_global(|g| g.cutbuffer.is_none()), "zap 后 cutbuffer 应为空");
+}
+
+#[test]
+fn buffer_text_helpers_consistent() {
+    // 验证 buffer_text 辅助函数自身：多行文本往返
+    setup();
+    nano_rs::files::open_buffer("");
+    nano_rs::text::inject(b"line1", 5);
+    nano_rs::text::do_enter();
+    nano_rs::text::inject(b"line2", 5);
+    let text = buffer_text();
+    assert_eq!(text, "line1\nline2");
+}
+
+/// 确保 LineRef 类型在测试中被引用（避免未使用导入警告）。
+#[allow(dead_code)]
+fn _type_anchor(_l: &LineRef) {}

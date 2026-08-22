@@ -14,6 +14,8 @@ welcome-message = Welcome to nano.  For basic help, type Ctrl+G.
 winio-modified =  Modified
 winio-new_buffer = New Buffer
 winio-cursor_position = line {lineno}/{filebot_lineno} ({linepct}%), col {column}/{fullwidth} ({colpct}%), char {sum}/{totsize} ({charpct}%)
+winio-view_warning = Key is invalid in view mode
+winio-nameless = (nameless)
 
 # ---------- browser（文件浏览器） ----------
 browser-search = Search
@@ -46,6 +48,33 @@ prompt-save_modified_buffer = Save modified buffer?
 files-restricted_mode = This function is disabled in restricted mode
 files-is_a_directory = '{filename}' is a directory
 files-new_file = New File
+files-insert_file = File to insert
+files-insert_new_buffer = File to read into new buffer
+files-execute_command = Command to execute
+files-execute_new_buffer = Command to execute in new buffer
+files-executing = Executing...
+files-pipe_failed = Piping failed
+files-command_failed = Error: {err}
+files-command_cancelled = Cancelled
+files-error_reading_stdin = Error reading from pipe: {err}
+files-no_temp_file = Error creating temp file: {err}
+files-error_writing_temp = Error writing temp file: {err}
+files-spell_check_failed = Spell checking failed: {err}
+files-linter_failed = Linting failed: {err}
+files-no_linter_defined = No linter is defined for this type of file
+files-no_formatter_defined = No formatter is defined for this type of file
+files-no_speller_defined = No spell checker is defined
+files-no_more_open_buffers = No more open file buffers
+files-lines_one = {name} -- {count} line
+files-lines_many = {name} -- {count} lines
+files-making_backup = Making backup...
+files-too_many_backups = Too many existing backup files
+files-cannot_write_backup = Error writing backup file {filename}: {err}
+files-error_deleting_lockfile = Error deleting lock file {filename}: {err}
+files-error_writing_lockfile = Error writing lock file {filename}: {err}
+files-couldnt_determine_identity = Couldn't determine my identity for lock file
+files-couldnt_determine_hostname = Couldn't determine hostname: {err}
+files-someone_else_editing = Someone else is also editing this file
 
 # ---------- movement（光标移动） ----------
 movement-not_possible = Not possible with '{opt}'
@@ -68,6 +97,10 @@ search-replace_with = Replace with
 search-view_replace_disabled = View mode: Replace disabled
 search-replaced_one = Replaced {count} occurrence
 search-replaced_many = Replaced {count} occurrences
+search-enter_line_column = Enter line number, column number
+search-invalid_line_or_column = Invalid line or column number
+search-not_a_bracket = Not a bracket
+search-no_matching_bracket = No matching bracket
 
 # ---------- text（编辑操作） ----------
 text-mark_unset = Mark Unset
@@ -78,6 +111,23 @@ text-nothing_to_undo = Nothing to undo
 text-nothing_to_redo = Nothing to redo
 text-undid = Undid {action}
 text-redid = Redid {action}
+text-verbatim_input = Verbatim Input
+text-invalid_code = Invalid code
+text-buffer_is_empty = Buffer is empty
+text-selection_is_empty = Selection is empty
+text-nothing_changed = Nothing changed
+text-invoking_formatter = Invoking formatter...
+text-finished_checking_spelling = Finished checking spelling
+text-error_invoking = Error invoking '{program}'
+text-no_word_fragment = No word fragment
+text-no_further_matches = No further matches
+text-no_matches = No matches
+text-justified = Justified
+text-justified_paragraph = Justified paragraph
+text-justified_file = Justified file
+text-justified_selection = Justified selection
+text-no_paragraph = No paragraph to justify
+text-use_fg = Use "fg" to return to nano.
 
 # ---------- color（颜色/语法） ----------
 color-unknown_syntax = Unknown syntax name: {name}

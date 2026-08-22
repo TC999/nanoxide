@@ -4,10 +4,13 @@
 // 全局状态 -> 命令行参数 -> 主目录 -> 终端 -> 颜色 -> rc 文件 ->
 // 快捷键 -> 历史 -> 打开文件 -> 显示 -> 主事件循环 -> 退出清理。
 
-use nano_rs::definitions::{with_global, with_global_mut, FOREIGN_SEQUENCE, THE_WINDOW_RESIZED};
+use nano_rs::definitions::{
+    with_global, with_global_mut, ISSET, MessageType, CONSTANT_SHOW, MINIBAR, ZERO,
+    FOREIGN_SEQUENCE, THE_WINDOW_RESIZED,
+};
 use nano_rs::global::parse_args;
 use nano_rs::winio::{handle_input_key, show_welcome_message, ERR};
-use nano_rs::{color, files, global, history, rcfile, utils, winio};
+use nano_rs::{color, files, global, history, rcfile, signals, text, utils, winio};
 
 fn main() {
     // 1. 初始化全局状态
@@ -27,6 +30,9 @@ fn main() {
     // 4. 初始化终端
     winio::initscr();
 
+    // 4b. 注册信号处理器（SIGHUP/SIGTERM 紧急保存、SIGTSTP 挂起、SIGWINCH 尺寸变化等）。
+    signals::set_up_signal_handlers();
+
     // 5. 初始化颜色
     color::set_interface_colorpairs();
 
@@ -40,34 +46,46 @@ fn main() {
     history::history_init();
     history::load_history();
 
-    // 9. 打开文件
-    let filename = parse_args(&args);
-    let has_filename = filename.is_some();
-    match filename {
-        Some(f) => {
-            let result = files::open_buffer(&f);
-            match result {
-                files::OpenBufferResult::NewFile => {
-                    // 文件不存在：在原来显示 welcome-message 的位置显示 "[ New File ]"
-                    winio::statusbar_centered(&format!("[ {} ]", nano_rs::t!("files-new_file")));
-                }
-                files::OpenBufferResult::Directory => {
-                    // 与原版 nano.c 一致：目录不加载（open_buffer 返回 FALSE 后
-                    // main 继续处理下一个文件），最终打开空白缓冲区让编辑器可用。
-                    // 状态栏已显示 "[ '目录' is a directory ]"（对应 statusline(ALERT)）。
-                    files::open_buffer("");
-                }
-                files::OpenBufferResult::ErrorRead => {
-                    // 读取失败：创建空缓冲区保证编辑器可继续工作
-                    files::open_buffer("");
-                }
-                files::OpenBufferResult::FileLoaded => {}
+    // 9. 打开文件（支持多文件与 +LINE,COLUMN 定位，对应 C 版 main 的循环）
+    let args: Vec<String> = std::env::args().collect();
+    let files = global::parse_file_args(&args);
+    let has_filename = !files.is_empty();
+    for (idx, (name, line, col)) in files.iter().enumerate() {
+        let result = if idx == 0 {
+            files::open_buffer(name)
+        } else {
+            files::open_another_buffer(name)
+        };
+        match result {
+            files::OpenBufferResult::NewFile => {
+                // 文件不存在：在原来显示 welcome-message 的位置显示 "[ New File ]"
+                winio::statusbar_centered(&format!("[ {} ]", nano_rs::t!("files-new_file")));
             }
+            files::OpenBufferResult::Directory => {
+                // 与原版 nano.c 一致：目录不加载（open_buffer 返回 FALSE 后
+                // main 继续处理下一个文件），最终打开空白缓冲区让编辑器可用。
+                // 状态栏已显示 "[ '目录' is a directory ]"（对应 statusline(ALERT)）。
+            }
+            files::OpenBufferResult::ErrorRead => {
+                // 读取失败：创建空缓冲区保证编辑器可继续工作
+            }
+            files::OpenBufferResult::FileLoaded => {}
         }
-        None => {
-            // 创建空缓冲区
-            files::open_buffer("");
+
+        /* 命令行给出的位置：跳到对应行/列（对应 C 的 goto_line_and_column）。 */
+        if *line != 0 || *col != 0 {
+            nano_rs::search::goto_line_and_column(*line, *col, true);
         }
+    }
+
+    // 若没有成功打开任何缓冲区，打开空白缓冲区。
+    if with_global(|g| g.openfile.is_none()) {
+        files::open_buffer("");
+    }
+
+    // 多文件时切回第一个缓冲区（对应 C：openfile = openfile->next）。
+    if files.len() > 1 {
+        files::switch_to_prev_buffer();
     }
 
     // 10. 准备显示
@@ -100,6 +118,46 @@ pub fn main_loop() {
     with_global_mut(|g| g.we_are_running = true);
 
     while with_global(|g| g.we_are_running) {
+        // 收到 SIGHUP/SIGTERM：紧急保存所有缓冲区并退出
+        // （对应 C 版 handle_hupterm 的 die + emergency_save_all）。
+        if signals::terminate_requested() {
+            files::emergency_save_all();
+            with_global_mut(|g| g.we_are_running = false);
+            break;
+        }
+
+        // 收到 SIGWINCH：重新查询尺寸并重绘（对应 regenerate_screen）。
+        if signals::take_window_resized() {
+            signals::regenerate_screen();
+        }
+
+        // 收到 SIGTSTP：请求挂起（对应 suspend_nano/continue_nano）。
+        if signals::take_suspend_requested() {
+            text::do_suspend();
+        }
+        if signals::take_resumed() {
+            winio::edit_refresh();
+        }
+
+        // 确认行号边距（对应 C 主循环的 confirm_margin()）。
+        winio::confirm_margin();
+
+        // MINIBAR 模式：无重要消息时刷新极简状态栏
+        // （对应 C 主循环的 minibar() 条件：lastmessage < REMARK）。
+        let quiet = matches!(
+            with_global(|g| g.lastmessage),
+            MessageType::Vacuum | MessageType::Hush
+        );
+        if ISSET(MINIBAR) && !ISSET(ZERO) && with_global(|g| g.LINES) > 1 && quiet {
+            winio::minibar();
+        } else if ISSET(CONSTANT_SHOW) && with_global(|g| g.LINES) > 1 && !ISSET(ZERO)
+            && quiet && winio::waiting_keycodes() == 0
+        {
+            // CONSTANT_SHOW：无消息且无待处理按键时报告光标位置
+            // （对应 C 主循环的 report_cursor_position() 条件）。
+            nano_rs::global::report_cursor_position();
+        }
+
         // 检查是否需要刷新
         if with_global(|g| g.refresh_needed) {
             with_global_mut(|g| g.refresh_needed = false);

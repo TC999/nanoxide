@@ -1007,3 +1007,245 @@ pub fn ask_for_and_do_replacements() {
         winio::statusline(MessageType::Remark, &msg);
     }
 }
+
+// ======================== 跳转到行与列（对应 do_gotolinecolumn） ========================
+
+/// 实现 Go To Line 菜单：询问行号（可带列号）并跳转
+/// （对应 `do_gotolinecolumn` / `ask_for_line_and_column`）。
+pub fn do_gotolinecolumn() {
+    let (mut line, mut column) = with_global(|g| {
+        let of = g.openfile.as_ref().expect("no open file").borrow();
+        let cur_lineno = of.current.as_ref().map(|c| c.borrow().lineno).unwrap_or(1);
+        (cur_lineno as isize, of.placewewant as isize + 1)
+    });
+
+    let response = crate::prompt::do_prompt(
+        MGOTOLINE,
+        "",
+        None,
+        Some(winio::edit_refresh),
+        &crate::t!("search-enter_line_column"),
+    );
+
+    /* 取消或运行了函数时完成。 */
+    if response < 0 {
+        winio::statusbar(&crate::t!("search-cancelled"));
+        return;
+    } else if response > 0 {
+        return;
+    }
+
+    let answer = with_global(|g| g.answer.clone()).unwrap_or_default();
+
+    /* ++ 或 -- 前缀表示相对跳转。 */
+    let mut doublesign = 0;
+    if answer.starts_with("++") || answer.starts_with("--") {
+        doublesign = 1;
+    }
+
+    /* 尝试从回答中提取一个或两个数字。 */
+    if !utils::parse_line_column(&answer[doublesign..], &mut line, &mut column) {
+        winio::statusline(MessageType::Ahem, &crate::t!("search-invalid_line_or_column"));
+        return;
+    }
+
+    if doublesign != 0 {
+        let cur_lineno = with_global(|g| {
+            g.openfile.as_ref().and_then(|of| {
+                let r = of.borrow();
+                r.current.as_ref().map(|c| c.borrow().lineno)
+            }).unwrap_or(1)
+        }) as isize;
+        line += cur_lineno;
+        if line < 1 {
+            line = 1;
+        }
+    }
+
+    goto_line_and_column(line, column, false);
+
+    crate::winio::adjust_viewport(
+        if answer.starts_with(',') {
+            UpdateType::Stationary
+        } else {
+            UpdateType::Centering
+        },
+    );
+    with_global_mut(|g| g.refresh_needed = true);
+}
+
+// ======================== 括号匹配（对应 find_a_bracket / do_find_bracket） ========================
+
+/// 从当前光标位置开始，向前（reverse=FALSE）或向后（reverse=TRUE）搜索
+/// `bracket_pair` 中两个字符的任一一个。找到时把光标移到该字符上并返回
+/// TRUE，否则返回 FALSE（对应 `find_a_bracket`）。
+fn find_a_bracket(reverse: bool, bracket_pair: &str) -> bool {
+    let pair = bracket_pair.as_bytes();
+    let of = openfile_ref();
+
+    let mut line = {
+        let r = of.borrow();
+        r.current.clone().unwrap()
+    };
+
+    let mut pointer: usize;
+    if reverse {
+        /* 先离开当前括号。 */
+        let current_x = of.borrow().current_x;
+        if current_x == 0 {
+            let prev = { let r = line.borrow(); r.prev.clone() };
+            match prev.and_then(|w| w.upgrade()) {
+                Some(p) => line = p,
+                None => return false,
+            }
+            pointer = line.borrow().data.len();
+        } else {
+            pointer = chars::step_left(line.borrow().data.as_bytes(), current_x);
+        }
+
+        /* 向后搜索两个感兴趣的括号。 */
+        loop {
+            let data = line.borrow().data.clone();
+            match chars::mbrevstrpbrk(data.as_bytes(), pair, pointer) {
+                Some(found) => {
+                    with_global_mut(|g| {
+                        if let Some(o) = &g.openfile {
+                            let mut o = o.borrow_mut();
+                            o.current = Some(line.clone());
+                            o.current_x = found;
+                        }
+                    });
+                    return true;
+                }
+                None => {
+                    let prev = { let r = line.borrow(); r.prev.clone() };
+                    match prev.and_then(|w| w.upgrade()) {
+                        Some(p) => line = p,
+                        None => return false,
+                    }
+                    pointer = line.borrow().data.len();
+                }
+            }
+        }
+    } else {
+        let current_x = of.borrow().current_x;
+        pointer = chars::step_right(line.borrow().data.as_bytes(), current_x);
+
+        loop {
+            let data = line.borrow().data.clone();
+            match chars::mbstrpbrk(&data.as_bytes()[pointer..], pair) {
+                Some(found) => {
+                    with_global_mut(|g| {
+                        if let Some(o) = &g.openfile {
+                            let mut o = o.borrow_mut();
+                            o.current = Some(line.clone());
+                            o.current_x = pointer + found;
+                        }
+                    });
+                    return true;
+                }
+                None => {
+                    let next = { let r = line.borrow(); r.next.clone() };
+                    match next {
+                        Some(n) => line = n,
+                        None => return false,
+                    }
+                    pointer = 0;
+                }
+            }
+        }
+    }
+}
+
+/// 若光标处是括号，搜索它的互补括号（对应 `do_find_bracket`）。
+pub fn do_find_bracket() {
+    let (was_current, was_x) = with_global(|g| {
+        let of = g.openfile.as_ref().expect("no open file").borrow();
+        (of.current.clone().unwrap(), of.current_x)
+    });
+    let matchbrackets = with_global(|g| g.matchbrackets.clone());
+
+    let Some(matchbrackets) = matchbrackets else {
+        winio::statusline(MessageType::Ahem, &crate::t!("search-not_a_bracket"));
+        return;
+    };
+
+    let (data, current_x) = {
+        let r = was_current.borrow();
+        (r.data.clone(), was_x)
+    };
+    let bytes = data.as_bytes();
+
+    /* 找到 matchbrackets 中光标处字符的位置。 */
+    let Some(ch_pos) = chars::mbstrchr(matchbrackets.as_bytes(), &bytes[current_x..]) else {
+        winio::statusline(MessageType::Ahem, &crate::t!("search-not_a_bracket"));
+        return;
+    };
+
+    /* 半数是左括号的个数（闭括号从中间开始）。 */
+    let charcount = chars::mbstrlen(matchbrackets.as_bytes()) / 2;
+    let mut halfway = 0;
+    let mbytes = matchbrackets.as_bytes();
+    for _ in 0..charcount {
+        halfway += chars::char_length(&mbytes[halfway..]);
+    }
+
+    /* 在闭括号上时反向搜索；否则正向搜索。 */
+    let reverse = ch_pos >= halfway;
+
+    /* 从 ch 向前/向后移动一半字符数得到互补括号。 */
+    let mut wanted_pos = ch_pos;
+    let mut count = charcount;
+    while count > 0 {
+        if reverse {
+            wanted_pos = chars::step_left(mbytes, wanted_pos);
+        } else {
+            wanted_pos += chars::char_length(&mbytes[wanted_pos..]);
+        }
+        count -= 1;
+    }
+
+    let ch_len = chars::char_length(&mbytes[ch_pos..]);
+    let wanted_len = chars::char_length(&mbytes[wanted_pos..]);
+
+    /* 把两个互补括号放入同一字符串。 */
+    let mut bracket_pair = String::new();
+    bracket_pair.push_str(&matchbrackets[ch_pos..ch_pos + ch_len]);
+    bracket_pair.push_str(&matchbrackets[wanted_pos..wanted_pos + wanted_len]);
+
+    let mut balance = 1i32;
+    let ch = &matchbrackets[ch_pos..ch_pos + ch_len];
+
+    while find_a_bracket(reverse, &bracket_pair) {
+        /* 相同括号则增加平衡数，否则减少。 */
+        let (data, current_x) = with_global(|g| {
+            let of = g.openfile.as_ref().expect("no open file").borrow();
+            let c = of.current.clone().unwrap();
+            let d = c.borrow().data.clone();
+            (d, of.current_x)
+        });
+        let found = &data[current_x..current_x + ch_len];
+        if found == ch {
+            balance += 1;
+        } else {
+            balance -= 1;
+        }
+
+        /* 平衡数归零时找到互补括号。 */
+        if balance == 0 {
+            crate::winio::edit_redraw(&was_current, UpdateType::Flowing);
+            return;
+        }
+    }
+
+    winio::statusline(MessageType::Ahem, &crate::t!("search-no_matching_bracket"));
+
+    /* 恢复光标位置。 */
+    with_global_mut(|g| {
+        if let Some(o) = &g.openfile {
+            let mut o = o.borrow_mut();
+            o.current = Some(was_current);
+            o.current_x = was_x;
+        }
+    });
+}

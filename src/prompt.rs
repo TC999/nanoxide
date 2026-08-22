@@ -597,10 +597,14 @@ pub fn run_function(func: FunctionId) {
         FunctionId::DoPaste => cut::paste_text(),
         FunctionId::DoCutToEof => cut::cut_till_eof(),
         FunctionId::DoSearchForward | FunctionId::DoSearchBackward | FunctionId::DoFindNext
-        | FunctionId::DoFindPrevious | FunctionId::DoReplace | FunctionId::DoGoToLine => {
-            /* 搜索/替换/跳转在 search.rs 完整翻译后接入。 */
+        | FunctionId::DoFindPrevious => {
+            /* 搜索/替换在 search.rs 完整翻译后接入。 */
         }
-        FunctionId::DoWriteOut | FunctionId::DoInsertFile | FunctionId::DoExecute => {}
+        FunctionId::DoReplace => crate::search::do_replace(),
+        FunctionId::DoGoToLine => crate::search::do_gotolinecolumn(),
+        FunctionId::DoWriteOut => files::do_writeout(),
+        FunctionId::DoInsertFile => files::do_insertfile(),
+        FunctionId::DoExecute => files::do_execute(),
         FunctionId::DoSpell => text::do_spell(),
         FunctionId::DoLinter => {}
         FunctionId::DoFormatter => text::do_formatter(),
@@ -625,7 +629,10 @@ pub fn run_function(func: FunctionId) {
         FunctionId::DoMark => text::do_mark(),
         FunctionId::DoAnchor => text::do_anchor(),
         FunctionId::DoFullRefresh => winio::full_refresh(),
-        FunctionId::DoJustify => {}
+        FunctionId::DoJustify => text::do_justify(),
+        FunctionId::DoWordCompletion => text::complete_a_word(),
+        FunctionId::DoPrevFile => files::switch_to_prev_buffer(),
+        FunctionId::DoNextFile => files::switch_to_next_buffer(),
         _ => {}
     }
     let _ = files::set_modified;

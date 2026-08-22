@@ -268,6 +268,125 @@ pub fn current_margin() -> usize {
     })
 }
 
+/// 确认行号边距：当缓冲区最高行号所需的边距变化时更新全局
+/// margin / editwincols，并安排全刷新（对应 nano.c 的 `confirm_margin`）。
+pub fn confirm_margin() {
+    let needed = current_margin() as i32;
+    with_global_mut(|g| {
+        if needed != g.margin {
+            let keep_focus = g.margin > 0 && g.focusing;
+            g.margin = needed;
+            g.editwincols = g
+                .COLS
+                .saturating_sub(needed as usize)
+                .saturating_sub(if g.sidebar { 1 } else { 0 });
+            g.focusing = keep_focus;
+            /* 边距变化——安排全刷新。 */
+            g.refresh_needed = true;
+        }
+    });
+}
+
+/// 显示只读模式警告（对应 nano.c 的 `print_view_warning`）。
+pub fn print_view_warning() {
+    statusline(MessageType::Ahem, &crate::t!("winio-view_warning"));
+}
+
+/// 绘制极简状态栏（对应 winio.c 的 `minibar`）：在底部信息行显示
+/// 文件名、修改标记、光标行/列和行号百分比。
+/// 仅当 MINIBAR 模式、非 ZERO、且行数足够时由主循环调用。
+pub fn minibar() {
+    if !ISSET(MINIBAR) || ISSET(ZERO) {
+        return;
+    }
+    let (cols, lines) = with_global(|g| (g.COLS, g.LINES));
+    if lines <= 1 {
+        return;
+    }
+
+    let mut stdout = io::stdout();
+    let status_row = lines.saturating_sub(3) as u16;
+
+    /* 用 MINI_INFOBAR 颜色对绘制整条底色条。 */
+    let pair = color::interface_color_pair(MINI_INFOBAR);
+    apply_attributes(&mut stdout, pair);
+    let _ = execute!(stdout, cursor::MoveTo(0, status_row));
+    let _ = write!(stdout, "{:width$}", "", width = cols);
+
+    let (filename, modified, lineno, filebot_lineno, column, has_anchor) = with_global(|g| {
+        let of = g.openfile.as_ref().map(|o| o.borrow());
+        let filename = of
+            .as_ref()
+            .and_then(|r| r.filename.clone())
+            .unwrap_or_default();
+        let filename = if filename.is_empty() {
+            crate::t!("winio-nameless")
+        } else {
+            filename
+        };
+        (
+            filename,
+            of.as_ref().map(|r| r.modified).unwrap_or(false),
+            of.as_ref().and_then(|r| r.current.as_ref()).map(|c| c.borrow().lineno).unwrap_or(1),
+            of.as_ref().and_then(|r| r.filebot.as_ref()).map(|b| b.borrow().lineno).unwrap_or(1),
+            of.as_ref().map(|r| r.current_x + 1).unwrap_or(1),
+            of.as_ref().and_then(|r| r.current.as_ref()).map(|c| c.borrow().has_anchor).unwrap_or(false),
+        )
+    });
+
+    /* 文件名（过长时省略号截断）加修改星号。 */
+    let mut left = String::new();
+    if cols > 4 {
+        let name_max = cols.saturating_sub(10);
+        if utils::breadth(filename.as_bytes()) > name_max {
+            let start = utils::actual_x(filename.as_bytes(), name_max.saturating_sub(8));
+            left.push_str("...");
+            left.push_str(&filename[start..]);
+        } else {
+            left.push_str(&filename);
+        }
+        left.push_str(if modified { " *" } else { "  " });
+    }
+
+    /* 右侧：行号百分比。 */
+    let pct = if filebot_lineno > 0 {
+        100 * lineno / filebot_lineno
+    } else {
+        0
+    };
+    let right = format!("{:3}%", pct);
+    let right_len = utils::breadth(right.as_bytes());
+
+    /* 光标位置（行,列）尽量显示。 */
+    let location = format!("{},{}", lineno, column);
+    let loc_len = utils::breadth(location.as_bytes());
+    let anchor_mark = if has_anchor { "†" } else { "" };
+
+    let _ = execute!(stdout, cursor::MoveTo(0, status_row));
+    let mut col = 0usize;
+    let _ = write!(stdout, "{}", left);
+    col += utils::breadth(left.as_bytes());
+
+    /* 行/列位置：放在中间偏右。 */
+    if col + loc_len + right_len + 6 < cols {
+        let _ = execute!(stdout, cursor::MoveTo((cols - right_len - loc_len - 6).min(cols.saturating_sub(1)) as u16, status_row));
+        let _ = write!(stdout, "{}", location);
+    }
+
+    /* 锚点标记。 */
+    if col + 6 < cols && !anchor_mark.is_empty() {
+        let _ = execute!(stdout, cursor::MoveTo(cols.saturating_sub(right_len + 5) as u16, status_row));
+        let _ = write!(stdout, "{}", anchor_mark);
+    }
+
+    /* 百分比（最右）。 */
+    let _ = execute!(stdout, cursor::MoveTo(cols.saturating_sub(right_len + 1) as u16, status_row));
+    let _ = write!(stdout, "{}", right);
+
+    reset_attributes(&mut stdout);
+    let _ = stdout.flush();
+}
+
 /// 刷新屏幕（逐行覆盖重绘，避免全屏 Clear 造成的闪烁）。
 pub fn refresh_screen() {
     let mut stdout = io::stdout();
@@ -1872,7 +1991,7 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     if key == 7 { help::do_help(); return true; }                               // Ctrl+G
     if key == 8 { cut::do_backspace(); edit_refresh(); return true; }           // Ctrl+H
     if key == 9 { text::do_tab(); edit_refresh(); return true; }                // Ctrl+I (Tab)
-    if key == 10 { return true; }                                               // Ctrl+J
+    if key == 10 { text::do_justify(); edit_refresh(); return true; }             // Ctrl+J: 对齐段落
     if key == 11 { cut::cut_text(); edit_refresh(); return true; }              // Ctrl+K
     if key == 12 { text::do_refresh(); edit_refresh(); return true; }           // Ctrl+L
     if key == 13 { text::do_enter(); edit_refresh(); return true; }             // Ctrl+M (Enter)
@@ -1946,6 +2065,10 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     // 其他
     if key == KEY_IC { text::do_mark(); edit_refresh(); return true; }
     if key == KEY_SUSPEND { text::do_suspend(); return true; }
+    if key == 29 { text::complete_a_word(); edit_refresh(); return true; }        // Ctrl+]: 单词补全
+    if key == 0x25D { search::do_find_bracket(); edit_refresh(); return true; }   // M-]: 括号匹配
+    if key == 0x22C { files::switch_to_prev_buffer(); edit_refresh(); return true; } // M-,: 前一个缓冲区
+    if key == 0x22E { files::switch_to_next_buffer(); edit_refresh(); return true; } // M-.: 下一个缓冲区
     if key == ESC_CODE as i32 { return true; } // 忽略单独的 Esc
 
     false

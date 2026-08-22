@@ -10,9 +10,11 @@
 use nano_rs::definitions::{with_global, with_global_mut};
 
 /// 初始化全局状态与 i18n（locales 指向仓库内的 locales/ 目录）。
+/// 固定 LANG=en-US，使断言不受开发机系统语言影响。
 fn setup() {
     let locales = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales");
     std::env::set_var("NANORS_LOCALES", locales);
+    std::env::set_var("LANG", "en-US");
     nano_rs::global::global_init();
     nano_rs::i18n::init();
     with_global_mut(|g| {
