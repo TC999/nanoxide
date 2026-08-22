@@ -847,17 +847,18 @@ pub fn do_left() {
     {
         let mut of_ref = of.borrow_mut();
         if of_ref.current_x > 0 {
+            /* current 在本分支内不变：循环外取一次 data 切片，避免每次迭代
+             * clone 整行字符串。原实现每步都 cur.borrow().data.clone()。 */
             let cur = of_ref.current.clone().unwrap();
             let data = cur.borrow().data.clone();
-            of_ref.current_x = chars::step_left(data.as_bytes(), of_ref.current_x);
+            let bytes = data.as_bytes();
+            of_ref.current_x = chars::step_left(bytes, of_ref.current_x);
             /* 跳过零宽字符。 */
             while of_ref.current_x > 0 {
-                let cur = of_ref.current.clone().unwrap();
-                let data = cur.borrow().data.clone();
-                if !chars::is_zerowidth(&data.as_bytes()[of_ref.current_x..]) {
+                if !chars::is_zerowidth(&bytes[of_ref.current_x..]) {
                     break;
                 }
-                of_ref.current_x = chars::step_left(data.as_bytes(), of_ref.current_x);
+                of_ref.current_x = chars::step_left(bytes, of_ref.current_x);
             }
         } else {
             let is_filetop = {
@@ -888,18 +889,19 @@ pub fn do_right() {
         let mut of_ref = of.borrow_mut();
         let cur = of_ref.current.clone().unwrap();
         let data = cur.borrow().data.clone();
-        let at_eol = data.as_bytes().get(of_ref.current_x).copied().unwrap_or(0) == 0;
+        let bytes = data.as_bytes();
+        let at_eol = bytes.get(of_ref.current_x).copied().unwrap_or(0) == 0;
         if !at_eol {
-            of_ref.current_x = chars::step_right(data.as_bytes(), of_ref.current_x);
+            /* current 在本分支内不变：循环外取一次 data 切片，避免每次迭代
+             * clone 整行字符串。原实现每步都 cur.borrow().data.clone()。 */
+            of_ref.current_x = chars::step_right(bytes, of_ref.current_x);
             /* 跳过零宽字符。 */
             loop {
-                let cur = of_ref.current.clone().unwrap();
-                let data = cur.borrow().data.clone();
-                let has_next_char = data.as_bytes().get(of_ref.current_x).copied().unwrap_or(0) != 0;
-                if !has_next_char || !chars::is_zerowidth(&data.as_bytes()[of_ref.current_x..]) {
+                let has_next_char = bytes.get(of_ref.current_x).copied().unwrap_or(0) != 0;
+                if !has_next_char || !chars::is_zerowidth(&bytes[of_ref.current_x..]) {
                     break;
                 }
-                of_ref.current_x = chars::step_right(data.as_bytes(), of_ref.current_x);
+                of_ref.current_x = chars::step_right(bytes, of_ref.current_x);
             }
         } else {
             let is_filebot = {
@@ -908,7 +910,6 @@ pub fn do_right() {
                 }).unwrap_or(false)
             };
             if !is_filebot {
-                let cur = of_ref.current.clone().unwrap();
                 let next = { let r = cur.borrow(); r.next.clone() }.unwrap();
                 of_ref.current = Some(next);
                 of_ref.current_x = 0;

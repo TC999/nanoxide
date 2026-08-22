@@ -1729,6 +1729,17 @@ pub fn display_string(text: &[u8], column: usize, span: usize, isdata: bool, isp
     let mut col = start_col;
     let mut converted: Vec<u8> = Vec::new();
 
+    /* 预取重绘相关的全局配置到局部变量，避免在下面逐字符循环内每遇到
+     * 空格/制表符/多字节字符都 with_global() 借用 + clone。原实现每次空格
+     * 或制表符都触发一次全局借用与 whitespace 克隆，整屏重绘时每行每字符
+     * 都付出此代价。 */
+    let (ws_bytes, wl0, wl1, tabsize, on_a_vt) = with_global(|g| {
+        let ws = g.whitespace.clone().unwrap_or_default();
+        let (a, b) = g.whitelen;
+        (ws, a, b, g.tabsize, g.on_a_vt)
+    });
+    let show_whitespace = ISSET(WHITESPACE_DISPLAY);
+
     /* 若第一个字符在左边缘之前开始，或被 "<" 记号覆盖，显示占位符。 */
     if (start_col < column || (start_col > 0 && isdata && !ISSET(SOFTWRAP)))
         && chars::byte_at(text, pos) != 0
@@ -1765,13 +1776,10 @@ pub fn display_string(text: &[u8], column: usize, span: usize, isdata: bool, isp
 
         /* 空格显示为可见字符或空格。 */
         if c == b' ' {
-            if ISSET(WHITESPACE_DISPLAY) {
-                let (ws, (wl0, wl1)) = with_global(|g| (g.whitespace.clone(), g.whitelen));
-                if let Some(w) = ws {
-                    for i in wl0..wl0 + wl1 {
-                        if i < w.len() {
-                            converted.push(w[i]);
-                        }
+            if show_whitespace {
+                for i in wl0..wl0 + wl1 {
+                    if i < ws_bytes.len() {
+                        converted.push(ws_bytes[i]);
                     }
                 }
             } else {
@@ -1784,17 +1792,13 @@ pub fn display_string(text: &[u8], column: usize, span: usize, isdata: bool, isp
 
         /* 制表符显示为可见字符加空格，或仅空格。 */
         if c == b'\t' {
-            let tabsize = with_global(|g| g.tabsize);
-            let show_ws = ISSET(WHITESPACE_DISPLAY)
+            let show_ws = show_whitespace
                 && (converted.len() > 0 || !isdata || !ISSET(SOFTWRAP)
                     || col % tabsize == 0 || col == start_col);
             if show_ws {
-                let (ws, (wl0, _)) = with_global(|g| (g.whitespace.clone(), g.whitelen));
-                if let Some(w) = ws {
-                    for i in 0..wl0 {
-                        if i < w.len() {
-                            converted.push(w[i]);
-                        }
+                for i in 0..wl0 {
+                    if i < ws_bytes.len() {
+                        converted.push(ws_bytes[i]);
                     }
                 }
             } else {
@@ -1829,10 +1833,9 @@ pub fn display_string(text: &[u8], column: usize, span: usize, isdata: bool, isp
             }
             Ok((wc, charlen)) => {
                 let charwidth = chars::wcwidth(wc);
-                let on_vt = with_global(|g| g.on_a_vt);
                 if charwidth == 0 {
                     /* 在 Linux 控制台上跳过零宽字符。 */
-                    if on_vt {
+                    if on_a_vt {
                         pos += charlen;
                         continue;
                     }

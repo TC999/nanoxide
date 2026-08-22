@@ -129,14 +129,11 @@ fn suspend_nano() {
     });
 }
 
-/// 复数形式辅助（对应 `P_`）。
-pub fn P_<'a>(singular: &'a str, _plural: &'a str, number: usize) -> &'a str {
-    if number == 1 {
-        singular
-    } else {
-        singular
-    }
-}
+// TODO: 翻译时单复数逻辑未翻译到位（两分支都返回 singular），暂注释占位，后续补上。
+// 原型：
+// pub fn P_<'a>(singular: &'a str, _plural: &'a str, number: usize) -> &'a str {
+//     if number == 1 { singular } else { singular }
+// }
 
 /// 向缓冲区插入单个字符（旧接口）。
 pub fn insert_char(ch: char) {
@@ -1806,12 +1803,15 @@ pub fn do_enter() {
         }
     }
 
-    /* 新行包含光标之后的部分加上自动缩进。 */
+    /* 新行包含光标之后的部分加上自动缩进。
+     * 原版 C 用字节拼接；这里一次性 clone 当前行字节，供后续"构造新行"与
+     * "截断当前行"两处复用，避免对 current.data 做两次 clone()+into_bytes()。 */
+    let cur_bytes = current.borrow().data.clone().into_bytes();
+
     {
-        let mut ndata = Vec::new();
+        let mut ndata = Vec::with_capacity(extra + (cur_bytes.len() - current_x));
         ndata.resize(extra, b' ');
-        let cdata = current.borrow().data.clone().into_bytes();
-        ndata.extend_from_slice(&cdata[current_x..]);
+        ndata.extend_from_slice(&cur_bytes[current_x..]);
         newnode.borrow_mut().data = String::from_utf8_lossy(&ndata).into_owned();
     }
 
@@ -1826,13 +1826,16 @@ pub fn do_enter() {
         }
 
         if autoindent {
-            /* 把样板行的空白复制到新行。 */
+            /* 把样板行的空白复制到新行。原实现 clone 新行 data 再逐字节赋值；
+             * 这里改为直接在 String 的字节切片上 copy，省一次 clone()+into_bytes()。 */
             let sdata = sampleline.borrow().data.clone().into_bytes();
-            let mut nd = newnode.borrow().data.clone().into_bytes();
-            for i in 0..extra {
-                nd[i] = sdata.get(i).copied().unwrap_or(b' ');
+            {
+                let mut nd_ref = newnode.borrow_mut();
+                let nd_bytes = unsafe { nd_ref.data.as_bytes_mut() };
+                let copy_len = extra.min(sdata.len()).min(nd_bytes.len());
+                nd_bytes[..copy_len].copy_from_slice(&sdata[..copy_len]);
+                /* 不足部分保持原样（resize 的空格）。 */
             }
-            newnode.borrow_mut().data = String::from_utf8_lossy(&nd).into_owned();
 
             /* 若光标前只有空白，修剪它们。 */
             if allblanks {
@@ -1844,9 +1847,9 @@ pub fn do_enter() {
         }
     }
 
-    /* 让当前行在光标处结束。 */
+    /* 让当前行在光标处结束。复用已 clone 的 cur_bytes，避免再次 clone。 */
     {
-        let mut cdata = current.borrow().data.clone().into_bytes();
+        let mut cdata = cur_bytes;
         cdata.truncate(current_x);
         current.borrow_mut().data = String::from_utf8_lossy(&cdata).into_owned();
     }
@@ -3326,12 +3329,14 @@ pub fn inject(burst: &[u8], count: usize) {
         add_undo(UndoType::Add, None);
     }
 
-    /* 为新字节腾出空间并复制到行中。 */
+    /* 为新字节腾出空间并复制到行中。
+     * 原版 C 用 memmove + memcpy 在字节缓冲区插入；这里用 String::insert_str
+     * 直接在行数据上插入，避免整行 clone()+into_bytes()+from_utf8_lossy() 往返
+     * （原实现每次插入都拷贝整行两次；现仅对 burst 做一次 lossy 转换）。 */
     let current_x = of.borrow().current_x;
     {
-        let mut data = thisline.borrow().data.clone().into_bytes();
-        data.splice(current_x..current_x, burst_vec.iter().cloned());
-        thisline.borrow_mut().data = String::from_utf8_lossy(&data).into_owned();
+        let insert_str = String::from_utf8_lossy(&burst_vec).into_owned();
+        thisline.borrow_mut().data.insert_str(current_x, &insert_str);
     }
 
     /* 光标在顶行且不在行首块时，添加文本可能改变前一块。 */

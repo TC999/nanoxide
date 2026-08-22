@@ -109,10 +109,8 @@ pub fn find_next_match(needle: &str, start_line: Option<LineRef>, start_x: usize
     None
 }
 
-/// 执行替换。
-pub fn do_replace_old_removed() {
-    // 已被 search_init/do_replace_loop 替代
-}
+// TODO: 翻译时未翻译到位，暂注释占位，后续补上。
+// 原型：pub fn do_replace_old_removed() { /* 已被 search_init/do_replace_loop 替代 */ }
 
 /// 替换所有匹配。
 pub fn replace_all(needle: &str, replacement: &str) -> usize {
