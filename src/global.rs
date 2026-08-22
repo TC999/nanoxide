@@ -440,6 +440,14 @@ const ALT_SHIFT_DOT: i32 = 0x43E;
 
 /// 注册提示/浏览器/其他菜单的快捷键（对应 global.c 的其余部分）。
 pub fn shortcut_init_rest() {
+    // Go To Line / Search 菜单专属快捷键（对应 C 版 global.c 的
+    // MGOTOLINE 相关绑定；须在共享提示绑定之前，保证优先匹配）。
+    add_to_sclist(MWHEREIS | MGOTOLINE, "^T", 20, FunctionId::FlipGoto, 0);
+    add_to_sclist(MGOTOLINE, "^W", 23, FunctionId::DoParaBegin, 0);
+    add_to_sclist(MGOTOLINE, "^O", 15, FunctionId::DoParaEnd, 0);
+    add_to_sclist(MGOTOLINE | MWHEREIS, "^Y", 25, FunctionId::DoFirstLine, 0);
+    add_to_sclist(MGOTOLINE | MWHEREIS, "^V", 22, FunctionId::DoLastLine, 0);
+
     // 提示菜单：方向键与编辑键
     let mmi = MMAIN | MWHEREIS | MREPLACE | MREPLACEWITH | MGOTOLINE | MINSERTFILE
         | MWRITEFILE | MEXECUTE | MSPELL | MLINTER;
@@ -453,7 +461,7 @@ pub fn shortcut_init_rest() {
     add_to_sclist(mmi, "M-Right", ALT_RIGHT, FunctionId::DoNextWord, 0);
     add_to_sclist(mmi, "M-Backspace", ALT_BACKSPACE, FunctionId::DoBackspace, 0);
     add_to_sclist(mmi, "M-D", ALT_DELETE, FunctionId::DoCut, 0);
-    add_to_sclist(mmi, "^V", 22, FunctionId::DoVerbatimInput, 0);
+    add_to_sclist(mmi, "M-V", 0x256, FunctionId::DoVerbatimInput, 0);
     add_to_sclist(mmi, "^X", 24, FunctionId::DoCut, 0);
     add_to_sclist(mmi, "^K", 11, FunctionId::DoCut, 0);
     add_to_sclist(mmi, "^U", 21, FunctionId::DoPaste, 0);

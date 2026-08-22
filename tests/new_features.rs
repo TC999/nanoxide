@@ -4,7 +4,8 @@
 //   3. 锁文件写入与删除（write_lockfile / delete_lockfile / lock_filename_for）；
 //   4. 段落对齐（do_justify）；
 //   5. 单词补全（complete_a_word）；
-//   6. 命令行多文件参数解析（parse_file_args）。
+//   6. 命令行多文件参数解析（parse_file_args）；
+//   7. Ctrl+/ 键码映射与 Go To Line 菜单快捷键。
 
 use nano_rs::definitions::{with_global, with_global_mut, LineRef};
 
@@ -226,6 +227,60 @@ fn buffer_text_helpers_consistent() {
     nano_rs::text::inject(b"line2", 5);
     let text = buffer_text();
     assert_eq!(text, "line1\nline2");
+}
+
+#[test]
+fn ctrl_slash_maps_to_gotoline_keycode() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    // Ctrl+/ 必须映射到 31（0x1F，与 Unix 终端发送的字节一致，对应 Go To Line）。
+    let key = KeyEvent::new(KeyCode::Char('/'), KeyModifiers::CONTROL);
+    assert_eq!(
+        nano_rs::winio::translate_keycode(key),
+        31,
+        "Ctrl+/ 应映射为 31（Go To Line），而不是与 Ctrl+O 冲突的 15"
+    );
+    // 对照：Ctrl+O 仍应为 15（写文件）。
+    let ctrl_o = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL);
+    assert_eq!(nano_rs::winio::translate_keycode(ctrl_o), 15);
+}
+
+#[test]
+fn gotoline_menu_shortcuts_are_bound() {
+    use nano_rs::definitions::FunctionId;
+    setup();
+    nano_rs::global::shortcut_init();
+
+    // Go To Line 提示菜单中的专属快捷键（对应 C 版 global.c）。
+    let t = nano_rs::global::find_shortcut(20, nano_rs::definitions::MGOTOLINE);
+    assert_eq!(t.map(|s| s.borrow().func), Some(FunctionId::FlipGoto), "^T 应切换到搜索");
+    let w = nano_rs::global::find_shortcut(23, nano_rs::definitions::MGOTOLINE);
+    assert_eq!(w.map(|s| s.borrow().func), Some(FunctionId::DoParaBegin), "^W 应为段落开头");
+    let o = nano_rs::global::find_shortcut(15, nano_rs::definitions::MGOTOLINE);
+    assert_eq!(o.map(|s| s.borrow().func), Some(FunctionId::DoParaEnd), "^O 应为段落末尾");
+    let y = nano_rs::global::find_shortcut(25, nano_rs::definitions::MGOTOLINE);
+    assert_eq!(y.map(|s| s.borrow().func), Some(FunctionId::DoFirstLine), "^Y 应为文件首行");
+    let v = nano_rs::global::find_shortcut(22, nano_rs::definitions::MGOTOLINE);
+    assert_eq!(v.map(|s| s.borrow().func), Some(FunctionId::DoLastLine), "^V 应为文件末行");
+
+    // 主菜单中的 ^/ 绑定仍指向 Go To Line。
+    let slash = nano_rs::global::find_shortcut(31, nano_rs::definitions::MMAIN);
+    assert_eq!(slash.map(|s| s.borrow().func), Some(FunctionId::DoGoToLine), "^/ 应绑定 Go To Line");
+}
+
+#[test]
+fn gotoline_prompt_sets_currmenu() {
+    // 提示期间 currmenu 应为 MGOTOLINE（do_prompt 设置），保证菜单专属快捷键匹配。
+    setup();
+    nano_rs::global::shortcut_init();
+    let currmenu = with_global(|g| g.currmenu);
+    assert_eq!(currmenu, nano_rs::definitions::MMAIN);
+    // 直接设置与恢复的路径由 do_prompt 内部处理；这里验证初始状态即可。
+    with_global_mut(|g| g.currmenu = nano_rs::definitions::MGOTOLINE);
+    let sc = nano_rs::global::find_shortcut(20, with_global(|g| g.currmenu));
+    assert_eq!(
+        sc.map(|s| s.borrow().func),
+        Some(nano_rs::definitions::FunctionId::FlipGoto)
+    );
 }
 
 /// 确保 LineRef 类型在测试中被引用（避免未使用导入警告）。

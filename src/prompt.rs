@@ -633,6 +633,7 @@ pub fn run_function(func: FunctionId) {
         FunctionId::DoWordCompletion => text::complete_a_word(),
         FunctionId::DoPrevFile => files::switch_to_prev_buffer(),
         FunctionId::DoNextFile => files::switch_to_next_buffer(),
+        FunctionId::FlipGoto => crate::search::flip_goto(),
         _ => {}
     }
     let _ = files::set_modified;
@@ -658,6 +659,10 @@ pub fn do_prompt(
     let was_typing_x = get_typing_x();
     let saved_prompt = with_global(|g| g.prompt.clone());
     let was_currmenu = with_global(|g| g.currmenu);
+
+    /* 提示期间切换到该菜单（对应 C 版 do_prompt 中 currmenu = menu），
+     * 使菜单专属快捷键（如 MGOTOLINE 的 ^W/^O/^Y/^V/^T）能正确匹配。 */
+    with_global_mut(|g| g.currmenu = menu);
 
     /* 立即切换到该菜单的底部快捷键（对应 C 的 bottombars(menu)）。 */
     winio::bottombars(menu);
@@ -685,10 +690,9 @@ pub fn do_prompt(
 
     /* 恢复之前的提示和可能的输入位置。 */
     with_global_mut(|g| g.prompt = saved_prompt);
-    /* 提示结束，切回原始菜单（对应 C 中主循环根据 currmenu 恢复底部快捷键）。 */
-    if with_global(|g| g.currmenu != was_currmenu) {
-        winio::bottombars(was_currmenu);
-    }
+    /* 提示结束，恢复原始菜单并重绘底部快捷键。 */
+    with_global_mut(|g| g.currmenu = was_currmenu);
+    winio::bottombars(was_currmenu);
     if function == Some(FunctionId::DoCancel) || function == Some(FunctionId::DoEnter)
         || function == Some(FunctionId::ToFirstFile) || function == Some(FunctionId::ToLastFile)
         || function == Some(FunctionId::DoFirstLine) || function == Some(FunctionId::DoLastLine)

@@ -130,8 +130,14 @@ pub fn translate_keycode(key: KeyEvent) -> i32 {
             if key.modifiers == KeyModifiers::CONTROL {
                 // Ctrl + ASCII 字符：按 nano 原语义 c & 0x1F 编码。
                 // 例如 Ctrl+A → 1, Ctrl+\ → 28, Ctrl+[ → 27 (等价 ESC)。
+                // 特例：Ctrl+/ 在终端上发送 0x1F（与 Ctrl+_ 相同，对应
+                // Go To Line 功能），而 '/' & 0x1F 会错误地得到 15（Ctrl+O）。
                 if c.is_ascii() {
-                    (c as u8 & 0x1F) as i32
+                    if c == '/' {
+                        0x1F
+                    } else {
+                        (c as u8 & 0x1F) as i32
+                    }
                 } else {
                     c as i32
                 }
@@ -2066,6 +2072,7 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     if key == KEY_IC { text::do_mark(); edit_refresh(); return true; }
     if key == KEY_SUSPEND { text::do_suspend(); return true; }
     if key == 29 { text::complete_a_word(); edit_refresh(); return true; }        // Ctrl+]: 单词补全
+    if key == 31 { search::do_gotolinecolumn(); edit_refresh(); return true; }   // Ctrl+/ 或 Ctrl+_: 跳转到行
     if key == 0x25D { search::do_find_bracket(); edit_refresh(); return true; }   // M-]: 括号匹配
     if key == 0x22C { files::switch_to_prev_buffer(); edit_refresh(); return true; } // M-,: 前一个缓冲区
     if key == 0x22E { files::switch_to_next_buffer(); edit_refresh(); return true; } // M-.: 下一个缓冲区

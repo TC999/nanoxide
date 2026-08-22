@@ -1011,8 +1011,15 @@ pub fn ask_for_and_do_replacements() {
 // ======================== 跳转到行与列（对应 do_gotolinecolumn） ========================
 
 /// 实现 Go To Line 菜单：询问行号（可带列号）并跳转
-/// （对应 `do_gotolinecolumn` / `ask_for_line_and_column`）。
+/// （对应 `do_gotolinecolumn`）。
 pub fn do_gotolinecolumn() {
+    ask_for_line_and_column("");
+}
+
+/// 询问行号与列号，然后跳转到那里（对应 `ask_for_line_and_column`）。
+/// `provided` 为提示栏的初始内容；支持 `++`/`--` 相对跳转与
+/// `行,列` 形式（逗号开头时视口静止）。
+pub fn ask_for_line_and_column(provided: &str) {
     let (mut line, mut column) = with_global(|g| {
         let of = g.openfile.as_ref().expect("no open file").borrow();
         let cur_lineno = of.current.as_ref().map(|c| c.borrow().lineno).unwrap_or(1);
@@ -1021,13 +1028,14 @@ pub fn do_gotolinecolumn() {
 
     let response = crate::prompt::do_prompt(
         MGOTOLINE,
-        "",
+        provided,
         None,
         Some(winio::edit_refresh),
         &crate::t!("search-enter_line_column"),
     );
 
-    /* 取消或运行了函数时完成。 */
+    /* 取消或运行了函数（如 ^T 切换搜索）时完成。
+     * 注：^T 的 FlipGoto 已在 do_prompt 内部通过 run_function 处理。 */
     if response < 0 {
         winio::statusbar(&crate::t!("search-cancelled"));
         return;
@@ -1072,6 +1080,21 @@ pub fn do_gotolinecolumn() {
         },
     );
     with_global_mut(|g| g.refresh_needed = true);
+}
+
+/// 在 Go To Line 提示与 Search 提示之间切换（对应 `flip_goto`）。
+/// 在跳转提示中按 ^T 进入搜索（保留输入），在搜索提示中按 ^T 进入跳转。
+pub fn flip_goto() {
+    UNSET(BACKWARDS_SEARCH);
+    let currmenu = with_global(|g| g.currmenu);
+    let answer = crate::prompt::get_answer();
+    if currmenu == MGOTOLINE {
+        /* 从 Go To Line 切换到 Search。 */
+        search_init(false, true);
+    } else {
+        /* 从 Search 切换到 Go To Line，使用已输入的回答。 */
+        ask_for_line_and_column(&answer);
+    }
 }
 
 // ======================== 括号匹配（对应 find_a_bracket / do_find_bracket） ========================
