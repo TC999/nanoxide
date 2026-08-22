@@ -89,7 +89,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "nano-rs"
+name = "nanoxide"
 version = "0.1.0"
 dependencies = [
  "crossterm",

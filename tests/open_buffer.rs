@@ -7,7 +7,7 @@
 //   3. 文件存在 → FileLoaded，正常加载；
 //   4. 空文件名 → 不带文件名的空白缓冲区。
 
-use nano_rs::definitions::{with_global, with_global_mut};
+use nanoxide::definitions::{with_global, with_global_mut};
 
 /// 初始化全局状态与 i18n（locales 指向仓库内的 locales/ 目录）。
 /// 固定 LANG=en-US，使断言不受开发机系统语言影响。
@@ -15,8 +15,8 @@ fn setup() {
     let locales = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales");
     std::env::set_var("NANORS_LOCALES", locales);
     std::env::set_var("LANG", "en-US");
-    nano_rs::global::global_init();
-    nano_rs::i18n::init();
+    nanoxide::global::global_init();
+    nanoxide::i18n::init();
     with_global_mut(|g| {
         g.COLS = 80;
         g.LINES = 24;
@@ -25,7 +25,7 @@ fn setup() {
         g.openfile = None;
         g.statusbar_msg.clear();
         g.statusbar_centered = false;
-        g.lastmessage = nano_rs::definitions::MessageType::Vacuum;
+        g.lastmessage = nanoxide::definitions::MessageType::Vacuum;
     });
 }
 
@@ -48,11 +48,11 @@ fn openfile_filename() -> Option<String> {
 fn open_nonexistent_shows_new_file() {
     setup();
     let name = "_rustnano_nonexistent_xyz.tmp";
-    let result = nano_rs::files::open_buffer(name);
-    assert!(matches!(result, nano_rs::files::OpenBufferResult::NewFile));
+    let result = nanoxide::files::open_buffer(name);
+    assert!(matches!(result, nanoxide::files::OpenBufferResult::NewFile));
 
     // main.rs 的 NewFile 分支：在欢迎消息（welcome-message）的位置居中显示。
-    nano_rs::winio::statusbar_centered(&format!("[ {} ]", nano_rs::t!("files-new_file")));
+    nanoxide::winio::statusbar_centered(&format!("[ {} ]", nanoxide::t!("files-new_file")));
     assert_eq!(statusbar_msg(), "[ New File ]");
 
     // 与原版 open_file 一致：新文件缓冲区也带文件名。
@@ -64,16 +64,16 @@ fn open_nonexistent_shows_new_file() {
 #[test]
 fn open_directory_shows_is_a_directory() {
     setup();
-    let result = nano_rs::files::open_buffer("tests");
-    assert!(matches!(result, nano_rs::files::OpenBufferResult::Directory));
+    let result = nanoxide::files::open_buffer("tests");
+    assert!(matches!(result, nanoxide::files::OpenBufferResult::Directory));
 
     assert_eq!(statusbar_msg(), "[ 'tests' is a directory ]");
     // 不创建带目录名的缓冲区。
     assert!(openfile_filename().is_none());
 
     // 模拟 main.rs 的 Directory 分支：打开空白缓冲区供编辑。
-    let blank = nano_rs::files::open_buffer("");
-    assert!(matches!(blank, nano_rs::files::OpenBufferResult::FileLoaded));
+    let blank = nanoxide::files::open_buffer("");
+    assert!(matches!(blank, nanoxide::files::OpenBufferResult::FileLoaded));
     assert!(openfile_filename().is_none());
 }
 
@@ -81,8 +81,8 @@ fn open_directory_shows_is_a_directory() {
 #[test]
 fn open_existing_file_loads() {
     setup();
-    let result = nano_rs::files::open_buffer("Cargo.toml");
-    assert!(matches!(result, nano_rs::files::OpenBufferResult::FileLoaded));
+    let result = nanoxide::files::open_buffer("Cargo.toml");
+    assert!(matches!(result, nanoxide::files::OpenBufferResult::FileLoaded));
     assert_eq!(openfile_filename().as_deref(), Some("Cargo.toml"));
     assert!(statusbar_msg().is_empty());
 }
@@ -91,7 +91,7 @@ fn open_existing_file_loads() {
 #[test]
 fn open_empty_filename_creates_blank_buffer() {
     setup();
-    let result = nano_rs::files::open_buffer("");
-    assert!(matches!(result, nano_rs::files::OpenBufferResult::FileLoaded));
+    let result = nanoxide::files::open_buffer("");
+    assert!(matches!(result, nanoxide::files::OpenBufferResult::FileLoaded));
     assert!(openfile_filename().is_none());
 }

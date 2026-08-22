@@ -4,9 +4,9 @@
 //! 按键），无法在无终端的环境中直接测试；这里覆盖其"未修改直接退出"路径，
 //! 以及"输入文本 → 标记已修改 → 保存后清除"的标记生命周期。
 
-use nano_rs::definitions::*;
-use nano_rs::global::global_init;
-use nano_rs::files::make_new_buffer;
+use nanoxide::definitions::*;
+use nanoxide::global::global_init;
+use nanoxide::files::make_new_buffer;
 
 fn setup() {
     global_init();
@@ -26,8 +26,8 @@ fn setup() {
 fn do_exit_unmodified_quits_immediately() {
     setup();
     with_global_mut(|g| g.we_are_running = true);
-    assert!(!nano_rs::files::is_modified(), "新缓冲区未修改");
-    nano_rs::text::do_exit();
+    assert!(!nanoxide::files::is_modified(), "新缓冲区未修改");
+    nanoxide::text::do_exit();
     let running = with_global(|g| g.we_are_running);
     assert!(!running, "未修改时 do_exit 应直接退出");
 }
@@ -36,40 +36,40 @@ fn do_exit_unmodified_quits_immediately() {
 #[test]
 fn typing_marks_buffer_modified() {
     setup();
-    assert!(!nano_rs::files::is_modified());
-    nano_rs::text::inject(b"abc", 3);
-    assert!(nano_rs::files::is_modified(), "输入文本后应标记为已修改");
+    assert!(!nanoxide::files::is_modified());
+    nanoxide::text::inject(b"abc", 3);
+    assert!(nanoxide::files::is_modified(), "输入文本后应标记为已修改");
 }
 
 /// 删除操作同样应标记为已修改。
 #[test]
 fn deletion_marks_buffer_modified() {
     setup();
-    nano_rs::text::inject(b"abc", 3);
-    nano_rs::cut::do_backspace();
-    assert!(nano_rs::files::is_modified(), "删除字符后应标记为已修改");
+    nanoxide::text::inject(b"abc", 3);
+    nanoxide::cut::do_backspace();
+    assert!(nanoxide::files::is_modified(), "删除字符后应标记为已修改");
 }
 
 /// 没有打开任何缓冲区时 is_modified 应返回 false（do_exit 不会误判）。
 #[test]
 fn is_modified_false_without_openfile() {
     global_init();
-    assert!(!nano_rs::files::is_modified());
+    assert!(!nanoxide::files::is_modified());
 }
 
 /// 保存成功后应清除修改标记（do_exit 据此判定保存成功并退出）。
 #[test]
 fn saving_clears_modified_flag() {
     setup();
-    nano_rs::text::inject(b"hello world", 11);
-    let path = std::env::temp_dir().join(format!("nano_rs_exit_test_{}.txt", std::process::id()));
+    nanoxide::text::inject(b"hello world", 11);
+    let path = std::env::temp_dir().join(format!("nanoxide_exit_test_{}.txt", std::process::id()));
     let ps = path.to_str().unwrap().to_string();
     with_global_mut(|g| {
         let of = g.openfile.as_ref().unwrap().clone();
         of.borrow_mut().filename = Some(ps);
     });
-    let n = nano_rs::files::write_it_out(false, true);
+    let n = nanoxide::files::write_it_out(false, true);
     assert!(n > 0, "保存应返回写入字节数");
-    assert!(!nano_rs::files::is_modified(), "保存后应清除修改标记");
+    assert!(!nanoxide::files::is_modified(), "保存后应清除修改标记");
     let _ = std::fs::remove_file(&path);
 }

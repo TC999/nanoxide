@@ -1,8 +1,8 @@
 //! 复现用户报告的崩溃：刷新屏幕与保存文件。
 
-use nano_rs::definitions::*;
-use nano_rs::global::global_init;
-use nano_rs::files::make_new_buffer;
+use nanoxide::definitions::*;
+use nanoxide::global::global_init;
+use nanoxide::files::make_new_buffer;
 
 fn setup() {
     global_init();
@@ -21,22 +21,22 @@ fn setup() {
 #[test]
 fn refresh_screen_works() {
     setup();
-    nano_rs::text::inject(b"hello", 5);
+    nanoxide::text::inject(b"hello", 5);
     // 直接调用刷新路径
-    nano_rs::winio::refresh_screen();
-    nano_rs::winio::edit_refresh();
+    nanoxide::winio::refresh_screen();
+    nanoxide::winio::edit_refresh();
 }
 
 /// 保存文件（write_it_out）不应崩溃。
 #[test]
 fn write_it_out_works() {
     setup();
-    nano_rs::text::inject(b"hello", 5);
+    nanoxide::text::inject(b"hello", 5);
     with_global_mut(|g| {
         let of = g.openfile.as_ref().unwrap().clone();
         of.borrow_mut().filename = Some("test_save.txt".to_string());
     });
-    let result = nano_rs::files::write_it_out(true, false);
+    let result = nanoxide::files::write_it_out(true, false);
     assert!(result > 0 || result == -1, "write_it_out returned {result}");
     let content = std::fs::read_to_string("test_save.txt").unwrap_or_default();
     assert_eq!(content, "hello\n");
@@ -47,7 +47,7 @@ fn write_it_out_works() {
 #[test]
 fn draw_bars_works() {
     setup();
-    nano_rs::winio::titlebar(None);
-    nano_rs::winio::statusbar("test message");
-    nano_rs::winio::bottombars(nano_rs::definitions::MMAIN);
+    nanoxide::winio::titlebar(None);
+    nanoxide::winio::statusbar("test message");
+    nanoxide::winio::bottombars(nanoxide::definitions::MMAIN);
 }

@@ -4,13 +4,13 @@
 // 全局状态 -> 命令行参数 -> 主目录 -> 终端 -> 颜色 -> rc 文件 ->
 // 快捷键 -> 历史 -> 打开文件 -> 显示 -> 主事件循环 -> 退出清理。
 
-use nano_rs::definitions::{
+use nanoxide::definitions::{
     with_global, with_global_mut, ISSET, MessageType, CONSTANT_SHOW, MINIBAR, ZERO,
     FOREIGN_SEQUENCE, THE_WINDOW_RESIZED,
 };
-use nano_rs::global::parse_args;
-use nano_rs::winio::{handle_input_key, show_welcome_message, ERR};
-use nano_rs::{color, files, global, history, rcfile, signals, text, utils, winio};
+use nanoxide::global::parse_args;
+use nanoxide::winio::{handle_input_key, show_welcome_message, ERR};
+use nanoxide::{color, files, global, history, rcfile, signals, text, utils, winio};
 
 fn main() {
     // 1. 初始化全局状态
@@ -18,7 +18,7 @@ fn main() {
 
     // 1b. 初始化 i18n（按 LANG 协商语言，加载外置 ftl，放在 global_init 之后、
     //     首次使用 i18n 之前即可；不依赖 home dir，因为 locales/ 默认位于 exe 旁）
-    nano_rs::i18n::init();
+    nanoxide::i18n::init();
 
     // 2. 解析命令行参数
     let args: Vec<String> = std::env::args().collect();
@@ -59,7 +59,7 @@ fn main() {
         match result {
             files::OpenBufferResult::NewFile => {
                 // 文件不存在：在原来显示 welcome-message 的位置显示 "[ New File ]"
-                winio::statusbar_centered(&format!("[ {} ]", nano_rs::t!("files-new_file")));
+                winio::statusbar_centered(&format!("[ {} ]", nanoxide::t!("files-new_file")));
             }
             files::OpenBufferResult::Directory => {
                 // 与原版 nano.c 一致：目录不加载（open_buffer 返回 FALSE 后
@@ -74,7 +74,7 @@ fn main() {
 
         /* 命令行给出的位置：跳到对应行/列（对应 C 的 goto_line_and_column）。 */
         if *line != 0 || *col != 0 {
-            nano_rs::search::goto_line_and_column(*line, *col, true);
+            nanoxide::search::goto_line_and_column(*line, *col, true);
         }
     }
 
@@ -155,7 +155,7 @@ pub fn main_loop() {
         {
             // CONSTANT_SHOW：无消息且无待处理按键时报告光标位置
             // （对应 C 主循环的 report_cursor_position() 条件）。
-            nano_rs::global::report_cursor_position();
+            nanoxide::global::report_cursor_position();
         }
 
         // 检查是否需要刷新

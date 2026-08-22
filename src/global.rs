@@ -672,14 +672,14 @@ pub fn parse_file_args(args: &[String]) -> Vec<(String, isize, isize)> {
 }
 /// 打印版本信息。
 fn print_version() {
-    println!("nano-rs version {}", VERSION);
+    println!("nanoxide version {}", VERSION);
     println!("(Rust translation of GNU nano)");
     println!("Compiled options: --enable-utf8");
 }
 
 /// 打印使用说明。
 fn print_usage() {
-    println!("Usage: nano [OPTIONS] [FILE]");
+    println!("Usage: nax [OPTIONS] [FILE]");
     println!("");
     println!("GNU nano - a small, friendly text editor");
     println!("");

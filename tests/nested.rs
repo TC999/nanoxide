@@ -1,7 +1,7 @@
 //! 验证 with_global 嵌套行为。
 
-use nano_rs::definitions::*;
-use nano_rs::global::global_init;
+use nanoxide::definitions::*;
+use nanoxide::global::global_init;
 
 #[test]
 fn nested_with_global_behavior() {

@@ -1,7 +1,11 @@
 [package]
-name = "nano-rs"
+name = "nanoxide"
 version = "0.1.0"
 edition = "2021"
+
+[[bin]]
+name = "nax"
+path = "src/main.rs"
 
 [dependencies]
 crossterm = "0.28"

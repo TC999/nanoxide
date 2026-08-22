@@ -477,7 +477,7 @@ fn draw_titlebar_line(stdout: &mut io::Stdout, cols: usize) {
             .map(|of| of.borrow().modified)
             .unwrap_or(false);
         let state = if modified { &crate::t!("winio-modified") } else { "" };
-        let left_text = format!(" Rust-nano {} ", env!("CARGO_PKG_VERSION"));
+        let left_text = format!(" nax {} ", env!("CARGO_PKG_VERSION"));
         let right_text = state;
 
         let left_len = left_text.len();

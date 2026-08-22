@@ -5,12 +5,12 @@
 // 2. 正则引擎能匹配真实规则
 // 3. update_line 渲染不崩溃
 
-use nano_rs::definitions::*;
+use nanoxide::definitions::*;
 
 /// 初始化全局状态与一个空缓冲。
 fn setup() {
-    nano_rs::global::global_init();
-    nano_rs::files::make_new_buffer();
+    nanoxide::global::global_init();
+    nanoxide::files::make_new_buffer();
     with_global_mut(|g| {
         g.COLS = 80;
         g.LINES = 24;
@@ -20,7 +20,7 @@ fn setup() {
 
 /// 解析 GNU nano 自带的 C 语法文件。
 fn parse_c_syntax() -> Option<SyntaxRef> {
-    let ok = nano_rs::rcfile::parse_rcfile("nano/syntax/c.nanorc");
+    let ok = nanoxide::rcfile::parse_rcfile("nano/syntax/c.nanorc");
     assert!(ok, "c.nanorc 应能读取");
     with_global(|g| g.syntaxes.clone())
 }
@@ -62,8 +62,8 @@ fn syntax_parse_works() {
 fn syntax_icolor_case_insensitive() {
     setup();
     // 先建立语法，再添加 icolor 规则
-    nano_rs::rcfile::parse_rcfile_line("syntax test", "test", 1);
-    nano_rs::rcfile::parse_rcfile_line("icolor brightred \"hello\"", "test", 2);
+    nanoxide::rcfile::parse_rcfile_line("syntax test", "test", 1);
+    nanoxide::rcfile::parse_rcfile_line("icolor brightred \"hello\"", "test", 2);
     let sntx = with_global(|g| g.syntaxes.clone()).expect("应有语法");
     let first = sntx.borrow().color.clone().expect("应有颜色规则");
     let r = first.borrow();
@@ -114,15 +114,15 @@ fn update_line_with_syntax_renders() {
     let sntx = parse_c_syntax().expect("应有语法");
 
     // 打开一个带 C 代码的缓冲并绑定语法
-    nano_rs::text::inject(b"int main() { return 0; }", 24);
+    nanoxide::text::inject(b"int main() { return 0; }", 24);
     with_global_mut(|g| {
         let of = g.openfile.as_ref().unwrap().clone();
         of.borrow_mut().syntax = Some(sntx);
     });
-    nano_rs::files::prepare_for_display();
+    nanoxide::files::prepare_for_display();
 
     let line = with_global(|g| g.openfile.as_ref().unwrap().borrow().current.clone().unwrap());
-    nano_rs::winio::update_line(&line, 0);
+    nanoxide::winio::update_line(&line, 0);
 }
 
 /// 多行规则（/* ... */）应更新 multidata 状态。
@@ -132,15 +132,15 @@ fn multiline_rule_sets_multidata() {
     let sntx = parse_c_syntax().expect("应有语法");
 
     // 构造多行内容：注释跨行
-    nano_rs::text::inject(b"/* comment start", 16);
+    nanoxide::text::inject(b"/* comment start", 16);
     with_global_mut(|g| {
         let of = g.openfile.as_ref().unwrap().clone();
         of.borrow_mut().syntax = Some(sntx.clone());
     });
-    nano_rs::files::prepare_for_display();
+    nanoxide::files::prepare_for_display();
 
     // 预计算多行信息
-    nano_rs::color::precalc_multicolorinfo();
+    nanoxide::color::precalc_multicolorinfo();
 
     // 第一行应标记 STARTSHERE 或 WHOLELINE（取决于规则）
     let line1 = with_global(|g| g.openfile.as_ref().unwrap().borrow().filetop.clone().unwrap());
@@ -159,13 +159,13 @@ fn syntax_binding_primes_colorpairs() {
     parse_c_syntax();
 
     // 打开一个 .c 文件并注入代码
-    let ok = nano_rs::files::open_buffer("test_syntax.c");
-    assert!(matches!(ok, nano_rs::files::OpenBufferResult::NewFile | nano_rs::files::OpenBufferResult::FileLoaded));
-    nano_rs::text::inject(b"int main(void) { return 0; }", 28);
-    nano_rs::files::prepare_for_display();
+    let ok = nanoxide::files::open_buffer("test_syntax.c");
+    assert!(matches!(ok, nanoxide::files::OpenBufferResult::NewFile | nanoxide::files::OpenBufferResult::FileLoaded));
+    nanoxide::text::inject(b"int main(void) { return 0; }", 28);
+    nanoxide::files::prepare_for_display();
 
     // 按扩展名匹配语法并绑定
-    nano_rs::color::find_and_prime_applicable_syntax();
+    nanoxide::color::find_and_prime_applicable_syntax();
 
     let bound = with_global(|g| {
         g.openfile.as_ref().unwrap().borrow().syntax.clone()
@@ -176,8 +176,8 @@ fn syntax_binding_primes_colorpairs() {
     assert_eq!(sntx.borrow().name.as_deref(), Some("c"));
 
     // 建立颜色对并准备调色板
-    nano_rs::color::set_syntax_colorpairs(&sntx);
-    nano_rs::color::prepare_palette();
+    nanoxide::color::set_syntax_colorpairs(&sntx);
+    nanoxide::color::prepare_palette();
 
     // 颜色规则应分配到非零 pairnum，且颜色对表有对应条目
     let first = sntx.borrow().color.clone().expect("应有颜色规则");
@@ -186,6 +186,6 @@ fn syntax_binding_primes_colorpairs() {
     assert!(pn > 0, "pairnum 应被分配，实际 {pn}");
     assert!(r.attributes & (pn as i32) != 0 || r.attributes >> 16 > 0,
             "attributes 应编码颜色对");
-    let lookup = nano_rs::color::lookup_pair(pn as i32);
+    let lookup = nanoxide::color::lookup_pair(pn as i32);
     assert!(lookup.is_some(), "颜色对表应有 pairnum={pn} 的条目");
 }

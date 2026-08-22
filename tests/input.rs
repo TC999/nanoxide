@@ -1,8 +1,8 @@
 //! 集成测试：模拟编辑器核心输入路径，验证无 RefCell 双重借用崩溃。
 
-use nano_rs::definitions::*;
-use nano_rs::global::global_init;
-use nano_rs::files::make_new_buffer;
+use nanoxide::definitions::*;
+use nanoxide::global::global_init;
+use nanoxide::files::make_new_buffer;
 
 fn setup() {
     global_init();
@@ -30,7 +30,7 @@ fn current_x() -> usize {
 #[test]
 fn typing_characters_works() {
     setup();
-    nano_rs::text::inject(b"hello", 5);
+    nanoxide::text::inject(b"hello", 5);
     assert_eq!(current_text(), "hello");
     assert_eq!(current_x(), 5);
 }
@@ -39,9 +39,9 @@ fn typing_characters_works() {
 #[test]
 fn typing_sequence_works() {
     setup();
-    nano_rs::text::inject(b"h", 1);
-    nano_rs::text::inject(b"i", 1);
-    nano_rs::text::inject(b"!", 1);
+    nanoxide::text::inject(b"h", 1);
+    nanoxide::text::inject(b"i", 1);
+    nanoxide::text::inject(b"!", 1);
     assert_eq!(current_text(), "hi!");
 }
 
@@ -49,8 +49,8 @@ fn typing_sequence_works() {
 #[test]
 fn pressing_enter_works() {
     setup();
-    nano_rs::text::inject(b"abc", 3);
-    nano_rs::text::do_enter();
+    nanoxide::text::inject(b"abc", 3);
+    nanoxide::text::do_enter();
     assert_eq!(current_text(), "");
 }
 
@@ -58,8 +58,8 @@ fn pressing_enter_works() {
 #[test]
 fn backspace_works() {
     setup();
-    nano_rs::text::inject(b"abc", 3);
-    nano_rs::cut::do_backspace();
+    nanoxide::text::inject(b"abc", 3);
+    nanoxide::cut::do_backspace();
     assert_eq!(current_text(), "ab");
 }
 
@@ -67,13 +67,13 @@ fn backspace_works() {
 #[test]
 fn delete_works() {
     setup();
-    nano_rs::text::inject(b"abc", 3);
+    nanoxide::text::inject(b"abc", 3);
     with_global_mut(|g| {
         let of = g.openfile.as_ref().unwrap().clone();
         let mut of = of.borrow_mut();
         of.current_x = 1;
     });
-    nano_rs::cut::do_delete();
+    nanoxide::cut::do_delete();
     assert_eq!(current_text(), "ac");
 }
 
@@ -81,7 +81,7 @@ fn delete_works() {
 #[test]
 fn tab_works() {
     setup();
-    nano_rs::text::do_tab();
+    nanoxide::text::do_tab();
     assert_eq!(current_text(), "\t");
 }
 
@@ -89,8 +89,8 @@ fn tab_works() {
 #[test]
 fn cut_works() {
     setup();
-    nano_rs::text::inject(b"hello", 5);
-    nano_rs::cut::cut_text();
+    nanoxide::text::inject(b"hello", 5);
+    nanoxide::cut::cut_text();
     assert_eq!(current_text(), "");
 }
 
@@ -98,8 +98,8 @@ fn cut_works() {
 #[test]
 fn undo_works() {
     setup();
-    nano_rs::text::inject(b"hello", 5);
-    nano_rs::text::do_undo();
+    nanoxide::text::inject(b"hello", 5);
+    nanoxide::text::do_undo();
     assert_eq!(current_text(), "");
 }
 
@@ -107,9 +107,9 @@ fn undo_works() {
 #[test]
 fn paste_works() {
     setup();
-    nano_rs::text::inject(b"hello", 5);
-    nano_rs::cut::cut_text();
-    nano_rs::cut::paste_text();
+    nanoxide::text::inject(b"hello", 5);
+    nanoxide::cut::cut_text();
+    nanoxide::cut::paste_text();
     assert_eq!(current_text(), "hello");
 }
 
@@ -117,21 +117,21 @@ fn paste_works() {
 #[test]
 fn movement_works() {
     setup();
-    nano_rs::text::inject(b"hello world", 11);
-    nano_rs::movement::do_home();
-    nano_rs::movement::do_right();
-    nano_rs::movement::do_down();
-    nano_rs::movement::do_up();
-    nano_rs::movement::do_end();
+    nanoxide::text::inject(b"hello world", 11);
+    nanoxide::movement::do_home();
+    nanoxide::movement::do_right();
+    nanoxide::movement::do_down();
+    nanoxide::movement::do_up();
+    nanoxide::movement::do_end();
 }
 
 /// 重做不应崩溃。
 #[test]
 fn redo_works() {
     setup();
-    nano_rs::text::inject(b"hello", 5);
-    nano_rs::text::do_undo();
-    nano_rs::text::do_redo();
+    nanoxide::text::inject(b"hello", 5);
+    nanoxide::text::do_undo();
+    nanoxide::text::do_redo();
     assert_eq!(current_text(), "hello");
 }
 
@@ -139,10 +139,10 @@ fn redo_works() {
 #[test]
 fn indent_unindent_works() {
     setup();
-    nano_rs::text::inject(b"hello", 5);
-    nano_rs::text::do_indent();
+    nanoxide::text::inject(b"hello", 5);
+    nanoxide::text::do_indent();
     assert!(current_text().starts_with('\t'));
-    nano_rs::text::do_unindent();
+    nanoxide::text::do_unindent();
     assert_eq!(current_text(), "hello");
 }
 
@@ -150,7 +150,7 @@ fn indent_unindent_works() {
 #[test]
 fn comment_works() {
     setup();
-    nano_rs::text::inject(b"hello", 5);
+    nanoxide::text::inject(b"hello", 5);
     with_global_mut(|g| {
         let of = g.openfile.as_ref().unwrap().clone();
         let mut of = of.borrow_mut();
@@ -159,7 +159,7 @@ fn comment_works() {
             s.borrow_mut().comment = Some("#".to_string());
         }
     });
-    nano_rs::text::do_comment();
+    nanoxide::text::do_comment();
     assert_eq!(current_text(), "#hello");
 }
 
@@ -167,69 +167,69 @@ fn comment_works() {
 #[test]
 fn scrolling_works() {
     setup();
-    nano_rs::text::inject(b"line one", 8);
-    nano_rs::text::do_enter();
-    nano_rs::text::inject(b"line two", 8);
-    nano_rs::movement::do_scroll_up();
-    nano_rs::movement::do_scroll_down();
-    nano_rs::movement::do_page_up();
-    nano_rs::movement::do_page_down();
+    nanoxide::text::inject(b"line one", 8);
+    nanoxide::text::do_enter();
+    nanoxide::text::inject(b"line two", 8);
+    nanoxide::movement::do_scroll_up();
+    nanoxide::movement::do_scroll_down();
+    nanoxide::movement::do_page_up();
+    nanoxide::movement::do_page_down();
 }
 
 /// 多行编辑后撤销不应崩溃。
 #[test]
 fn multi_line_undo_works() {
     setup();
-    nano_rs::text::inject(b"abc", 3);
-    nano_rs::text::do_enter();
-    nano_rs::text::inject(b"def", 3);
-    nano_rs::text::do_undo();
-    nano_rs::text::do_undo();
-    nano_rs::text::do_redo();
-    nano_rs::text::do_redo();
+    nanoxide::text::inject(b"abc", 3);
+    nanoxide::text::do_enter();
+    nanoxide::text::inject(b"def", 3);
+    nanoxide::text::do_undo();
+    nanoxide::text::do_undo();
+    nanoxide::text::do_redo();
+    nanoxide::text::do_redo();
 }
 
 /// 搜索不应崩溃。
 #[test]
 fn search_works() {
     setup();
-    nano_rs::text::inject(b"hello world hello", 17);
+    nanoxide::text::inject(b"hello world hello", 17);
     with_global_mut(|g| g.last_search = Some("hello".to_string()));
-    nano_rs::search::do_research();
-    nano_rs::search::do_findnext();
-    nano_rs::search::do_findprevious();
+    nanoxide::search::do_research();
+    nanoxide::search::do_findnext();
+    nanoxide::search::do_findprevious();
 }
 
 /// 单词移动不应崩溃。
 #[test]
 fn word_movement_works() {
     setup();
-    nano_rs::text::inject(b"hello world foo", 15);
-    nano_rs::movement::do_prev_word();
-    nano_rs::movement::do_next_word(false);
-    nano_rs::movement::to_prev_word();
-    nano_rs::movement::to_next_word();
+    nanoxide::text::inject(b"hello world foo", 15);
+    nanoxide::movement::do_prev_word();
+    nanoxide::movement::do_next_word(false);
+    nanoxide::movement::to_prev_word();
+    nanoxide::movement::to_next_word();
 }
 
 /// 段落与块移动不应崩溃。
 #[test]
 fn para_block_movement_works() {
     setup();
-    nano_rs::text::inject(b"first paragraph", 15);
-    nano_rs::text::do_enter();
-    nano_rs::text::do_enter();
-    nano_rs::text::inject(b"second", 6);
-    nano_rs::movement::to_para_begin();
-    nano_rs::movement::to_para_end();
-    nano_rs::movement::to_prev_block();
-    nano_rs::movement::to_next_block();
+    nanoxide::text::inject(b"first paragraph", 15);
+    nanoxide::text::do_enter();
+    nanoxide::text::do_enter();
+    nanoxide::text::inject(b"second", 6);
+    nanoxide::movement::to_para_begin();
+    nanoxide::movement::to_para_end();
+    nanoxide::movement::to_prev_block();
+    nanoxide::movement::to_next_block();
 }
 
 /// 制表符转空格不应崩溃。
 #[test]
 fn tabs_to_spaces_works() {
     setup();
-    nano_rs::definitions::SET(nano_rs::definitions::TABS_TO_SPACES);
-    nano_rs::text::do_tab();
+    nanoxide::definitions::SET(nanoxide::definitions::TABS_TO_SPACES);
+    nanoxide::text::do_tab();
     assert_eq!(current_text(), "        ");
 }
