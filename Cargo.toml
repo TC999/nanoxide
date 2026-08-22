@@ -2,6 +2,10 @@
 name = "nanoxide"
 version = "0.1.0"
 edition = "2021"
+description = "A Rust-based, drop-in replacement for the GNU nano editor"
+license = "GPL-3.0"
+authors = ["TC999 <88823709+TC999@users.noreply.github.com>"]
+repository = "https://github.com/TC999/nanoxide"
 
 [[bin]]
 name = "nax"
