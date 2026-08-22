@@ -284,7 +284,7 @@ pub fn is_on_a_vt() -> bool {
 /// 分配并设置快捷键列表（所有菜单）。
 pub fn shortcut_init() {
     // 主菜单快捷键（与 C 版 global.c 对应）
-    add_to_sclist(MMAIN, r"^G", 7, FunctionId::DoHelp, 0);
+    add_to_sclist((MMOST | MBROWSER) & !MFINDINHELP, r"^G", 7, FunctionId::DoHelp, 0);
     add_to_sclist(MMAIN, r"^O", 15, FunctionId::DoWriteOut, 0);
     add_to_sclist(MMAIN | MBROWSER | MHELP, r"^F", 6, FunctionId::DoSearchForward, 0);
     add_to_sclist(MMAIN, r"^\", 28, FunctionId::DoReplace, 0);
@@ -391,6 +391,15 @@ pub fn shortcut_init() {
     add_to_funcs(FunctionId::DoBackspace, MMAIN, crate::t!("key-backspace"), "backspace_gist", true);
     add_to_funcs(FunctionId::DoEnter, MMAIN, crate::t!("key-enter"), "enter_gist", true);
     add_to_funcs(FunctionId::DoTab, MMAIN, crate::t!("key-tab"), "tab_gist", true);
+    /* Go To Line / Search 提示菜单条目（对应 C 版 add_to_funcs 中
+     * to_para_begin/to_para_end/to_first_line/to_last_line/flip_goto；
+     * 尾插保证显示顺序：Help → Cancel → ParaBegin → ParaEnd → FirstLine
+     * → LastLine → ToSearch，与 C 版底部快捷键栏布局一致）。 */
+    add_to_funcs(FunctionId::DoParaBegin, MMAIN | MGOTOLINE, crate::t!("key-start_of_paragraph"), "parabegin_gist", true);
+    add_to_funcs(FunctionId::DoParaEnd, MMAIN | MGOTOLINE, crate::t!("key-end_of_paragraph"), "paraend_gist", false);
+    add_to_funcs(FunctionId::DoFirstLine, MMAIN | MHELP | MGOTOLINE, crate::t!("key-first_line"), "firstline_gist", true);
+    add_to_funcs(FunctionId::DoLastLine, MMAIN | MHELP | MGOTOLINE, crate::t!("key-last_line"), "lastline_gist", false);
+    add_to_funcs(FunctionId::FlipGoto, MGOTOLINE, crate::t!("key-to_search"), "tosearch_gist", false);
     /* 其余菜单的快捷键（提示/浏览器等，对应 C 的 shortcut_init 后半部分）。 */
     shortcut_init_rest();
 }

@@ -268,6 +268,49 @@ fn gotoline_menu_shortcuts_are_bound() {
 }
 
 #[test]
+fn gotoline_bottombars_layout_matches_original() {
+    // 验证 MGOTOLINE 菜单底部快捷键栏的条目与顺序（对应原版 C 版布局）：
+    //   第一行：^G 帮助    ^W 段落开头   ^Y 首行   ^T 跳至文字
+    //   第二行：^C 取消    ^O 段落结尾   ^V 尾行
+    use nano_rs::definitions::MGOTOLINE;
+    setup();
+    /* 断言中文标签，固定语言为 zh-CN。 */
+    std::env::set_var("LANG", "zh-CN");
+    nano_rs::i18n::init();
+    nano_rs::global::shortcut_init();
+
+    // 模拟 C 版 bottombars：遍历 allfuncs，对匹配 MGOTOLINE 的函数
+    // 用 first_sc_for 找快捷键，得到显示顺序（keystr, tag）。
+    let entries: Vec<(String, String)> = with_global(|g| {
+        let mut result = Vec::new();
+        let mut current_func = g.allfuncs.clone();
+        while let Some(f) = current_func {
+            let f_ref = f.borrow();
+            if (f_ref.menus & MGOTOLINE) != 0 {
+                if let Some(sc) = nano_rs::global::first_sc_for(MGOTOLINE, f_ref.func) {
+                    result.push((sc.borrow().keystr.clone(), f_ref.tag.clone()));
+                }
+            }
+            current_func = f_ref.next.clone();
+        }
+        result
+    });
+
+    // 期望的键序列（与用户/原版布局一致，index 交错两行）。
+    let expected_keys = ["^G", "^C", "^W", "^O", "^Y", "^V", "^T"];
+    assert_eq!(entries.len(), expected_keys.len(), "条目数：{entries:?}");
+    for (i, key) in expected_keys.iter().enumerate() {
+        assert_eq!(&entries[i].0, key, "第 {i} 项键应为 {key}，实际 {entries:?}");
+    }
+
+    // 期望的标签（中文，注意 i18n）。
+    let expected_tags = ["帮助", "取消", "段落开头", "段落结尾", "首行", "尾行", "跳至文字"];
+    for (i, tag) in expected_tags.iter().enumerate() {
+        assert_eq!(&entries[i].1, tag, "第 {i} 项标签应为 {tag}，实际 {entries:?}");
+    }
+}
+
+#[test]
 fn gotoline_prompt_sets_currmenu() {
     // 提示期间 currmenu 应为 MGOTOLINE（do_prompt 设置），保证菜单专属快捷键匹配。
     setup();
