@@ -25,6 +25,52 @@ fn arrow_keys_map_correctly() {
     assert_eq!(tc(key(KeyCode::Char(' '))), 32);
 }
 
+/// Ctrl + 标点/数字在终端上发送 0x1C-0x1F 控制字节，必须还原为 nano
+/// 原语义的键码（对应 ncurses wgetch）：
+///   Ctrl+\ → 28（替换）、Ctrl+] → 29（单词补全）、Ctrl+^ → 30、
+///   Ctrl+/ 与 Ctrl+_ → 31（Go To Line）、Ctrl+@ → 0。
+///
+/// 两个平台的 crossterm 表示不同，必须都映射正确：
+/// - Windows：直接报告“原始字符 + CONTROL”（Char('\\')、Char('/') …）。
+/// - Unix：终端先转成控制字节，crossterm 再把 0x1C-0x1F 重编码为
+///   Char('4'..'7') + CONTROL、0x00 重编码为 Char(' ') + CONTROL；
+///   启用了 kitty 键盘协议（CSI-u）时也会直接收到精确字符。
+#[test]
+fn ctrl_punctuation_maps_to_control_codes() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut cases: Vec<(char, i32)> = Vec::new();
+    // 两个平台共同的精确字符表示。
+    cases.extend_from_slice(&[
+        ('\\', 28), // Ctrl+\：替换（对应原版 MMAIN "^\\"）
+        ('/', 31),  // Ctrl+/：Go To Line
+        (' ', 0),   // Ctrl+Space / Ctrl+@ → 0x00
+        ('a', 1),   // Ctrl+A
+        ('z', 26),  // Ctrl+Z
+    ]);
+    #[cfg(unix)]
+    // Unix 普通终端：crossterm 把控制字节 0x1C-0x1F 重编码为 '4'..='7' + CONTROL。
+    cases.extend_from_slice(&[
+        ('4', 28), // 0x1C（Ctrl+\ 或 Ctrl+4）
+        ('5', 29), // 0x1D（Ctrl+] 或 Ctrl+5）
+        ('6', 30), // 0x1E（Ctrl+^ 或 Ctrl+6）
+        ('7', 31), // 0x1F（Ctrl+/、Ctrl+_ 或 Ctrl+7）
+    ]);
+    #[cfg(not(unix))]
+    cases.extend_from_slice(&[
+        (']', 29), // Ctrl+]
+        ('^', 30), // Ctrl+^
+        ('_', 31), // Ctrl+_（与 Ctrl+/ 同码 0x1F）
+    ]);
+    for &(c, expected) in &cases {
+        let key = KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        assert_eq!(
+            nanoxide::winio::translate_keycode(key),
+            expected,
+            "Ctrl+{c:?} 应映射为 {expected}"
+        );
+    }
+}
+
 #[test]
 fn arrow_keys_do_not_collide_with_ctrl_codes() {
     // 方向键码必须大于 255，绝不落入 Ctrl 码（1..26）与普通字符（32..126）范围

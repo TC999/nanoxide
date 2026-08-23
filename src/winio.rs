@@ -123,24 +123,58 @@ pub fn get_keycode() -> i32 {
     wgetch()
 }
 
+/// Ctrl + 字符 → nano 键码（对应原版 ncurses wgetch 的控制字符语义）。
+///
+/// 两套后端对 Ctrl 组合键的表示不同，必须按平台区分，互不干扰：
+///
+/// - **Windows**：crossterm 直接报告“原始字符 + CONTROL”（如 Ctrl+\ →
+///   `Char('\\')`、Ctrl+/ → `Char('/')`），按 nano 原语义 `c & 0x1F` 编码。
+/// - **Unix/Linux**：终端先把手按的键转成控制字节（Ctrl+\ → 0x1C、
+///   Ctrl+/ → 0x1F），crossterm 再把字节重新编码为
+///   `Char('a'..'z')`（0x01-0x1A）、`Char('4'..'7')`（0x1C-0x1F）、
+///   `Char(' ')`（0x00）+ CONTROL；这里须反向解码回原始字节。
+///   若终端启用了 kitty 键盘协议（CSI-u），则直接收到精确字符
+///   （如 `Char('/')`），同样按原语义编码。
+#[cfg(unix)]
+fn ctrl_char_code(c: char) -> i32 {
+    match c {
+        // crossterm unix：0x01-0x1A（Ctrl+A..Ctrl+Z）→ 'a'..='z' + CONTROL。
+        'a'..='z' => (c as u8 - b'a' + 1) as i32,
+        // crossterm unix：0x1C-0x1F（Ctrl+\ ] ^ _ /）→ '4'..='7' + CONTROL。
+        '4'..='7' => (c as u8 - b'4' + 0x1C) as i32,
+        // crossterm unix：0x00（Ctrl+@ / Ctrl+2 / Ctrl+Space）→ ' ' + CONTROL。
+        ' ' => 0,
+        // kitty 协议下的精确 Ctrl+/：终端发送 0x1F（与 Ctrl+_ 相同，对应
+        // Go To Line 功能），而 '/' & 0x1F 会错误地得到 15（Ctrl+O）。
+        '/' => 0x1F,
+        // 其余 ASCII（如 kitty 协议下的 Ctrl+\、Ctrl+[ 等）：按原语义编码。
+        c if c.is_ascii() => (c as u8 & 0x1F) as i32,
+        _ => c as i32,
+    }
+}
+
+#[cfg(not(unix))]
+fn ctrl_char_code(c: char) -> i32 {
+    // Windows：crossterm 报告原始字符 + CONTROL，按 nano 原语义 c & 0x1F。
+    // 例如 Ctrl+A → 1, Ctrl+\ → 28, Ctrl+[ → 27 (等价 ESC)。
+    // 特例：Ctrl+/ 在终端上发送 0x1F（与 Ctrl+_ 相同，对应 Go To Line
+    // 功能），而 '/' & 0x1F 会错误地得到 15（Ctrl+O）。
+    if c == '/' {
+        0x1F
+    } else if c.is_ascii() {
+        (c as u8 & 0x1F) as i32
+    } else {
+        c as i32
+    }
+}
+
 /// 将 crossterm KeyEvent 转换为 nano 键码。
 pub fn translate_keycode(key: KeyEvent) -> i32 {
     match key.code {
         KeyCode::Char(c) => {
             if key.modifiers == KeyModifiers::CONTROL {
-                // Ctrl + ASCII 字符：按 nano 原语义 c & 0x1F 编码。
-                // 例如 Ctrl+A → 1, Ctrl+\ → 28, Ctrl+[ → 27 (等价 ESC)。
-                // 特例：Ctrl+/ 在终端上发送 0x1F（与 Ctrl+_ 相同，对应
-                // Go To Line 功能），而 '/' & 0x1F 会错误地得到 15（Ctrl+O）。
-                if c.is_ascii() {
-                    if c == '/' {
-                        0x1F
-                    } else {
-                        (c as u8 & 0x1F) as i32
-                    }
-                } else {
-                    c as i32
-                }
+                // Ctrl + 字符：按平台各自的编码规则转换为 nano 键码。
+                ctrl_char_code(c)
             } else if key.modifiers == KeyModifiers::ALT {
                 // Alt + 字母
                 match c {
