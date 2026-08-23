@@ -5,7 +5,8 @@
 // 快捷键 -> 历史 -> 打开文件 -> 显示 -> 主事件循环 -> 退出清理。
 
 use nanoxide::definitions::{
-    with_global, with_global_mut, ISSET, MessageType, CONSTANT_SHOW, MINIBAR, ZERO,
+    with_global, with_global_mut, ISSET, SET, MessageType, CONSTANT_SHOW, MINIBAR, ZERO,
+    RESTRICTED, NO_WRAP, BREAK_LONG_LINES,
     FOREIGN_SEQUENCE, THE_WINDOW_RESIZED,
 };
 use nanoxide::global::parse_args;
@@ -33,14 +34,64 @@ fn main() {
     // 4b. 注册信号处理器（SIGHUP/SIGTERM 紧急保存、SIGTSTP 挂起、SIGWINCH 尺寸变化等）。
     signals::set_up_signal_handlers();
 
-    // 5. 初始化颜色
-    color::set_interface_colorpairs();
+    // 5. 初始化颜色（原版顺序：do_rcfiles 之后 set_interface_colorpairs）
+    color::start_color();
+
+    // 5b. 初始化快捷键与函数列表（原版顺序：shortcut_init 在读取 rcfile 之前，
+    //     以便 rcfile 能 rebind/unbind 键，且 check_vitals_mapped 依赖函数列表）。
+    global::shortcut_init();
+
+    // 5c. 备份命令行选项（对应 nano.c do_rcfiles 前的 *-cmdline 备份与清空）。
+    with_global_mut(|g| {
+        g.cmdline_flags = g.flags;
+        g.backup_dir = None;
+        g.word_chars = None;
+        g.operating_dir = None;
+        g.quotestr = None;
+        g.speller = None;
+    });
 
     // 6. 读取 rc 文件
     rcfile::do_rcfiles();
 
-    // 7. 初始化快捷键
-    global::shortcut_init();
+    // 6a. 恢复命令行选项（对应 nano.c do_rcfiles 后的恢复：命令行优先）。
+    with_global_mut(|g| {
+        if let Some(f) = g.cmdline_fill {
+            g.fill = f;
+        }
+        if let Some(t) = g.cmdline_tabsize {
+            g.tabsize = t;
+        }
+        if let Some(s) = g.cmdline_stripe_column {
+            g.stripe_column = s;
+        }
+        if let Some(b) = g.cmdline_backup_dir.clone() {
+            g.backup_dir = Some(b);
+        }
+        if let Some(w) = g.cmdline_word_chars.clone() {
+            g.word_chars = Some(w);
+        }
+        if let Some(o) = g.cmdline_operating_dir.clone() {
+            g.operating_dir = Some(o);
+        } else if ISSET(RESTRICTED) {
+            g.operating_dir = None;
+        }
+        if let Some(q) = g.cmdline_quotestr.clone() {
+            g.quotestr = Some(q);
+        }
+        if let Some(s) = g.cmdline_speller.clone() {
+            g.speller = Some(s);
+        }
+        /* 命令行 flags 与 rcfile flags 按位 OR：rcfile 不能取消命令行选项。 */
+        g.flags.or_with(&g.cmdline_flags);
+        /* 若 rcfile 未取消 nowrap，保持 breaklonglines。 */
+        if !ISSET(NO_WRAP) {
+            SET(BREAK_LONG_LINES);
+        }
+    });
+
+    // 6b. 用 rcfile 中的 set <element>color 初始化界面颜色对
+    color::set_interface_colorpairs();
 
     // 8. 加载历史记录
     history::history_init();
@@ -111,6 +162,9 @@ fn main() {
     history::save_history();
     winio::terminal_restore();
     with_global_mut(|g| g.we_are_running = false);
+
+    // 14b. 输出 rcfile 解析中累积的错误（对应 display_rcfile_errors）
+    rcfile::print_errors();
 }
 
 /// 主事件循环。

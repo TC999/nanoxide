@@ -1996,8 +1996,122 @@ pub fn handle_input_key(key: i32) -> bool {
     handled
 }
 
+/// 按 FunctionId 执行对应函数（对应 C 版 process_a_keystroke 的函数分发）。
+/// 返回 true 表示已处理。未实现的函数返回 true（消费按键，无操作）。
+fn execute_by_id(func: FunctionId) -> bool {
+    match func {
+        FunctionId::DoCancel => text::do_cancel(),
+        FunctionId::DoExit => text::do_exit(),
+        FunctionId::DoHelp => help::do_help(),
+        FunctionId::DoLeft => movement::do_left(),
+        FunctionId::DoRight => movement::do_right(),
+        FunctionId::DoUp => movement::do_up(),
+        FunctionId::DoDown => movement::do_down(),
+        FunctionId::DoHome => movement::do_home(),
+        FunctionId::DoEnd => movement::do_end(),
+        FunctionId::DoPageUp => movement::do_page_up(),
+        FunctionId::DoPageDown => movement::do_page_down(),
+        FunctionId::DoDelete => cut::do_delete(),
+        FunctionId::DoBackspace => cut::do_backspace(),
+        FunctionId::DoEnter => text::do_enter(),
+        FunctionId::DoTab => text::do_tab(),
+        FunctionId::DoCut => cut::cut_text(),
+        FunctionId::DoCopy => cut::copy_text(),
+        FunctionId::DoPaste => cut::paste_text(),
+        FunctionId::DoCutToEof => cut::cut_till_eof(),
+        FunctionId::DoSearchForward => search::do_search_forward(),
+        FunctionId::DoSearchBackward => search::do_search_backward(),
+        FunctionId::DoFindNext => search::do_findnext(),
+        FunctionId::DoFindPrevious => search::do_findprevious(),
+        FunctionId::DoReplace => search::do_replace(),
+        FunctionId::DoGoToLine => search::do_gotolinecolumn(),
+        FunctionId::DoWriteOut => files::do_writeout(),
+        FunctionId::DoInsertFile => files::do_insertfile(),
+        FunctionId::DoExecute => files::do_execute(),
+        FunctionId::DoSpell => text::do_spell(),
+        FunctionId::DoLinter => {}
+        FunctionId::DoFormatter => text::do_formatter(),
+        FunctionId::DoIndent => text::do_indent(),
+        FunctionId::DoUnindent => text::do_unindent(),
+        FunctionId::DoComment | FunctionId::DoUncomment => text::do_comment(),
+        FunctionId::DoUndo => text::do_undo(),
+        FunctionId::DoRedo => text::do_redo(),
+        FunctionId::DoRefresh => text::do_refresh(),
+        FunctionId::DoSuspend => text::do_suspend(),
+        FunctionId::DoScrollUp => movement::do_scroll_up(),
+        FunctionId::DoScrollDown => movement::do_scroll_down(),
+        FunctionId::DoPrevBlock => movement::to_prev_block(),
+        FunctionId::DoNextBlock => movement::to_next_block(),
+        FunctionId::DoParaBegin => movement::to_para_begin(),
+        FunctionId::DoParaEnd => movement::to_para_end(),
+        FunctionId::DoFirstLine => movement::do_first_line(),
+        FunctionId::DoLastLine => movement::do_last_line(),
+        FunctionId::DoNextWord => movement::to_next_word(),
+        FunctionId::DoPrevWord => movement::to_prev_word(),
+        FunctionId::DoMark => text::do_mark(),
+        FunctionId::DoAnchor => text::do_anchor(),
+        FunctionId::DoFullRefresh => full_refresh(),
+        FunctionId::DoJustify => text::do_justify(),
+        FunctionId::DoWordCompletion => text::complete_a_word(),
+        FunctionId::DoPrevFile => files::switch_to_prev_buffer(),
+        FunctionId::DoNextFile => files::switch_to_next_buffer(),
+        FunctionId::DoFindBracket => search::do_find_bracket(),
+        FunctionId::DoReportLocation => global::report_cursor_position(),
+        FunctionId::DoVerbatimInput => text::do_verbatim_input(),
+        FunctionId::FlipGoto => search::flip_goto(),
+        FunctionId::DoNothing => return false,
+        _ => {}
+    }
+    true
+}
+
+/// 执行 rcfile bind 登记的用户绑定（对应 C 版 sclist 分发）。
+fn execute_bound(bound: &BoundKey) -> bool {
+    match bound.func {
+        FunctionId::Implant => {
+            /* 把植入字符串逐字符插入（对应 implant 的简化实现）。 */
+            if let Some(expansion) = &bound.expansion {
+                text::inject(expansion.as_bytes(), expansion.len());
+            }
+            edit_refresh();
+            true
+        }
+        FunctionId::DoToggle => {
+            TOGGLE(bound.toggle as usize);
+            edit_refresh();
+            true
+        }
+        _ => {
+            let handled = execute_by_id(bound.func);
+            if handled {
+                edit_refresh();
+            }
+            handled
+        }
+    }
+}
+
 /// 根据键码执行对应函数。
 fn execute_function(key: i32, _menu: i32) -> bool {
+    // 用户 rcfile 绑定优先（对应 C 版 interpret/find_shortcut 的 sclist 分发）。
+    let currmenu = with_global(|g| g.currmenu);
+    let unbound = with_global(|g| {
+        g.unbound_keys
+            .iter()
+            .any(|(k, m)| *k == key && (*m & currmenu) != 0)
+    });
+    if unbound {
+        return false;
+    }
+    let bound = with_global(|g| {
+        g.bound_keys
+            .iter()
+            .find(|b| b.keycode == key && (b.menus & currmenu) != 0)
+            .cloned()
+    });
+    if let Some(b) = bound {
+        return execute_bound(&b);
+    }
     // 使用 if/else 链替代 match，避免表达式模式的问题
     if key == 1 { movement::do_home(); edit_refresh(); return true; }           // Ctrl+A
     if key == 2 {

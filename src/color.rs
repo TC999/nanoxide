@@ -18,6 +18,7 @@ pub const A_NORMAL: i32 = 0;
 pub const A_REVERSE: i32 = 1;
 pub const A_BOLD: i32 = 2;
 pub const A_UNDERLINE: i32 = 4;
+pub const A_ITALIC: i32 = 8;
 pub const A_BLINK: i32 = 8;
 
 /// 无效颜色（对应 C 的 BAD_COLOR）。
@@ -55,9 +56,33 @@ pub fn nano_to_crossterm_color(color: i16) -> Color {
     }
 }
 
-/// 设置界面颜色对。
+/// 设置界面颜色对（对应 color.c 的 `set_interface_colorpairs`）。
+/// 在 rcfile 解析完成后调用：用 set color 命令登记的 color_combo 初始化界面颜色对。
 pub fn set_interface_colorpairs() {
-    // 使用默认颜色，在 crossterm 中动态设置
+    set_interface_colorpairs_full();
+}
+
+/// 设置给定界面元素的颜色组合（对应 rcfile.c 的 `set_interface_color`）。
+/// 该函数把解析结果存入 color_combo，待 set_interface_colorpairs 时生效。
+pub fn set_interface_color(element: usize, combotext: &str) {
+    let Some((fg, bg, attributes)) = parse_combination(combotext) else {
+        return;
+    };
+    with_global_mut(|g| {
+        if element < g.color_combo.len() {
+            let trio = Rc::new(RefCell::new(ColorType {
+                id: 0,
+                fg,
+                bg,
+                pairnum: 0,
+                attributes,
+                start: None,
+                end: None,
+                next: None,
+            }));
+            g.color_combo[element] = Some(trio);
+        }
+    });
 }
 
 /// 初始化颜色对（对应 init_pair）：记录 pairnum → (fg, bg)，渲染时查表。
@@ -733,6 +758,11 @@ pub fn color_to_short(colorname: &str) -> Result<(i16, bool, bool), String> {
             let g = parse_hex(chars[1]);
             let b = parse_hex(chars[2]);
             if let (Some(r), Some(g), Some(b)) = (r, g, b) {
+                /* 灰阶：红绿蓝相等时映射到 xterm 灰阶（对应 closest_index_color）。 */
+                if r == g && g == b && r > 0 && r < 0xF {
+                    const GRAY: [i32; 14] = [1, 2, 3, 4, 5, 6, 7, 9, 11, 13, 15, 18, 21, 23];
+                    return Ok((232 + GRAY[(r - 1) as usize] as i16, false, false));
+                }
                 let level = |v: u32| -> i32 { match v { 0..=3 => 0, 4..=7 => 1, 8..=9 => 2, 10..=11 => 3, 12..=13 => 4, _ => 5 } };
                 let value = 16 + 36 * level(r) + 6 * level(g) + level(b);
                 return Ok((value as i16, false, false));
@@ -771,7 +801,7 @@ pub fn parse_combination(text: &str) -> Option<(i16, i16, i32)> {
         s = &rest[1..];
     }
     if let Some(rest) = s.strip_prefix("italic") {
-        // A_ITALIC 在 crossterm 中不单独支持；消费掉前缀。
+        attributes |= A_ITALIC;
         if !rest.starts_with(',') {
             crate::rcfile::jot_error(&crate::t!("color-attr_needs_comma"));
             return None;
@@ -783,11 +813,16 @@ pub fn parse_combination(text: &str) -> Option<(i16, i16, i32)> {
     let fg_part = parts.next().unwrap_or("");
     let bg_part = parts.next();
 
-    let (fgv, fg_vivid, fg_thick) = match color_to_short(fg_part) {
-        Ok(v) => v,
-        Err(msg) => {
-            crate::rcfile::jot_error(&msg);
-            return None;
+    /* 逗号位于开头（如 ",blue"）时前景色为默认（对应 parse_combination）。 */
+    let (fgv, fg_vivid, fg_thick) = if fg_part.is_empty() {
+        (THE_DEFAULT as i16, false, false)
+    } else {
+        match color_to_short(fg_part) {
+            Ok(v) => v,
+            Err(msg) => {
+                crate::rcfile::jot_error(&msg);
+                return None;
+            }
         }
     };
     let fg = if fg_vivid && !fg_thick { fgv + 8 } else { fgv };

@@ -396,6 +396,14 @@ pub enum FunctionId {
     DoNothing, DoVerbatimInput, DoWordCompletion, GetOlderItem, GetNewerItem,
     DoPrevFile, DoNextFile,
     ToFirstFile, ToLastFile, Implant, FlipGoto,
+    // 以下变体对应 rcfile.c strtosc() 支持的其余函数名（原版兼容）。
+    DiscardBuffer, DoSaveFile, DoZap, DoFullJustify, DoCycle, DoCenter,
+    ToTopRow, ToBottomRow, ChopPrevWord, ChopNextWord, CountWords,
+    PutOrLiftAnchor, ToPrevAnchor, ToNextAnchor,
+    DosFormat, AppendIt, PrependIt, BackItUp,
+    FlipExecute, FlipPipe, FlipConvert, FlipNewBuffer,
+    CaseSensVoid, RegexpVoid, BackwardsVoid, FlipReplace,
+    ToFiles, GotoDir, DoScrollLeft, DoScrollRight,
     Other(u32),
 }
 
@@ -552,6 +560,19 @@ pub struct KeyStruct {
     pub expansion: Option<String>, pub next: Option<KeyRef>,
 }
 
+/// rcfile 中 bind/unbind 命令登记的用户绑定（对应 rcfile.c parse_binding
+/// 对 sclist 的修改；供主循环按键分发使用，覆盖内置硬编码键位）。
+#[derive(Debug, Clone)]
+pub struct BoundKey {
+    pub keystr: String,
+    pub keycode: i32,
+    pub menus: i32,
+    pub func: FunctionId,
+    pub toggle: i32,
+    pub ordinal: i32,
+    pub expansion: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct FuncStruct {
     pub func: FunctionId, pub tag: String, pub phrase: &'static str,
@@ -587,6 +608,12 @@ impl GlobalFlags {
     pub fn toggle(&mut self, flag: usize) {
         let idx = flag / (std::mem::size_of::<Flagword>() * 8);
         self.flags[idx] ^= FLAGMASK(flag);
+    }
+    /// 按位 OR 合并另一个标志集（对应 C 版 flags[i] |= flags_cmdline[i]）。
+    pub fn or_with(&mut self, other: &GlobalFlags) {
+        for i in 0..self.flags.len() {
+            self.flags[i] |= other.flags[i];
+        }
     }
 }
 
@@ -710,6 +737,28 @@ pub struct GlobalState {
     pub syntaxes: Option<SyntaxRef>,
     pub commandname: Option<String>,
     pub planted_shortcut: Option<KeyRef>,
+    // rcfile 相关（对应 rcfile.c 的全局变量）
+    pub custom_nanorc: Option<String>,
+    pub backup_dir: Option<String>,
+    pub operating_dir: Option<String>,
+    pub stripe_column: usize,
+    pub punct: Option<String>,
+    pub brackets: Option<String>,
+    pub quotestr: Option<String>,
+    /// bind 命令登记的用户绑定（覆盖内置键位）。
+    pub bound_keys: Vec<BoundKey>,
+    /// unbind 命令登记的键（keycode, menus 掩码），命中时按键被忽略。
+    pub unbound_keys: Vec<(i32, i32)>,
+    // 命令行选项快照（do_rcfiles 后恢复，对应 C 版 *-cmdline 备份）
+    pub cmdline_fill: Option<isize>,
+    pub cmdline_tabsize: Option<usize>,
+    pub cmdline_stripe_column: Option<usize>,
+    pub cmdline_backup_dir: Option<String>,
+    pub cmdline_word_chars: Option<String>,
+    pub cmdline_operating_dir: Option<String>,
+    pub cmdline_quotestr: Option<String>,
+    pub cmdline_speller: Option<String>,
+    pub cmdline_flags: GlobalFlags,
     // 窗口尺寸
     pub COLS: usize,
     pub LINES: usize,
@@ -769,6 +818,13 @@ impl GlobalState {
             interface_color_pair: vec![0; NUMBER_OF_ELEMENTS],
             allfuncs: None, shortcuts: None, syntaxes: None,
             commandname: None, planted_shortcut: None,
+            custom_nanorc: None, backup_dir: None, operating_dir: None,
+            stripe_column: 0, punct: None, brackets: None, quotestr: None,
+            bound_keys: Vec::new(), unbound_keys: Vec::new(),
+            cmdline_fill: None, cmdline_tabsize: None, cmdline_stripe_column: None,
+            cmdline_backup_dir: None, cmdline_word_chars: None,
+            cmdline_operating_dir: None, cmdline_quotestr: None,
+            cmdline_speller: None, cmdline_flags: GlobalFlags::new(),
             COLS: 80, LINES: 24, fill: -1, wrap_at: 0,
         }
     }

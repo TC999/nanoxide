@@ -400,6 +400,56 @@ pub fn shortcut_init() {
     add_to_funcs(FunctionId::DoFirstLine, MMAIN | MHELP | MGOTOLINE, crate::t!("key-first_line"), "firstline_gist", true);
     add_to_funcs(FunctionId::DoLastLine, MMAIN | MHELP | MGOTOLINE, crate::t!("key-last_line"), "lastline_gist", false);
     add_to_funcs(FunctionId::FlipGoto, MGOTOLINE, crate::t!("key-to_search"), "tosearch_gist", false);
+    /* 补充其余函数注册（对应 global.c 的 add_to_funcs，供 rcfile bind 的
+     * 菜单限制与 check_vitals_mapped 使用）。 */
+    add_to_funcs(FunctionId::DoExit, MBROWSER, crate::t!("key-exit"), "exit_gist", false);
+    add_to_funcs(FunctionId::DoComment, MMAIN, crate::t!("key-comment"), "comment_gist", false);
+    add_to_funcs(FunctionId::DoIndent, MMAIN, crate::t!("key-indent"), "indent_gist", false);
+    add_to_funcs(FunctionId::DoUnindent, MMAIN, crate::t!("key-unindent"), "unindent_gist", false);
+    add_to_funcs(FunctionId::DoScrollLeft, MMAIN, "Scroll Left".to_string(), "scrollleft_gist", false);
+    add_to_funcs(FunctionId::DoScrollRight, MMAIN, "Scroll Right".to_string(), "scrollright_gist", false);
+    add_to_funcs(FunctionId::DoPrevWord, MMAIN, crate::t!("key-prev_word"), "prevword_gist", false);
+    add_to_funcs(FunctionId::DoNextWord, MMAIN, crate::t!("key-next_word"), "nextword_gist", false);
+    add_to_funcs(FunctionId::ChopPrevWord, MMAIN, "Chop Previous Word".to_string(), "chopwordleft_gist", false);
+    add_to_funcs(FunctionId::ChopNextWord, MMAIN, "Chop Next Word".to_string(), "chopwordright_gist", false);
+    add_to_funcs(FunctionId::DoFullJustify, MMAIN, crate::t!("key-full_justify"), "fulljustify_gist", false);
+    add_to_funcs(FunctionId::CountWords, MMAIN, "Word Count".to_string(), "wordcount_gist", false);
+    add_to_funcs(FunctionId::DoVerbatimInput, MMAIN, crate::t!("key-verbatim"), "verbatim_gist", false);
+    add_to_funcs(FunctionId::DoRecordMacro, MMAIN, crate::t!("key-record_macro"), "recordmacro_gist", false);
+    add_to_funcs(FunctionId::DoRunMacro, MMAIN, crate::t!("key-run_macro"), "runmacro_gist", false);
+    add_to_funcs(FunctionId::DoZap, MMAIN, crate::t!("key-zap"), "zap_gist", false);
+    add_to_funcs(FunctionId::PutOrLiftAnchor, MMAIN, crate::t!("key-anchor"), "anchor_gist", false);
+    add_to_funcs(FunctionId::ToPrevAnchor, MMAIN, "Previous Anchor".to_string(), "prevanchor_gist", false);
+    add_to_funcs(FunctionId::ToNextAnchor, MMAIN, "Next Anchor".to_string(), "nextanchor_gist", false);
+    add_to_funcs(FunctionId::DoSpell, MMAIN, crate::t!("key-spell"), "spell_gist", false);
+    add_to_funcs(FunctionId::DoLinter, MMAIN, crate::t!("key-linter"), "linter_gist", false);
+    add_to_funcs(FunctionId::DoFormatter, MMAIN, crate::t!("key-formatter"), "formatter_gist", false);
+    add_to_funcs(FunctionId::DoSuspend, MMAIN, crate::t!("key-suspend"), "suspend_gist", false);
+    add_to_funcs(FunctionId::DoCenter, MMAIN, crate::t!("key-center"), "center_gist", false);
+    add_to_funcs(FunctionId::DoCycle, MMAIN, crate::t!("key-cycle"), "cycle_gist", false);
+    add_to_funcs(FunctionId::DoSaveFile, MMAIN, crate::t!("key-savefile"), "savefile_gist", false);
+    add_to_funcs(FunctionId::DoWordCompletion, MMAIN, crate::t!("key-complete"), "complete_gist", false);
+    add_to_funcs(FunctionId::DoAnchor, MMAIN, crate::t!("key-anchor"), "anchor_gist", false);
+    add_to_funcs(FunctionId::DoPrevFile, MMAIN, crate::t!("key-prevfile"), "prevbuf_gist", false);
+    add_to_funcs(FunctionId::DoNextFile, MMAIN, crate::t!("key-nextfile"), "nextbuf_gist", false);
+    add_to_funcs(FunctionId::CaseSensVoid, MWHEREIS | MREPLACE, "Case Sens".to_string(), "casesens_gist", false);
+    add_to_funcs(FunctionId::RegexpVoid, MWHEREIS | MREPLACE, "Regexp".to_string(), "regexp_gist", false);
+    add_to_funcs(FunctionId::BackwardsVoid, MWHEREIS | MREPLACE, "Backwards".to_string(), "backwards_gist", false);
+    add_to_funcs(FunctionId::FlipReplace, MWHEREIS | MREPLACE, "Flip Replace".to_string(), "flipreplace_gist", false);
+    add_to_funcs(FunctionId::GetOlderItem, MWHEREIS | MREPLACE | MREPLACEWITH | MWHEREISFILE | MEXECUTE, "Older".to_string(), "older_gist", false);
+    add_to_funcs(FunctionId::GetNewerItem, MWHEREIS | MREPLACE | MREPLACEWITH | MWHEREISFILE | MEXECUTE, "Newer".to_string(), "newer_gist", false);
+    add_to_funcs(FunctionId::DosFormat, MWRITEFILE, "DOS Format".to_string(), "dosformat_gist", false);
+    add_to_funcs(FunctionId::BackItUp, MWRITEFILE, "Backup".to_string(), "backup_gist", false);
+    add_to_funcs(FunctionId::AppendIt, MWRITEFILE, "Append".to_string(), "append_gist", false);
+    add_to_funcs(FunctionId::PrependIt, MWRITEFILE, "Prepend".to_string(), "prepend_gist", false);
+    add_to_funcs(FunctionId::FlipConvert, MINSERTFILE, "Flip Convert".to_string(), "flipconvert_gist", false);
+    add_to_funcs(FunctionId::FlipExecute, MINSERTFILE, "Flip Execute".to_string(), "flipexecute_gist", false);
+    add_to_funcs(FunctionId::FlipNewBuffer, MINSERTFILE | MEXECUTE, "Flip New Buffer".to_string(), "flipnewbuffer_gist", false);
+    add_to_funcs(FunctionId::FlipPipe, MEXECUTE, "Flip Pipe".to_string(), "flippipe_gist", false);
+    add_to_funcs(FunctionId::ToFiles, MBROWSER, crate::t!("key-to_files"), "tofiles_gist", false);
+    add_to_funcs(FunctionId::GotoDir, MBROWSER, crate::t!("key-goto_dir"), "gotodir_gist", false);
+    add_to_funcs(FunctionId::ToFirstFile, MBROWSER, crate::t!("key-firstfile"), "firstfile_gist", false);
+    add_to_funcs(FunctionId::ToLastFile, MBROWSER, crate::t!("key-lastfile"), "lastfile_gist", false);
     /* 其余菜单的快捷键（提示/浏览器等，对应 C 的 shortcut_init 后半部分）。 */
     shortcut_init_rest();
 }
@@ -542,15 +592,21 @@ pub fn parse_args(args: &[String]) -> Option<String> {
                 "-E" | "--tabstospaces" => SET(TABS_TO_SPACES),
                 "-Q" | "--quotestr" => {
                     i += 1;
-                    if i < args.len() {
-                        // 设置引用字符串模式
+                    if let Some(v) = args.get(i) {
+                        with_global_mut(|g| {
+                            g.quotestr = Some(v.clone());
+                            g.cmdline_quotestr = Some(v.clone());
+                        });
                     }
                 }
                 "-r" | "--fill" => {
                     i += 1;
                     if i < args.len() {
                         if let Ok(f) = args[i].parse::<isize>() {
-                            with_global_mut(|g| g.fill = f);
+                            with_global_mut(|g| {
+                                g.fill = f;
+                                g.cmdline_fill = Some(f);
+                            });
                         }
                     }
                 }
@@ -558,7 +614,10 @@ pub fn parse_args(args: &[String]) -> Option<String> {
                     i += 1;
                     if i < args.len() {
                         if let Ok(s) = args[i].parse::<usize>() {
-                            with_global_mut(|g| g.tabsize = s);
+                            with_global_mut(|g| {
+                                g.tabsize = s;
+                                g.cmdline_tabsize = Some(s);
+                            });
                             set_tabsize_independent(s);
                         }
                     }
@@ -566,17 +625,27 @@ pub fn parse_args(args: &[String]) -> Option<String> {
                 "-R" | "--restricted" => SET(RESTRICTED),
                 "-o" | "--operatingdir" => {
                     i += 1;
-                    // 设置操作目录
+                    if let Some(v) = args.get(i) {
+                        with_global_mut(|g| {
+                            g.operating_dir = Some(v.clone());
+                            g.cmdline_operating_dir = Some(v.clone());
+                        });
+                    }
                 }
                 "-f" | "--rcfile" => {
                     i += 1;
-                    // 指定 rc 文件
+                    if let Some(v) = args.get(i) {
+                        with_global_mut(|g| g.custom_nanorc = Some(v.clone()));
+                    }
                 }
                 "-K" | "--rebinddelete" => SET(REBIND_DELETE),
                 "-s" | "--speller" => {
                     i += 1;
                     if let Some(v) = args.get(i) {
-                        with_global_mut(|g| g.speller = Some(v.clone()));
+                        with_global_mut(|g| {
+                            g.speller = Some(v.clone());
+                            g.cmdline_speller = Some(v.clone());
+                        });
                     }
                 }
                 "-Y" | "--syntax" => {
@@ -590,7 +659,14 @@ pub fn parse_args(args: &[String]) -> Option<String> {
                 "-e" | "--emptyline" => SET(EMPTY_LINE),
                 "-J" | "--guidestripe" => {
                     i += 1;
-                    // 设置引导线
+                    if let Some(v) = args.get(i) {
+                        if let Ok(n) = v.parse::<usize>() {
+                            with_global_mut(|g| {
+                                g.stripe_column = n;
+                                g.cmdline_stripe_column = Some(n);
+                            });
+                        }
+                    }
                 }
                 "-t" | "--saveonexit" => SET(SAVE_ON_EXIT),
                 "-0" | "--zero" => SET(ZERO),
@@ -599,7 +675,12 @@ pub fn parse_args(args: &[String]) -> Option<String> {
                 "-B" | "--backup" => SET(MAKE_BACKUP),
                 "-C" | "--backupdir" => {
                     i += 1;
-                    // 设置备份目录
+                    if let Some(v) = args.get(i) {
+                        with_global_mut(|g| {
+                            g.backup_dir = Some(v.clone());
+                            g.cmdline_backup_dir = Some(v.clone());
+                        });
+                    }
                 }
                 "-I" | "--insecurebackup" => SET(INSECURE_BACKUP),
                 "-N" | "--noconvert" => SET(NO_CONVERT),
@@ -702,4 +783,257 @@ fn print_usage() {
     println!("  -E, --tabstospaces     Convert typed tabs to spaces");
     println!("  -T, --tabsize=N        Tab size (default 8)");
     println!("  -r, --fill=N           Target width for wrap (default -2)");
+}
+
+// ======================== rcfile 辅助（对应 global.c / rcfile.c） ========================
+
+/// 将键名字符串转换为键码（对应 `keycode_from_string`）。
+/// 失败返回 -1。
+pub fn keycode_from_string(keystring: &str) -> i32 {
+    let bytes = keystring.as_bytes();
+    if bytes.first() == Some(&b'^') {
+        if bytes.len() == 2 {
+            let ch = bytes[1];
+            if ch == b'/' || ch == b'-' {
+                return 31;
+            }
+            if ch <= b'_' {
+                return ch as i32 - 64;
+            }
+            if ch == b'`' {
+                return 0;
+            }
+            return -1;
+        } else if keystring.eq_ignore_ascii_case("^Space") {
+            return 0;
+        } else {
+            return -1;
+        }
+    } else if bytes.first() == Some(&b'M') {
+        if bytes.len() == 3 && bytes[1] == b'-' {
+            let ch = bytes[2];
+            if (b'A'..=b'Z').contains(&ch) {
+                return (ch | 0x20) as i32;
+            }
+            return ch as i32;
+        }
+        if keystring.eq_ignore_ascii_case("M-Space") {
+            return b' ' as i32;
+        } else if keystring.eq_ignore_ascii_case("M-Left") {
+            return ALT_LEFT;
+        } else if keystring.eq_ignore_ascii_case("M-Right") {
+            return ALT_RIGHT;
+        } else if keystring.eq_ignore_ascii_case("M-Up") {
+            return ALT_UP;
+        } else if keystring.eq_ignore_ascii_case("M-Down") {
+            return ALT_DOWN;
+        } else if keystring.eq_ignore_ascii_case("M-Ins") {
+            return ALT_INSERT;
+        } else if keystring.eq_ignore_ascii_case("M-Del") {
+            return ALT_DELETE;
+        } else {
+            return -1;
+        }
+    } else if keystring.len() >= 5
+        && keystring[..5].eq_ignore_ascii_case("Sh-M-")
+        && keystring.len() == 6
+    {
+        let ch = keystring.as_bytes()[5];
+        if ch.is_ascii_alphabetic() {
+            with_global_mut(|g| g.shifted_metas = true);
+            return (ch & 0x5F) as i32;
+        }
+        return -1;
+    } else if bytes.first() == Some(&b'F') {
+        let n: i32 = keystring[1..].parse().unwrap_or(0);
+        if (1..=24).contains(&n) {
+            return KEY_F0 + n;
+        }
+        return -1;
+    } else if keystring.eq_ignore_ascii_case("Ins") {
+        return KEY_IC;
+    } else if keystring.eq_ignore_ascii_case("Del") {
+        return KEY_DC;
+    } else {
+        return -1;
+    }
+}
+
+/// 16 个菜单名与对应符号（对应 rcfile.c 的 menunames/menusymbols）。
+const MENU_NAMES: [&str; 16] = [
+    "main", "search", "replace", "replacewith",
+    "yesno", "gotoline", "writeout", "insert",
+    "execute", "help", "spell", "linter",
+    "browser", "whereisfile", "gotodir",
+    "all",
+];
+
+const MENU_SYMBOLS: [i32; 16] = [
+    MMAIN, MWHEREIS, MREPLACE, MREPLACEWITH,
+    MYESNO, MGOTOLINE, MWRITEFILE, MINSERTFILE,
+    MEXECUTE, MHELP, MSPELL, MLINTER,
+    MBROWSER, MWHEREISFILE, MGOTODIR,
+    MMOST | MBROWSER | MHELP | MYESNO,
+];
+
+/// 返回给定菜单名对应的符号；未知返回 0（对应 `name_to_menu`）。
+pub fn name_to_menu(name: &str) -> i32 {
+    for (index, entry) in MENU_NAMES.iter().enumerate() {
+        if *entry == name {
+            return MENU_SYMBOLS[index];
+        }
+    }
+    0
+}
+
+/// 返回给定菜单符号对应的名称（对应 `menu_to_name`）。
+pub fn menu_to_name(menu: i32) -> &'static str {
+    for (index, symbol) in MENU_SYMBOLS.iter().enumerate() {
+        if *symbol == menu {
+            return MENU_NAMES[index];
+        }
+    }
+    "boooo"
+}
+
+/// 解释 rc 文件中的函数字符串，返回 (函数, toggle 值)。
+/// 无法识别时返回 None（对应 rcfile.c 的 `strtosc`）。
+pub fn strtosc(input: &str) -> Option<(FunctionId, i32)> {
+    let s = input;
+    let plain = |func: FunctionId| Some((func, 0));
+    match s {
+        "cancel" => plain(FunctionId::DoCancel),
+        "help" => plain(FunctionId::DoHelp),
+        "exit" => plain(FunctionId::DoExit),
+        "discardbuffer" => plain(FunctionId::DiscardBuffer),
+        "writeout" => plain(FunctionId::DoWriteOut),
+        "savefile" => plain(FunctionId::DoSaveFile),
+        "insert" => plain(FunctionId::DoInsertFile),
+        "whereis" => plain(FunctionId::DoSearchForward),
+        "wherewas" => plain(FunctionId::DoSearchBackward),
+        "findprevious" => plain(FunctionId::DoFindPrevious),
+        "findnext" => plain(FunctionId::DoFindNext),
+        "replace" => plain(FunctionId::DoReplace),
+        "cut" => plain(FunctionId::DoCut),
+        "copy" => plain(FunctionId::DoCopy),
+        "paste" => plain(FunctionId::DoPaste),
+        "execute" => plain(FunctionId::DoExecute),
+        "cutrestoffile" => plain(FunctionId::DoCutToEof),
+        "zap" => plain(FunctionId::DoZap),
+        "mark" => plain(FunctionId::DoMark),
+        "tospell" | "speller" => plain(FunctionId::DoSpell),
+        "linter" => plain(FunctionId::DoLinter),
+        "formatter" => plain(FunctionId::DoFormatter),
+        "location" => plain(FunctionId::DoReportLocation),
+        "gotoline" => plain(FunctionId::DoGoToLine),
+        "justify" => plain(FunctionId::DoJustify),
+        "fulljustify" => plain(FunctionId::DoFullJustify),
+        "beginpara" => plain(FunctionId::DoParaBegin),
+        "endpara" => plain(FunctionId::DoParaEnd),
+        "comment" => plain(FunctionId::DoComment),
+        "complete" => plain(FunctionId::DoWordCompletion),
+        "indent" => plain(FunctionId::DoIndent),
+        "unindent" => plain(FunctionId::DoUnindent),
+        "chopwordleft" => plain(FunctionId::ChopPrevWord),
+        "chopwordright" => plain(FunctionId::ChopNextWord),
+        "findbracket" => plain(FunctionId::DoFindBracket),
+        "wordcount" => plain(FunctionId::CountWords),
+        "recordmacro" => plain(FunctionId::DoRecordMacro),
+        "runmacro" => plain(FunctionId::DoRunMacro),
+        "anchor" => plain(FunctionId::PutOrLiftAnchor),
+        "prevanchor" => plain(FunctionId::ToPrevAnchor),
+        "nextanchor" => plain(FunctionId::ToNextAnchor),
+        "undo" => plain(FunctionId::DoUndo),
+        "redo" => plain(FunctionId::DoRedo),
+        "suspend" => plain(FunctionId::DoSuspend),
+        "left" | "back" => plain(FunctionId::DoLeft),
+        "right" | "forward" => plain(FunctionId::DoRight),
+        "up" | "prevline" => plain(FunctionId::DoUp),
+        "down" | "nextline" => plain(FunctionId::DoDown),
+        "scrollleft" => plain(FunctionId::DoScrollLeft),
+        "scrollright" => plain(FunctionId::DoScrollRight),
+        "scrollup" => plain(FunctionId::DoScrollUp),
+        "scrolldown" => plain(FunctionId::DoScrollDown),
+        "prevword" => plain(FunctionId::DoPrevWord),
+        "nextword" => plain(FunctionId::DoNextWord),
+        "home" => plain(FunctionId::DoHome),
+        "end" => plain(FunctionId::DoEnd),
+        "prevblock" => plain(FunctionId::DoPrevBlock),
+        "nextblock" => plain(FunctionId::DoNextBlock),
+        "toprow" => plain(FunctionId::ToTopRow),
+        "bottomrow" => plain(FunctionId::ToBottomRow),
+        "center" => plain(FunctionId::DoCenter),
+        "cycle" => plain(FunctionId::DoCycle),
+        "pageup" | "prevpage" => plain(FunctionId::DoPageUp),
+        "pagedown" | "nextpage" => plain(FunctionId::DoPageDown),
+        "firstline" => plain(FunctionId::DoFirstLine),
+        "lastline" => plain(FunctionId::DoLastLine),
+        "prevbuf" => plain(FunctionId::DoPrevFile),
+        "nextbuf" => plain(FunctionId::DoNextFile),
+        "verbatim" => plain(FunctionId::DoVerbatimInput),
+        "tab" => plain(FunctionId::DoTab),
+        "enter" => plain(FunctionId::DoEnter),
+        "delete" => plain(FunctionId::DoDelete),
+        "backspace" => plain(FunctionId::DoBackspace),
+        "refresh" => plain(FunctionId::DoFullRefresh),
+        "casesens" => plain(FunctionId::CaseSensVoid),
+        "regexp" => plain(FunctionId::RegexpVoid),
+        "backwards" => plain(FunctionId::BackwardsVoid),
+        "flipreplace" => plain(FunctionId::FlipReplace),
+        "older" => plain(FunctionId::GetOlderItem),
+        "newer" => plain(FunctionId::GetNewerItem),
+        "dosformat" => plain(FunctionId::DosFormat),
+        "append" => plain(FunctionId::AppendIt),
+        "prepend" => plain(FunctionId::PrependIt),
+        "backup" => plain(FunctionId::BackItUp),
+        "flipexecute" => plain(FunctionId::FlipExecute),
+        "flippipe" => plain(FunctionId::FlipPipe),
+        "flipconvert" => plain(FunctionId::FlipConvert),
+        "flipnewbuffer" => plain(FunctionId::FlipNewBuffer),
+        "tofiles" | "browser" => plain(FunctionId::ToFiles),
+        "gotodir" => plain(FunctionId::GotoDir),
+        "firstfile" => plain(FunctionId::ToFirstFile),
+        "lastfile" => plain(FunctionId::ToLastFile),
+        /* do_toggle 及其 toggle 值（对应 C 版 strtosc 末尾的 do_toggle 分支）。 */
+        "nohelp" => Some((FunctionId::DoToggle, NO_HELP as i32)),
+        "zero" => Some((FunctionId::DoToggle, ZERO as i32)),
+        "constantshow" => Some((FunctionId::DoToggle, CONSTANT_SHOW as i32)),
+        "softwrap" => Some((FunctionId::DoToggle, SOFTWRAP as i32)),
+        "linenumbers" => Some((FunctionId::DoToggle, LINE_NUMBERS as i32)),
+        "whitespacedisplay" => Some((FunctionId::DoToggle, WHITESPACE_DISPLAY as i32)),
+        "nosyntax" => Some((FunctionId::DoToggle, NO_SYNTAX as i32)),
+        "smarthome" => Some((FunctionId::DoToggle, SMART_HOME as i32)),
+        "autoindent" => Some((FunctionId::DoToggle, AUTOINDENT as i32)),
+        "cutfromcursor" => Some((FunctionId::DoToggle, CUT_FROM_CURSOR as i32)),
+        "breaklonglines" => Some((FunctionId::DoToggle, BREAK_LONG_LINES as i32)),
+        "tabstospaces" => Some((FunctionId::DoToggle, TABS_TO_SPACES as i32)),
+        "mouse" => Some((FunctionId::DoToggle, USE_MOUSE as i32)),
+        _ => None,
+    }
+}
+
+/// 函数是否在几乎所有菜单中都有（对应 rcfile.c 的 `is_universal`）。
+pub fn is_universal(func: FunctionId) -> bool {
+    matches!(
+        func,
+        FunctionId::DoLeft
+            | FunctionId::DoRight
+            | FunctionId::DoHome
+            | FunctionId::DoEnd
+            | FunctionId::DoPrevWord
+            | FunctionId::DoNextWord
+            | FunctionId::DoDelete
+            | FunctionId::DoBackspace
+            | FunctionId::DoCut
+            | FunctionId::DoPaste
+            | FunctionId::DoTab
+            | FunctionId::DoEnter
+            | FunctionId::DoVerbatimInput
+    )
+}
+
+/// 打印致命错误消息并退出（对应 `die`）。
+pub fn die(msg: &str) -> ! {
+    eprintln!("{}", msg);
+    std::process::exit(1);
 }
