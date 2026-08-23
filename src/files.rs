@@ -25,12 +25,14 @@ fn openfile_ref() -> OpenFileRef {
 ///   - Ok(NewFile)     = 指定了文件名但文件不存在，视为新文件（状态栏应显示 "[ New File ]"）
 ///   - Ok(Directory)   = 指定的是目录（状态栏应显示 "[ '<name>' is a directory ]"，且不创建缓冲区）
 ///   - Ok(ErrorRead)   = 文件存在但读取失败（状态栏已显示错误）
+///   - Ok(Skipped)     = 锁文件已存在且用户选择不打开（对应 C 版 do_lockfile 返回 SKIPTHISFILE）
 ///   - Err            = 内部错误
 pub enum OpenBufferResult {
     FileLoaded,
     NewFile,
     Directory,
     ErrorRead,
+    Skipped,
 }
 
 /// 打开文件并加载到缓冲区。
@@ -51,7 +53,10 @@ pub fn open_another_buffer(filename: &str) -> OpenBufferResult {
     make_new_buffer();
     let result = open_buffer_impl(filename, true);
     /* 目录等失败情况不保留空缓冲区（对应 C：open_buffer 失败时 continue）。 */
-    if matches!(result, OpenBufferResult::Directory | OpenBufferResult::ErrorRead) {
+    if matches!(
+        result,
+        OpenBufferResult::Directory | OpenBufferResult::ErrorRead | OpenBufferResult::Skipped
+    ) {
         close_buffer();
     }
     result
@@ -129,6 +134,20 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
         return OpenBufferResult::Directory;
     }
 
+    /* 打开文件前先处理锁文件（对应 C 版 open_buffer 中 do_lockfile 的调用：
+     * 在 open_file 之前、LOCKING 且非 VIEW_MODE 且文件名非空时创建锁；
+     * 对不存在的文件同样创建（原版如此）。用户选择不打开时返回 Skipped，
+     * 不创建缓冲区。 */
+    let lock_filename = if ISSET(LOCKING) && !ISSET(VIEW_MODE) {
+        match do_lockfile(filename, true) {
+            DoLockfileResult::Locked(name) => Some(name),
+            DoLockfileResult::NoLock => None,
+            DoLockfileResult::SkipFile => return OpenBufferResult::Skipped,
+        }
+    } else {
+        None
+    };
+
     // 文件不存在：视为新文件。
     if !path.exists() {
         with_global_mut(|g| {
@@ -139,7 +158,7 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
                 current_x: 0, placewewant: 0, brink: 0, cursor_row: 0,
                 statinfo: None, spillage_line: None,
                 mark: None, mark_x: 0, softmark: false,
-                fmt: FormatType::NixFile, lock_filename: None,
+                fmt: FormatType::NixFile, lock_filename: lock_filename.clone(),
                 undotop: None, current_undo: None, last_saved: None,
                 last_action: UndoType::Other, modified: false,
                 syntax: None, errormessage: None,
@@ -205,7 +224,7 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
                     statinfo: fs::metadata(path).ok().map(|m| Box::new(m)),
                     spillage_line: None,
                     mark: None, mark_x: 0, softmark: false,
-                    fmt: FormatType::NixFile, lock_filename: None,
+                    fmt: FormatType::NixFile, lock_filename: lock_filename.clone(),
                     undotop: None, current_undo: None, last_saved: None,
                     last_action: UndoType::Other, modified: false,
                     syntax: None, errormessage: None,
@@ -214,17 +233,6 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
                 install_buffer(g, new_file, fresh);
             });
             crate::color::find_and_prime_applicable_syntax();
-            /* 打开已有文件时创建锁文件（对应 C 版 do_lockfile 的简化版）。 */
-            if ISSET(LOCKING) && !ISSET(VIEW_MODE) {
-                let lockname = lock_filename_for(filename);
-                if write_lockfile(&lockname, filename, false) {
-                    with_global_mut(|g| {
-                        if let Some(of) = &g.openfile {
-                            of.borrow_mut().lock_filename = Some(lockname);
-                        }
-                    });
-                }
-            }
             OpenBufferResult::FileLoaded
         }
         Err(e) => {
@@ -247,6 +255,32 @@ pub fn delete_lockfile(lockfilename: &str) -> bool {
             false
         }
     }
+}
+
+/// 把文件名截短到 room 列宽内（对应 C 版 `crop_to_fit` 的简化版）：
+/// 宽度足够时原样返回；超宽时保留尾部并在前面加 "..."；room 太小返回 "_"。
+/// 宽度按 ASCII=1、其他=2 近似（文件名多为 ASCII，够用）。
+fn crop_to_fit_filename(name: &str, room: usize) -> String {
+    if crate::utils::breadth(name.as_bytes()) <= room {
+        return name.to_string();
+    }
+    if room < 4 {
+        return "_".to_string();
+    }
+    let keep = room - 3;
+    let mut clipped: Vec<char> = Vec::new();
+    let mut width = 0usize;
+    for ch in name.chars().rev() {
+        let cw = if ch.is_ascii() { 1 } else { 2 };
+        if width + cw > keep {
+            break;
+        }
+        clipped.push(ch);
+        width += cw;
+    }
+    let mut out = String::from("...");
+    out.extend(clipped.iter().rev());
+    out
 }
 
 /// 为给定文件名构造锁文件名：`目录/.文件名.swp`（对应 C 版的拼接）。
@@ -325,6 +359,119 @@ pub fn write_lockfile(lockfilename: &str, filename: &str, modified: bool) -> boo
             );
             false
         }
+    }
+}
+
+/// do_lockfile 的结果（对应 C 版 do_lockfile 的返回值）。
+#[derive(Debug, Clone)]
+pub enum DoLockfileResult {
+    /// 锁文件已成功写入，携带锁文件名。
+    Locked(String),
+    /// 未创建锁文件（失败，或坏锁被忽略），但可继续打开文件。
+    NoLock,
+    /// 锁文件已存在且用户选择不打开该文件（对应 SKIPTHISFILE）。
+    SkipFile,
+}
+
+/// 检查锁文件是否已存在并视情况提示或询问用户，然后写入锁文件
+/// （对应 C 版 `do_lockfile`）。
+///
+/// * `ask_the_user` 为 TRUE（打开文件时）：锁文件存在则读取并解析其中
+///   的程序名/用户名/PID，询问用户是否仍要打开；回答 No 或取消则返回
+///   [`DoLockfileResult::SkipFile`]；回答 Yes 则覆盖旧锁。
+/// * 为 FALSE（保存改名时）：锁文件存在只提示 "Someone else is also
+///   editing this file" 并停留 1200ms，然后照常覆盖。
+/// * 锁文件存在但内容无效（不足 68 字节或魔数不对）：提示 "Bad lock
+///   file is ignored" 并返回 [`DoLockfileResult::NoLock`]（不覆盖旧文件）。
+pub fn do_lockfile(filename: &str, ask_the_user: bool) -> DoLockfileResult {
+    let lockfilename = lock_filename_for(filename);
+
+    if Path::new(&lockfilename).exists() {
+        if !ask_the_user {
+            winio::blank_bottombars();
+            winio::statusline(
+                MessageType::Alert,
+                &crate::t!("files-someone_else_editing"),
+            );
+            winio::napms(1200);
+        } else {
+            /* 读取并校验锁文件（对应 C 版 do_lockfile 的读取/解析分支）。 */
+            match fs::read(&lockfilename) {
+                Ok(lockbuf) if lockbuf.len() >= 68 && lockbuf[0] == 0x62 && lockbuf[1] == 0x30 => {
+                    /* 解析程序名（偏移 2，10 字节）、PID（偏移 24，小端 4 字节）、
+                     * 用户名（偏移 28，16 字节）。字段以 NUL 填充，去掉尾随 NUL。 */
+                    let lockprog = String::from_utf8_lossy(&lockbuf[2..12])
+                        .trim_end_matches('\0')
+                        .to_string();
+                    let lockpid = (lockbuf[24] as u32)
+                        | ((lockbuf[25] as u32) << 8)
+                        | ((lockbuf[26] as u32) << 16)
+                        | ((lockbuf[27] as u32) << 24);
+                    let lockuser = String::from_utf8_lossy(&lockbuf[28..44])
+                        .trim_end_matches('\0')
+                        .to_string();
+                    let pidstring = lockpid.to_string();
+
+                    /* 对应 C 版 crop_to_fit：文件名太长时截短，保证
+                     * "open anyway?" 等尾部提示完整显示在一行内。
+                     * room = COLS - "File " 前缀宽度 - 其余部分宽度。 */
+                    let cols = with_global(|g| g.COLS);
+                    let tail = format!(
+                        " is being edited by {lockuser} (with {lockprog}, PID {pidstring}); open anyway?"
+                    );
+                    let room = cols
+                        .saturating_sub(crate::utils::breadth(tail.as_bytes()))
+                        .saturating_sub("File ".len());
+                    let postedname = crop_to_fit_filename(filename, room);
+
+                    let question = crate::t!(
+                        "files-being_edited",
+                        filename = postedname,
+                        user = lockuser,
+                        prog = lockprog,
+                        pid = pidstring
+                    );
+                    let choice = crate::prompt::ask_user(false, &question);
+
+                    /* 启动时（尚未运行）取消：退出编辑器（对应 C 版 finish()）。 */
+                    if choice == CANCEL && !with_global(|g| g.we_are_running) {
+                        winio::terminal_restore();
+                        std::process::exit(0);
+                    }
+
+                    if choice != YES {
+                        winio::wipe_statusbar();
+                        return DoLockfileResult::SkipFile;
+                    }
+                }
+                Ok(_) => {
+                    /* 坏锁：忽略，且不覆盖旧锁文件（对应 C 版 return NULL）。 */
+                    winio::statusline(
+                        MessageType::Alert,
+                        &crate::t!("files-bad_lock_file", filename = lockfilename),
+                    );
+                    return DoLockfileResult::NoLock;
+                }
+                Err(e) => {
+                    /* 锁文件存在但无法读取：报错后放弃（对应 C 版 return NULL）。 */
+                    winio::statusline(
+                        MessageType::Alert,
+                        &crate::t!(
+                            "files-error_opening_lockfile",
+                            filename = lockfilename,
+                            err = e.to_string()
+                        ),
+                    );
+                    return DoLockfileResult::NoLock;
+                }
+            }
+        }
+    }
+
+    if write_lockfile(&lockfilename, filename, false) {
+        DoLockfileResult::Locked(lockfilename)
+    } else {
+        DoLockfileResult::NoLock
     }
 }
 
@@ -419,14 +566,14 @@ fn save_to(answer: &str) -> i32 {
                     if !answer.is_empty() {
                         of_ref.filename = Some(answer.to_string());
                     }
-                    /* 文件名变化时，按需更新锁文件。 */
+                    /* 文件名变化时，按需更新锁文件（对应 C 版 write_file 中
+                     * 删除旧锁后用 do_lockfile(realname, FALSE) 写新锁）。 */
                     if was_filename.as_deref() != Some(answer) && !answer.is_empty() {
                         if let Some(old_lock) = of_ref.lock_filename.take() {
                             delete_lockfile(&old_lock);
                         }
-                        if ISSET(LOCKING) && !ISSET(VIEW_MODE) {
-                            let lockname = lock_filename_for(answer);
-                            if write_lockfile(&lockname, answer, false) {
+                        if ISSET(LOCKING) {
+                            if let DoLockfileResult::Locked(lockname) = do_lockfile(answer, false) {
                                 of_ref.lock_filename = Some(lockname);
                             }
                         }
@@ -882,11 +1029,14 @@ fn insert_a_file_or(execute: bool) {
     } else {
         /* 插入文件内容。 */
         if ISSET(NEW_BUFFER) {
-            open_buffer(&answer);
-            if let Some(of) = with_global(|g| g.openfile.clone()) {
-                of.borrow_mut().modified = false;
+            let result = open_buffer(&answer);
+            /* 用户拒绝覆盖已有锁时（Skipped）：不修改当前缓冲区的状态。 */
+            if !matches!(result, OpenBufferResult::Skipped) {
+                if let Some(of) = with_global(|g| g.openfile.clone()) {
+                    of.borrow_mut().modified = false;
+                }
+                prepare_for_display();
             }
-            prepare_for_display();
         } else {
             let was_lineno = with_global(|g| {
                 g.openfile.as_ref().and_then(|of| {

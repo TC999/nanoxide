@@ -121,6 +121,11 @@ fn main() {
                 // 读取失败：创建空缓冲区保证编辑器可继续工作
             }
             files::OpenBufferResult::FileLoaded => {}
+            files::OpenBufferResult::Skipped => {
+                // 锁文件已存在且用户选择不打开：跳过该文件（对应 C 版
+                // open_buffer 返回 FALSE 后 main 的 continue）。
+                continue;
+            }
         }
 
         /* 命令行给出的位置：跳到对应行/列（对应 C 的 goto_line_and_column）。 */

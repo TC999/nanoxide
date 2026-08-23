@@ -80,6 +80,9 @@ files-error_writing_lockfile = 写入锁文件 {filename} 出错：{err}
 files-couldnt_determine_identity = 无法确定我的身份以创建锁文件
 files-couldnt_determine_hostname = 无法确定主机名：{err}
 files-someone_else_editing = 其他人也在编辑此文件
+files-error_opening_lockfile = 打开锁文件 {filename} 出错：{err}
+files-bad_lock_file = 无效的锁文件被忽略：{filename}
+files-being_edited = 文件 {filename} 正被 {user}（使用 {prog}，PID {pid}）编辑；仍要打开吗？
 
 # ---------- movement（光标移动） ----------
 movement-not_possible = 使用 "{opt}" 时无法做到

@@ -75,6 +75,9 @@ files-error_writing_lockfile = Error writing lock file {filename}: {err}
 files-couldnt_determine_identity = Couldn't determine my identity for lock file
 files-couldnt_determine_hostname = Couldn't determine hostname: {err}
 files-someone_else_editing = Someone else is also editing this file
+files-error_opening_lockfile = Error opening lock file {filename}: {err}
+files-bad_lock_file = Bad lock file is ignored: {filename}
+files-being_edited = File {filename} is being edited by {user} (with {prog}, PID {pid}); open anyway?
 
 # ---------- movement（光标移动） ----------
 movement-not_possible = Not possible with '{opt}'
