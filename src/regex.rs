@@ -51,7 +51,7 @@ impl Regex {
             pos: 0,
             icase,
         };
-        let prog = parser.parse_alt()?;
+        let prog = parser.parse_alt(false)?;
         if parser.pos != parser.chars.len() {
             return Err(crate::t!("regex-unexpected", ch = (parser.chars[parser.pos] as char).to_string()));
         }
@@ -247,13 +247,13 @@ impl<'a> Parser<'a> {
         Some(c)
     }
 
-    /// 解析交替：expr (| expr)*
-    fn parse_alt(&mut self) -> Result<Node, String> {
-        let mut branches = vec![self.parse_seq()?];
+    /// 解析交替：expr (| expr)*。stop_at_paren 为真时 `)` 结束表达式（分组内部）。
+    fn parse_alt(&mut self, stop_at_paren: bool) -> Result<Node, String> {
+        let mut branches = vec![self.parse_seq(stop_at_paren)?];
         loop {
             if self.peek() == Some(b'|') {
                 self.pos += 1;
-                branches.push(self.parse_seq()?);
+                branches.push(self.parse_seq(stop_at_paren)?);
             } else {
                 break;
             }
@@ -265,14 +265,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// 解析连接：piece*
-    fn parse_seq(&mut self) -> Result<Node, String> {
+    /// 解析连接：piece*。stop_at_paren 为真时 `)` 结束表达式。
+    fn parse_seq(&mut self, stop_at_paren: bool) -> Result<Node, String> {
         let mut items = Vec::new();
         loop {
             match self.peek() {
                 None => break,
-                Some(b'|') | Some(b')') => break,
-                _ => items.push(self.parse_piece()?),
+                Some(b'|') => break,
+                Some(b')') if stop_at_paren => break,
+                _ => items.push(self.parse_piece(stop_at_paren)?),
             }
         }
         if items.is_empty() {
@@ -286,8 +287,8 @@ impl<'a> Parser<'a> {
     }
 
     /// 解析一个原子及其量词。
-    fn parse_piece(&mut self) -> Result<Node, String> {
-        let atom = self.parse_atom()?;
+    fn parse_piece(&mut self, stop_at_paren: bool) -> Result<Node, String> {
+        let atom = self.parse_atom(stop_at_paren)?;
         // 量词
         let mut min = 1usize;
         let mut max: Option<usize> = Some(1);
@@ -315,26 +316,6 @@ impl<'a> Parser<'a> {
                     if let Ok((lo, hi)) = self.parse_braces() {
                         min = lo;
                         max = hi;
-                    } else {
-                        self.pos = save;
-                        break;
-                    }
-                }
-                Some(b'\\') if self.chars.get(self.pos + 1) == Some(&b'{') => {
-                    // BRE 形式 \{m,n\}
-                    let save = self.pos;
-                    self.pos += 2;
-                    let inner = match self.parse_braces_bre() {
-                        Ok(v) => v,
-                        Err(_) => {
-                            self.pos = save;
-                            break;
-                        }
-                    };
-                    if self.peek() == Some(b'\\') && self.chars.get(self.pos + 1) == Some(&b'}') {
-                        self.pos += 2;
-                        min = inner.0;
-                        max = inner.1;
                     } else {
                         self.pos = save;
                         break;
@@ -402,48 +383,8 @@ impl<'a> Parser<'a> {
         Err("bad braces".into())
     }
 
-    /// 解析 BRE 形式的 {m,n} 内部（数字、逗号），末尾需是 \}（由调用方处理）。
-    fn parse_braces_bre(&mut self) -> Result<(usize, Option<usize>), String> {
-        let start = self.pos;
-        let mut lo = 0usize;
-        let mut seen = false;
-        while let Some(c) = self.peek() {
-            if c.is_ascii_digit() {
-                lo = lo * 10 + (c - b'0') as usize;
-                seen = true;
-                self.pos += 1;
-            } else {
-                break;
-            }
-        }
-        if !seen {
-            self.pos = start;
-            return Err("no digits".into());
-        }
-        if self.peek() == Some(b',') {
-            self.pos += 1;
-            let mut hi = 0usize;
-            let mut seen2 = false;
-            while let Some(c) = self.peek() {
-                if c.is_ascii_digit() {
-                    hi = hi * 10 + (c - b'0') as usize;
-                    seen2 = true;
-                    self.pos += 1;
-                } else {
-                    break;
-                }
-            }
-            if !seen2 {
-                // {m,} 无上限
-                return Ok((lo, None));
-            }
-            return Ok((lo, Some(hi)));
-        }
-        Ok((lo, Some(lo)))
-    }
-
     /// 解析一个原子（字符、类、分组、锚点、词边界、转义）。
-    fn parse_atom(&mut self) -> Result<Node, String> {
+    fn parse_atom(&mut self, stop_at_paren: bool) -> Result<Node, String> {
         let c = self.eat().ok_or("unexpected end")?;
         match c {
             b'.' => Ok(Node::Any),
@@ -451,7 +392,7 @@ impl<'a> Parser<'a> {
             b'$' => Ok(Node::Eol),
             b'[' => self.parse_class(),
             b'(' => {
-                let inner = self.parse_alt()?;
+                let inner = self.parse_alt(true)?;
                 if self.eat() != Some(b')') {
                     return Err("missing ')'".into());
                 }
@@ -459,7 +400,10 @@ impl<'a> Parser<'a> {
             }
             b'\\' => self.parse_escape(),
             b'*' | b'+' | b'?' => Err(crate::t!("regex-dangling", ch = (c as char).to_string())),
-            b'|' | b')' | b'{' | b'}' => Err(crate::t!("regex-unexpected", ch = (c as char).to_string())),
+            /* ERE 中无法构成重复的裸 {、} 及多余的分隔符/右括号按字面处理
+             * （对应 glibc regcomp 的容错行为）。stop_at_paren 为真时 `)` 由
+             * parse_seq 截断，不会到达此处。 */
+            b'{' | b'}' | b'|' | b')' => Ok(self.char_node(c)),
             _ => Ok(self.char_node(c)),
         }
     }
@@ -473,19 +417,30 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// 解析转义序列（\x、\(、\)、\|、\{、\}、\<、\>、\b 等）。
+    /// 解析转义序列。POSIX ERE 语义：转义的特殊字符是字面量
+    /// （`\(` `\)` `\|` `\{` `\}` `\+` `\?` `\*` `\.` `\^` `\$`），
+    /// 另支持 GNU 扩展的 `\<` `\>` `\b` 词边界与 `\s` `\S` `\w` `\W` `\d` `\D` 字符类。
     fn parse_escape(&mut self) -> Result<Node, String> {
         let c = self.eat().ok_or("dangling '\\'")?;
         match c {
             b'<' | b'>' | b'b' => Ok(Node::WordBoundary),
-            b'(' => {
-                let inner = self.parse_alt()?;
-                if self.eat() != Some(b')') {
-                    return Err("missing '\\)'".into());
-                }
-                Ok(inner)
+            /* GNU 扩展字符类。 */
+            b's' => Ok(Node::Class(vec![(b'\t', b'\r'), (b' ', b' ')], false)),
+            b'S' => Ok(Node::Class(vec![(b'\t', b'\r'), (b' ', b' ')], true)),
+            b'w' => Ok(Node::Class(
+                vec![(b'0', b'9'), (b'A', b'Z'), (b'a', b'z'), (b'_', b'_')],
+                false,
+            )),
+            b'W' => Ok(Node::Class(
+                vec![(b'0', b'9'), (b'A', b'Z'), (b'a', b'z'), (b'_', b'_')],
+                true,
+            )),
+            b'd' => Ok(Node::Class(vec![(b'0', b'9')], false)),
+            b'D' => Ok(Node::Class(vec![(b'0', b'9')], true)),
+            /* 转义的特殊字符：字面量（POSIX ERE）。 */
+            b'(' | b')' | b'|' | b'{' | b'}' | b'+' | b'?' | b'*' | b'.' | b'^' | b'$' | b'[' | b']' => {
+                Ok(self.char_node(c))
             }
-            b'{' => Ok(self.char_node(b'{')), // \{ 视作字面 {（量词由 parse_piece 处理）
             _ => Ok(self.char_node(c)),
         }
     }
@@ -690,5 +645,39 @@ mod tests {
         assert_eq!(find("(ab)*", "ababab"), Some((0, 6)));
         assert_eq!(find("a{2,4}b", "aaaab"), Some((0, 5)));
         assert_eq!(find("(a|b)*c", "ababc"), Some((0, 5)));
+    }
+
+    #[test]
+    fn ere_escaped_literals() {
+        // POSIX ERE：\( \) \| 等转义是字面量（不是分组/交替）
+        assert_eq!(find(r"\(", "a(b"), Some((1, 2)));
+        assert_eq!(find(r"\(|\)|\[|\]|\{|\}", "{"), Some((0, 1)));
+        assert_eq!(find(r"\(x\)", "(x)"), Some((0, 3)));
+        assert_eq!(find(r"\\f(.|\(..)", "\\f("), Some((0, 3)));
+        // 未转义括号是分组
+        assert_eq!(find("(ab)+", "abab"), Some((0, 4)));
+        // 无法构成重复的裸 { 按字面
+        assert_eq!(find("a{foo", "a{foo"), Some((0, 5)));
+    }
+
+    #[test]
+    fn gnu_class_escapes() {
+        // GNU 扩展：\s \S \w \W \d \D 字符类
+        assert_eq!(find(r"\s+", "ab cd"), Some((2, 3)));
+        assert_eq!(find(r"\S+", " ab "), Some((1, 3)));
+        assert_eq!(find(r"\w+", "a_b-1"), Some((0, 3)));
+        assert_eq!(find(r"\W+", "ab - cd"), Some((2, 5)));
+        assert_eq!(find(r"\d+", "ab12cd"), Some((2, 4)));
+        assert_eq!(find(r"\D+", "12ab34"), Some((2, 4)));
+    }
+
+    #[test]
+    fn trailing_paren_is_literal() {
+        // glibc 容错：多余右括号按字面处理（对应 objc.nanorc 的 "selector)\>"）
+        assert_eq!(find("a)b", "a)b"), Some((0, 3)));
+        // 分组括号与多余右括号字面共存
+        assert_eq!(find("@(x)|y)\\>", "@x"), Some((0, 2)));
+        assert_eq!(find("@(x)|y)\\>", "y)a"), Some((0, 2)), "\\> 零宽，终点在 ) 后");
+        assert_eq!(find("a|b)", "b)"), Some((0, 2)));
     }
 }
