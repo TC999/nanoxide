@@ -65,13 +65,20 @@ impl Regex {
     }
 
     /// 字节串版本的 find（nano 文本为字节级存储）。
+    /// POSIX 语义：最左优先、同起点取最长匹配（leftmost-longest）。
     pub fn find_bytes(&self, text: &[u8], start: usize, notbol: bool) -> Option<(usize, usize)> {
         let len = text.len();
         let start = start.min(len);
         for so in start..=len {
             let notbol_here = notbol || so != start;
-            let eo = match_node(&self.prog, text, so, so, len, notbol_here, &|eo| Some(eo));
-            if let Some(eo) = eo {
+            /* 收集所有可能终点，取最长（对应 POSIX leftmost-longest）。 */
+            let best: std::cell::Cell<Option<usize>> = std::cell::Cell::new(None);
+            match_node(&self.prog, text, so, so, len, notbol_here, &|eo| {
+                let prev = best.get();
+                best.set(Some(prev.map_or(eo, |b: usize| b.max(eo))));
+                None // 返回 None 以继续枚举其它可能终点
+            });
+            if let Some(eo) = best.get() {
                 return Some((so, eo));
             }
         }
@@ -557,7 +564,7 @@ impl<'a> Parser<'a> {
     }
 }
 
-/// 展开 POSIX 字符类名称为字节范围。
+/// 展开 POSIX 字符类名称为字节范围（含 GNU 扩展）。
 fn posix_class(name: &[u8]) -> Vec<(u8, u8)> {
     match name {
         b"alpha" => vec![(b'A', b'Z'), (b'a', b'z')],
@@ -574,6 +581,9 @@ fn posix_class(name: &[u8]) -> Vec<(u8, u8)> {
         b"cntrl" => vec![(0, 31), (127, 127)],
         b"graph" => vec![(33, 126)],
         b"print" => vec![(32, 126)],
+        /* GNU 扩展：word = alnum + 下划线。 */
+        b"word" => vec![(b'0', b'9'), (b'A', b'Z'), (b'a', b'z'), (b'_', b'_')],
+        b"ascii" => vec![(0, 127)],
         _ => vec![],
     }
 }
@@ -650,5 +660,35 @@ mod tests {
         let re2 = Regex::compile("^", false).unwrap();
         assert_eq!(re2.find("abc", 2, false), Some((2, 2)));
         assert_eq!(re2.find("abc", 1, true), None);
+    }
+
+    #[test]
+    fn leftmost_longest_semantics() {
+        // POSIX leftmost-longest：同起点取最长匹配
+        assert_eq!(find("a|aa", "aa"), Some((0, 2)));
+        assert_eq!(find("aa|a", "aa"), Some((0, 2)));
+        assert_eq!(find("(a|aa)b", "aab"), Some((0, 3)));
+        assert_eq!(find("a*", "aaa"), Some((0, 3)));
+        assert_eq!(find("a*|b", "aa"), Some((0, 2)));
+        // 最左优先
+        assert_eq!(find("b|a", "xxayy"), Some((2, 3)));
+    }
+
+    #[test]
+    fn gnu_word_class() {
+        // GNU 扩展 [ [:word:] ] = alnum + 下划线
+        let re = Regex::compile("[[:word:]]+", false).unwrap();
+        assert_eq!(re.find("abc_123", 0, false), Some((0, 7)));
+        assert_eq!(re.find("a-b", 0, false), Some((0, 1)), "a-b 中只应匹配 a");
+        let re2 = Regex::compile("\\<[[:word:]]+\\>", false).unwrap();
+        assert_eq!(re2.find("hello_world", 0, false), Some((0, 11)));
+        assert_eq!(re2.find("xx hello_world yy", 0, false), Some((0, 2)), "最左优先：先匹配 xx");
+    }
+
+    #[test]
+    fn nested_repetition() {
+        assert_eq!(find("(ab)*", "ababab"), Some((0, 6)));
+        assert_eq!(find("a{2,4}b", "aaaab"), Some((0, 5)));
+        assert_eq!(find("(a|b)*c", "ababc"), Some((0, 5)));
     }
 }

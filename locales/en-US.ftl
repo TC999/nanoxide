@@ -312,3 +312,27 @@ key-last_file = Last File
 key-go_to_dir = Go To Dir
 key-verbatim_input = Verbatim Input
 key-unbound = Unbound Key
+# ---------- 宏录制（对应 winio.c record_macro / run_macro） ----------
+macro-recording = Recording a macro...
+macro-stopped = Stopped recording
+macro-cancelled = Cancelled
+macro-while_recording = Cannot run macro while recording
+macro-empty = Macro is empty
+
+# ---------- 锚点（对应 search.c put_or_lift_anchor 等） ----------
+anchor-placed = Placed anchor
+anchor-removed = Removed anchor
+anchor-jumped = Jumped to anchor
+anchor-only = This is the only anchor
+anchor-none = There are no anchors
+
+# ---------- 字数统计（对应 text.c count_lines_words_and_characters） ----------
+count-lines = {lines} {lines_pl}（{lines} {lines_label}）
+count-report = {lines_label}: {lines},  {words_label}: {words},  {chars_label}: {chars}
+
+# ---------- linter（对应 text.c do_linter） ----------
+linter-none = No linter is defined for this type of file
+linter-invoking = Invoking linter...
+linter-ok = No lint problems found
+linter-report = {count} lint error(s): {first}
+linter-failed = Could not invoke linter

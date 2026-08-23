@@ -1134,7 +1134,8 @@ fn parse_one_include(file: &str, syntax: Option<SyntaxRef>) {
 // ======================== 主解析循环（对应 rcfile.c 的 parse_rcfile） ========================
 
 /// 处理一行 rc 配置（parse_rcfile 主循环的主体）。返回 true 表示应停止解析。
-fn handle_rcfile_line(line: &str, just_syntax: bool, intros_only: bool) -> bool {
+/// had_invalid 表示原始行含非法 UTF-8 字节（对应 C 版的 mbstowcs 校验前提）。
+fn handle_rcfile_line(line: &str, just_syntax: bool, intros_only: bool, had_invalid: bool) -> bool {
     let line = line.trim_start_matches([' ', '\t']);
     if line.is_empty() || line.starts_with('#') {
         return false;
@@ -1289,6 +1290,12 @@ fn handle_rcfile_line(line: &str, just_syntax: bool, intros_only: bool) -> bool 
         return false;
     };
 
+    /* UTF-8 模式下忽略含非法序列的参数（对应 C 版 mbstowcs 校验）。 */
+    if had_invalid && with_global(|g| g.using_utf8) {
+        jot_error(&crate::t!("rcfile-invalid_multibyte"));
+        return false;
+    }
+
     parse_valued_option(option, argument);
 
     false
@@ -1297,15 +1304,12 @@ fn handle_rcfile_line(line: &str, just_syntax: bool, intros_only: bool) -> bool 
 /// 从流中解析（对应 parse_rcfile 主循环）。just_syntax 时允许文件只含
 /// 颜色语法命令；intros_only 时只收集语法骨架（syntax/header/magic）。
 fn parse_stream<R: BufRead>(reader: &mut R, just_syntax: bool, intros_only: bool) {
-    let mut buffer = String::new();
+    let mut buffer: Vec<u8> = Vec::new();
     loop {
         buffer.clear();
-        let n = match reader.read_line(&mut buffer) {
+        match reader.read_until(b'\n', &mut buffer) {
             Ok(0) | Err(_) => break,
-            Ok(n) => n,
-        };
-        if n == 0 {
-            break;
+            Ok(_) => {}
         }
 
         let lineno = get_rcfile_lineno() + 1;
@@ -1319,10 +1323,14 @@ fn parse_stream<R: BufRead>(reader: &mut R, just_syntax: bool, intros_only: bool
             }
         }
 
-        /* 去掉结尾换行和可能的回车。 */
-        let line = buffer.trim_end_matches(['\n', '\r']);
+        /* 去掉结尾换行和可能的回车（字节级，对应 C 版 getline 处理）。 */
+        while buffer.last() == Some(&b'\n') || buffer.last() == Some(&b'\r') {
+            buffer.pop();
+        }
+        let had_invalid = std::str::from_utf8(&buffer).is_err();
+        let line = String::from_utf8_lossy(&buffer);
 
-        if handle_rcfile_line(line, just_syntax, intros_only) {
+        if handle_rcfile_line(&line, just_syntax, intros_only, had_invalid) {
             break;
         }
     }
@@ -1395,7 +1403,7 @@ pub fn parse_rcfile_line(line: &str, filename: &str, lineno: usize) {
         if matches!(kw, "color" | "icolor" | "comment" | "tabgives" | "linter" | "formatter") {
             parse_syntax_commands(kw, rest);
         } else {
-            handle_rcfile_line(line, false, true);
+            handle_rcfile_line(line, false, true, false);
         }
     }
 
@@ -1464,12 +1472,10 @@ pub fn do_rcfiles() {
             parse_one_nanorc();
         }
     } else {
-        /* 系统级 nanorc。 */
-        for sys in ["/etc/nanorc", "/usr/local/etc/nanorc"] {
-            if have_nanorc(sys) {
-                parse_one_nanorc();
-                break;
-            }
+        /* 系统级 nanorc（对应 C 版 SYSCONFDIR/nanorc，编译期确定）。 */
+        let sys_rc = format!("{}/nanorc", env!("SYSCONFDIR"));
+        if have_nanorc(&sys_rc) {
+            parse_one_nanorc();
         }
 
         utils::get_homedir();

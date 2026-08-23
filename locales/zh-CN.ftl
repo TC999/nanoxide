@@ -318,3 +318,26 @@ key-last_file = 末文件
 key-go_to_dir = 跳至目录
 key-verbatim_input = 原形输入
 key-unbound = 按键未绑定
+# ---------- 宏录制（对应 winio.c record_macro / run_macro） ----------
+macro-recording = 正在录制宏...
+macro-stopped = 停止录制
+macro-cancelled = 已取消
+macro-while_recording = 录制期间无法运行宏
+macro-empty = 宏为空
+
+# ---------- 锚点（对应 search.c put_or_lift_anchor 等） ----------
+anchor-placed = 已放置锚点
+anchor-removed = 已移除锚点
+anchor-jumped = 已跳转到锚点
+anchor-only = 这是唯一的锚点
+anchor-none = 没有锚点
+
+# ---------- 字数统计（对应 text.c count_lines_words_and_characters） ----------
+count-report = 行数: {lines},  字数: {words},  字符数: {chars}
+
+# ---------- linter（对应 text.c do_linter） ----------
+linter-none = 未为此类文件定义 linter
+linter-invoking = 正在调用 linter...
+linter-ok = 未发现 lint 问题
+linter-report = {count} 个 lint 错误：{first}
+linter-failed = 无法调用 linter

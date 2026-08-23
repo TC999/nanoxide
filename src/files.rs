@@ -1646,3 +1646,12 @@ pub fn emergency_save_all() {
         }
     }
 }
+
+/// 保存当前缓冲区（对应 `do_savefile`：直接写文件，不进入 WriteOut 提示）。
+pub fn do_savefile() {
+    let result = write_it_out(false, false);
+    if result == 2 {
+        /* C 版：write_it_out 返回 2 表示关闭并退出；此处关闭当前缓冲区。 */
+        close_buffer();
+    }
+}

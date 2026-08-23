@@ -30,6 +30,114 @@ use crossterm::{
 /// 错误码。
 pub const ERR: i32 = -1;
 
+// ======================== 植入机制（对应 winio.c 的 implant / get_code_from_plantation） ========================
+
+/// 植入队列中的一项：普通字符键码或函数命令。
+enum Planted {
+    Key(i32),
+    Command(FunctionId, i32),
+}
+
+thread_local! {
+    static PLANTED_QUEUE: std::cell::RefCell<std::collections::VecDeque<Planted>> =
+        const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+}
+
+/// UTF-8 首字节的长度。
+fn utf8_len(first: u8) -> usize {
+    if first < 0x80 {
+        1
+    } else if first < 0xE0 {
+        2
+    } else if first < 0xF0 {
+        3
+    } else {
+        4
+    }
+}
+
+/// 植入一个展开字符串（对应 C 版 `implant` + `get_code_from_plantation`）。
+/// 支持 `{function}` 占位符与 `{{}` / `{}}` 转义；普通文本按字符压入输入队列。
+pub fn implant(expansion: &str) {
+    PLANTED_QUEUE.with(|q| {
+        let mut queue = q.borrow_mut();
+        let bytes = expansion.as_bytes();
+        let n = bytes.len();
+        let mut i = 0;
+        while i < n {
+            if bytes[i] == b'{' {
+                /* {{} 与 {}} 转义为字面花括号。 */
+                if i + 2 < n && bytes[i + 2] == b'}' && (bytes[i + 1] == b'{' || bytes[i + 1] == b'}') {
+                    queue.push_back(Planted::Key(bytes[i + 1] as i32));
+                    i += 3;
+                    continue;
+                }
+                /* {command}：函数名占位符。 */
+                if let Some(closing) = expansion[i + 1..].find('}') {
+                    let name = &expansion[i + 1..i + 1 + closing];
+                    if let Some((func, toggle)) = global::strtosc(name) {
+                        queue.push_back(Planted::Command(func, toggle));
+                    }
+                    /* 未知函数：忽略（对应 C 版 NO_SUCH_FUNCTION）。 */
+                    i += 1 + closing + 1;
+                    continue;
+                }
+                /* 未闭合的 {：按字面处理。 */
+                queue.push_back(Planted::Key(b'{' as i32));
+                i += 1;
+                continue;
+            }
+            /* 普通字符：按 code point 压入，避免逐字节拆分多字节字符。 */
+            let ch_len = utf8_len(bytes[i]).min(n - i);
+            if let Some(c) = expansion[i..i + ch_len].chars().next() {
+                queue.push_back(Planted::Key(c as i32));
+            }
+            i += ch_len;
+        }
+    });
+}
+
+// ======================== 宏录制与回放（对应 winio.c record_macro / run_macro） ========================
+
+/// 切换宏录制状态（对应 `record_macro`）。
+pub fn record_macro() {
+    let recording = with_global(|g| g.recording);
+    if !recording {
+        with_global_mut(|g| {
+            g.recording = true;
+            g.macro_buffer.clear();
+        });
+        statusline(MessageType::Remark, &crate::t!("macro-recording"));
+    } else {
+        with_global_mut(|g| {
+            g.recording = false;
+            /* 剪掉触发停止的按键。 */
+            g.macro_buffer.pop();
+        });
+        statusline(MessageType::Remark, &crate::t!("macro-stopped"));
+    }
+}
+
+/// 把宏按键序列排入输入队列（对应 `run_macro`）。
+pub fn run_macro() {
+    if with_global(|g| g.recording) {
+        statusline(MessageType::Ahem, &crate::t!("macro-while_recording"));
+        return;
+    }
+    let buffer = with_global(|g| g.macro_buffer.clone());
+    if buffer.is_empty() {
+        statusline(MessageType::Ahem, &crate::t!("macro-empty"));
+        return;
+    }
+    /* 正序压入植入队列（C 版逆序 put_back + 栈式读取等价于正序执行）。 */
+    PLANTED_QUEUE.with(|q| {
+        let mut queue = q.borrow_mut();
+        for code in buffer {
+            queue.push_back(Planted::Key(code));
+        }
+    });
+}
+
 /// 初始化屏幕（对应 initscr）。
 pub fn initscr() {
     let mut stdout = io::stdout();
@@ -79,6 +187,23 @@ pub fn curs_set(visible: i32) {
 
 /// 获取按键输入（对应 wgetch）。
 pub fn wgetch() -> i32 {
+    // 优先消费植入队列（对应 C 版 get_input 先处理 put_back 的键）。
+    if let Some(planted) = PLANTED_QUEUE.with(|q| q.borrow_mut().pop_front()) {
+        match planted {
+            Planted::Key(k) => return k,
+            Planted::Command(func, toggle) => {
+                /* 函数命令直接执行（对应 C 版主循环对 PLANTED_A_COMMAND 的处理）。 */
+                if func == FunctionId::DoToggle {
+                    TOGGLE(toggle as usize);
+                    edit_refresh();
+                } else {
+                    let _ = execute_by_id(func);
+                    edit_refresh();
+                }
+                return FOREIGN_SEQUENCE;
+            }
+        }
+    }
     match event::read() {
         Ok(Event::Key(key)) => {
             if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat {
@@ -1974,6 +2099,10 @@ pub fn show_welcome_message() -> bool {
 /// 处理单个按键：执行快捷键或作为普通字符输入。
 /// 返回 TRUE 表示已处理。
 pub fn handle_input_key(key: i32) -> bool {
+    /* 宏录制：记录每个按键（触发停止的按键由 record_macro 弹出）。 */
+    if with_global(|g| g.recording) {
+        with_global_mut(|g| g.macro_buffer.push(key));
+    }
     let menu = with_global(|g| g.currmenu);
     let handled = execute_function(key, menu);
 
@@ -2029,7 +2158,6 @@ fn execute_by_id(func: FunctionId) -> bool {
         FunctionId::DoInsertFile => files::do_insertfile(),
         FunctionId::DoExecute => files::do_execute(),
         FunctionId::DoSpell => text::do_spell(),
-        FunctionId::DoLinter => {}
         FunctionId::DoFormatter => text::do_formatter(),
         FunctionId::DoIndent => text::do_indent(),
         FunctionId::DoUnindent => text::do_unindent(),
@@ -2059,6 +2187,38 @@ fn execute_by_id(func: FunctionId) -> bool {
         FunctionId::DoReportLocation => global::report_cursor_position(),
         FunctionId::DoVerbatimInput => text::do_verbatim_input(),
         FunctionId::FlipGoto => search::flip_goto(),
+        FunctionId::ToTopRow => movement::to_top_row(),
+        FunctionId::ToBottomRow => movement::to_bottom_row(),
+        FunctionId::DoCycle => movement::do_cycle(),
+        FunctionId::DoCenter => movement::do_center(),
+        FunctionId::ChopPrevWord => cut::chop_previous_word(),
+        FunctionId::ChopNextWord => cut::chop_next_word(),
+        FunctionId::PutOrLiftAnchor => text::do_anchor(),
+        FunctionId::ToPrevAnchor => text::to_prev_anchor(),
+        FunctionId::ToNextAnchor => text::to_next_anchor(),
+        FunctionId::CountWords => text::count_lines_words_and_characters(),
+        FunctionId::DoZap => cut::zap_text(),
+        FunctionId::DoSaveFile => files::do_savefile(),
+        FunctionId::DoRecordMacro => record_macro(),
+        FunctionId::DoRunMacro => run_macro(),
+        FunctionId::DoLinter => text::do_linter(),
+        FunctionId::ToFirstFile => crate::browser::to_first_file(),
+        FunctionId::ToLastFile => crate::browser::to_last_file(),
+        FunctionId::ToFiles => {
+            let start = with_global(|g| {
+                g.present_path
+                    .clone()
+                    .or_else(|| g.openfile.as_ref().and_then(|of| of.borrow().filename.clone()))
+                    .unwrap_or_else(|| ".".to_string())
+            });
+            if let Some(chosen) = crate::browser::browse(&start) {
+                let _ = files::open_buffer(&chosen);
+            }
+        }
+        FunctionId::GotoDir => {
+            let start = with_global(|g| g.present_path.clone().unwrap_or_else(|| ".".to_string()));
+            let _ = crate::browser::browse_in(&start);
+        }
         FunctionId::DoNothing => return false,
         _ => {}
     }
@@ -2069,11 +2229,10 @@ fn execute_by_id(func: FunctionId) -> bool {
 fn execute_bound(bound: &BoundKey) -> bool {
     match bound.func {
         FunctionId::Implant => {
-            /* 把植入字符串逐字符插入（对应 implant 的简化实现）。 */
+            /* 把植入字符串排入输入队列（对应 C 版 implant）。 */
             if let Some(expansion) = &bound.expansion {
-                text::inject(expansion.as_bytes(), expansion.len());
+                implant(expansion);
             }
-            edit_refresh();
             true
         }
         FunctionId::DoToggle => {
@@ -2276,5 +2435,70 @@ mod tests {
         let (s, w) = clip_to_width("a中文b", 4);
         assert_eq!(w, 3);
         assert_eq!(s, "a中");
+    }
+
+    /// 植入队列解析：普通字符、{command} 占位符、{{}/{}} 转义、多字节字符。
+    #[test]
+    fn implant_parses_placeholders() {
+        let drain = || {
+            PLANTED_QUEUE.with(|q| {
+                let mut q = q.borrow_mut();
+                let mut out = Vec::new();
+                while let Some(item) = q.pop_front() {
+                    match item {
+                        Planted::Key(k) => out.push(("key", k)),
+                        Planted::Command(f, t) => out.push(("cmd", if f == FunctionId::DoEnter { 1000 + t } else { -1 })),
+                    }
+                }
+                out
+            })
+        };
+        implant("ab{enter}cd");
+        let items = drain();
+        assert_eq!(items.len(), 5);
+        assert_eq!(items[0], ("key", 97)); // a
+        assert_eq!(items[1], ("key", 98)); // b
+        // {enter} → DoEnter 命令
+        assert_eq!(items[2], ("cmd", 1000));
+        assert_eq!(items[3], ("key", 99)); // c
+        assert_eq!(items[4], ("key", 100)); // d
+
+        // 转义与多字节
+        implant("{{}中{}}");
+        let items = drain();
+        assert_eq!(items, vec![("key", 123), ("key", 0x4E2D), ("key", 125)]);
+
+        // 未知函数忽略
+        implant("x{nosuchfunc}y");
+        let items = drain();
+        assert_eq!(items.len(), 2);
+    }
+
+    /// 宏录制与回放队列。
+    #[test]
+    fn macro_record_and_run() {
+        crate::global::global_init();
+        // 开始录制
+        record_macro();
+        assert!(with_global(|g| g.recording));
+        with_global_mut(|g| g.macro_buffer.push(97));
+        with_global_mut(|g| g.macro_buffer.push(98));
+        // 停止录制（record_macro 会弹出触发键）
+        with_global_mut(|g| g.macro_buffer.push(25)); // M-U 触发键
+        record_macro();
+        assert!(!with_global(|g| g.recording));
+        assert_eq!(with_global(|g| g.macro_buffer.clone()), vec![97, 98]);
+
+        // 回放：压入植入队列
+        run_macro();
+        let got = PLANTED_QUEUE.with(|q| {
+            let mut q = q.borrow_mut();
+            let mut v = Vec::new();
+            while let Some(Planted::Key(k)) = q.pop_front() {
+                v.push(k);
+            }
+            v
+        });
+        assert_eq!(got, vec![97, 98]);
     }
 }

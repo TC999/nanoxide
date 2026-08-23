@@ -2968,6 +2968,216 @@ pub fn do_anchor() {
     }
 }
 
+/// 跳转到给定锚点行，或报告锚点状态（对应 `go_to_and_confirm`）。
+fn go_to_and_confirm(line: &LineRef) {
+    let same = with_global(|g| {
+        g.openfile
+            .as_ref()
+            .and_then(|of| of.borrow().current.clone())
+            .map(|c| std::rc::Rc::ptr_eq(&c, line))
+            .unwrap_or(false)
+    });
+
+    if !same {
+        let old = with_global(|g| {
+            let mut of = g.openfile.as_ref().unwrap().borrow_mut();
+            of.current = Some(line.clone());
+            of.current_x = 0;
+            of.current.clone().unwrap()
+        });
+        winio::edit_redraw(&old, UpdateType::Centering);
+        winio::statusbar(&crate::t!("anchor-jumped"));
+    } else {
+        let has = line.borrow().has_anchor;
+        if has {
+            winio::statusline(MessageType::Remark, &crate::t!("anchor-only"));
+        } else {
+            winio::statusline(MessageType::Ahem, &crate::t!("anchor-none"));
+        }
+    }
+}
+
+/// 跳转到当前行之前的第一个锚点，绕回文件尾（对应 `to_prev_anchor`）。
+pub fn to_prev_anchor() {
+    let target = with_global(|g| {
+        let of = g.openfile.as_ref().unwrap().borrow();
+        let mut line = of.current.clone();
+        let start_lineno = line.as_ref().map(|l| l.borrow().lineno).unwrap_or(0);
+        loop {
+            let prev = {
+                let r = line.as_ref().unwrap().borrow();
+                r.prev.clone().and_then(|w| w.upgrade())
+            };
+            line = match prev {
+                Some(p) => Some(p),
+                None => of.filebot.clone(),
+            };
+            if line.as_ref().map(|l| l.borrow().has_anchor).unwrap_or(false) {
+                break;
+            }
+            if line.as_ref().map(|l| l.borrow().lineno).unwrap_or(0) == start_lineno {
+                break;
+            }
+        }
+        line
+    });
+    if let Some(line) = target {
+        go_to_and_confirm(&line);
+    }
+}
+
+/// 跳转到当前行之后的下一个锚点，绕回文件顶（对应 `to_next_anchor`）。
+pub fn to_next_anchor() {
+    let target = with_global(|g| {
+        let of = g.openfile.as_ref().unwrap().borrow();
+        let mut line = of.current.clone();
+        let start_lineno = line.as_ref().map(|l| l.borrow().lineno).unwrap_or(0);
+        loop {
+            let next = {
+                let r = line.as_ref().unwrap().borrow();
+                r.next.clone()
+            };
+            line = match next {
+                Some(n) => Some(n),
+                None => of.filetop.clone(),
+            };
+            if line.as_ref().map(|l| l.borrow().has_anchor).unwrap_or(false) {
+                break;
+            }
+            if line.as_ref().map(|l| l.borrow().lineno).unwrap_or(0) == start_lineno {
+                break;
+            }
+        }
+        line
+    });
+    if let Some(line) = target {
+        go_to_and_confirm(&line);
+    }
+}
+
+/// 统计（标记区域或整个）缓冲区的行数、词数与字符数并显示
+/// （对应 `count_lines_words_and_characters` 的简化版）。
+pub fn count_lines_words_and_characters() {
+    let (lines, chars, words) = with_global(|g| {
+        let of = g.openfile.as_ref().unwrap().borrow();
+        let filetop = of.filetop.clone();
+        let filebot = of.filebot.clone();
+        let totsize = of.totsize;
+        let ft = filetop.as_ref().map(|l| l.borrow().lineno).unwrap_or(1);
+        let fb = filebot.as_ref().map(|l| l.borrow().lineno).unwrap_or(1);
+        let mut words = 0usize;
+        let mut line = filetop;
+        while let Some(l) = line {
+            let data = l.borrow().data.clone();
+            words += data.split_whitespace().count();
+            let next = { let r = l.borrow(); r.next.clone() };
+            line = next;
+        }
+        ((fb - ft + 1).max(1), totsize, words)
+    });
+    winio::statusline(
+        MessageType::Info,
+        &crate::t!(
+            "count-report",
+            lines = lines.to_string(),
+            words = words.to_string(),
+            chars = chars.to_string()
+        ),
+    );
+}
+
+/// 运行当前语法的 linter 并报告结果（对应 `do_linter` 的基础版：
+/// 写临时文件、执行命令、解析输出、跳转到第一个错误）。
+pub fn do_linter() {
+    if files::in_restricted_mode() {
+        return;
+    }
+    let linter = with_global(|g| {
+        g.openfile
+            .as_ref()
+            .and_then(|of| of.borrow().syntax.clone())
+            .and_then(|s| s.borrow().linter.clone())
+    });
+    let Some(linter) = linter else {
+        winio::statusline(MessageType::Ahem, &crate::t!("linter-none"));
+        return;
+    };
+
+    with_global_mut(|g| g.ran_a_tool = true);
+    let Some(temp_name) = safe_tempfile_name() else {
+        return;
+    };
+    if !write_buffer_to_file(&temp_name) {
+        let _ = std::fs::remove_file(&temp_name);
+        return;
+    }
+
+    winio::statusbar(&crate::t!("linter-invoking"));
+
+    /* 把 %s 替换为临时文件名，其余交给 shell 执行。 */
+    let command = linter.replace("%s", &temp_name);
+    let output = std::process::Command::new("sh").arg("-c").arg(&command).output();
+
+    let _ = std::fs::remove_file(&temp_name);
+
+    let text = match output {
+        Ok(o) => {
+            let mut t = String::from_utf8_lossy(&o.stdout).to_string();
+            t.push_str(&String::from_utf8_lossy(&o.stderr));
+            t
+        }
+        Err(_) => {
+            winio::statusline(MessageType::Alert, &crate::t!("linter-failed"));
+            return;
+        }
+    };
+
+    if text.trim().is_empty() {
+        winio::statusline(MessageType::Info, &crate::t!("linter-ok"));
+        return;
+    }
+
+    /* 解析输出：统计错误数，尝试提取第一个 "line:col:" 或 "file:line:col:" 并跳转。 */
+    let mut count = 0usize;
+    let mut first_msg = String::new();
+    let mut jump_line: Option<isize> = None;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        count += 1;
+        if first_msg.is_empty() {
+            first_msg = line.to_string();
+        }
+        if jump_line.is_none() {
+            if let Some(idx) = line.find(':') {
+                let before = &line[..idx];
+                if let Some(colon2) = before.rfind(':') {
+                    if let Ok(n) = before[colon2 + 1..].parse::<isize>() {
+                        jump_line = Some(n);
+                    }
+                } else if let Ok(n) = before.parse::<isize>() {
+                    jump_line = Some(n);
+                }
+            }
+        }
+    }
+
+    if let Some(n) = jump_line {
+        crate::search::goto_line_and_column(n, 0, true);
+    }
+
+    winio::statusline(
+        MessageType::Info,
+        &crate::t!(
+            "linter-report",
+            count = count.to_string(),
+            first = first_msg
+        ),
+    );
+}
+
 /// 清除所有剪贴板内容（对应 C 版在剪切操作前 `free_lines(cutbuffer);
 /// cutbuffer = NULL` 的集中清理）。
 pub fn zap_all_cutbuffer() {

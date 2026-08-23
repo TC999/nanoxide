@@ -749,6 +749,10 @@ pub struct GlobalState {
     pub bound_keys: Vec<BoundKey>,
     /// unbind 命令登记的键（keycode, menus 掩码），命中时按键被忽略。
     pub unbound_keys: Vec<(i32, i32)>,
+    /// 是否正在录制宏（对应 C 版 recording）。
+    pub recording: bool,
+    /// 宏按键缓冲（对应 C 版 macro_buffer）。
+    pub macro_buffer: Vec<i32>,
     // 命令行选项快照（do_rcfiles 后恢复，对应 C 版 *-cmdline 备份）
     pub cmdline_fill: Option<isize>,
     pub cmdline_tabsize: Option<usize>,
@@ -821,6 +825,7 @@ impl GlobalState {
             custom_nanorc: None, backup_dir: None, operating_dir: None,
             stripe_column: 0, punct: None, brackets: None, quotestr: None,
             bound_keys: Vec::new(), unbound_keys: Vec::new(),
+            recording: false, macro_buffer: Vec::new(),
             cmdline_fill: None, cmdline_tabsize: None, cmdline_stripe_column: None,
             cmdline_backup_dir: None, cmdline_word_chars: None,
             cmdline_operating_dir: None, cmdline_quotestr: None,

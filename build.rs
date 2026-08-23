@@ -35,6 +35,11 @@ fn main() {
     println!("cargo:warning=  release -> {}", release_dir.display());
     println!("cargo:warning=  debug   -> {}", debug_dir.display());
 
+    // 系统级 nanorc 目录（对应 C 版 configure 的 SYSCONFDIR，默认 /etc）。
+    let sysconfdir = env::var("SYSCONFDIR").unwrap_or_else(|_| "/etc".to_string());
+    println!("cargo:rustc-env=SYSCONFDIR={}", sysconfdir);
+    println!("cargo:warning=SYSCONFDIR = {}", sysconfdir);
+
     if !src_dir.exists() {
         println!("cargo:warning=Source locales directory '{}' does not exist, skipping copy.", src_dir.display());
         return;
