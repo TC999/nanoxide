@@ -21,6 +21,8 @@ use crate::files;
 use crate::utils;
 use crate::winio;
 use std::rc::Rc;
+#[cfg(not(target_os = "windows"))]
+use std::io::Write;
 
 /// 获取当前打开的缓冲区引用（克隆 Rc，释放全局借用）。
 fn openfile_ref() -> OpenFileRef {
