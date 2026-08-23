@@ -753,7 +753,7 @@ pub fn parse_file_args(args: &[String]) -> Vec<(String, isize, isize)> {
 }
 /// 打印版本信息。
 fn print_version() {
-    println!("nanoxide version {}", VERSION);
+    println!("nanoxide version {}", env!("CARGO_PKG_VERSION"));
     println!("(Rust translation of GNU nano)");
     println!("Compiled options: --enable-utf8");
 }
