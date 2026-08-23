@@ -1244,6 +1244,45 @@ pub fn make_new_buffer() {
     });
 }
 
+/// 删除当前缓冲区的锁文件并清空其记录
+/// （对应 C 版 `close_and_go` 开头的
+/// `if (openfile->lock_filename) delete_lockfile(openfile->lock_filename)`）。
+pub fn delete_lockfile_of_current_buffer() {
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            let lock = { of.borrow_mut().lock_filename.take() };
+            if let Some(lock) = lock {
+                delete_lockfile(&lock);
+            }
+        }
+    });
+}
+
+/// 删除所有缓冲区的锁文件（对应 C 版 `die()` 中遍历删除）。
+pub fn delete_all_lockfiles() {
+    let openfiles: Vec<OpenFileRef> = {
+        let mut result = Vec::new();
+        let mut current = with_global(|g| g.openfile.clone());
+        loop {
+            let next = match current {
+                Some(ref ofile) => {
+                    result.push(ofile.clone());
+                    ofile.borrow().next.clone()
+                }
+                None => break,
+            };
+            current = next;
+        }
+        result
+    };
+    for ofile in openfiles {
+        let lock = { ofile.borrow_mut().lock_filename.take() };
+        if let Some(lock) = lock {
+            delete_lockfile(&lock);
+        }
+    }
+}
+
 /// 关闭当前缓冲区并回到前一个（对应 `close_buffer`）。
 pub fn close_buffer() {
     with_global_mut(|g| {

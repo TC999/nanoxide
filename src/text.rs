@@ -61,6 +61,7 @@ pub fn do_cancel() {}
 pub fn do_exit() {
     /* 未修改时直接退出。 */
     if !files::is_modified() {
+        files::delete_lockfile_of_current_buffer();
         with_global_mut(|g| g.we_are_running = false);
         return;
     }
@@ -72,11 +73,15 @@ pub fn do_exit() {
         YES => {
             files::do_writeout();
             if !files::is_modified() {
+                files::delete_lockfile_of_current_buffer();
                 with_global_mut(|g| g.we_are_running = false);
             }
         }
         /* "否"：直接退出。 */
-        NO => with_global_mut(|g| g.we_are_running = false),
+        NO => {
+            files::delete_lockfile_of_current_buffer();
+            with_global_mut(|g| g.we_are_running = false);
+        }
         /* 取消：留在编辑器中。 */
         _ => winio::statusbar(&crate::t!("files-cancelled")),
     }

@@ -176,6 +176,8 @@ pub fn main_loop() {
         // （对应 C 版 handle_hupterm 的 die + emergency_save_all）。
         if signals::terminate_requested() {
             files::emergency_save_all();
+            /* 对应 C 版 die()：遍历删除所有缓冲区的锁文件。 */
+            files::delete_all_lockfiles();
             with_global_mut(|g| g.we_are_running = false);
             break;
         }
