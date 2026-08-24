@@ -445,12 +445,11 @@ pub fn find_and_prime_applicable_syntax() {
         }
     }
 
-    /* 语法尚未加载时解析并初始化其颜色。 */
+    /* 为选定的语法分配颜色对编号（对应 C 的 parse_one_include + set_syntax_colorpairs）：
+     * Rust 中语法已在启动时全量解析（filename 恒为 None），故直接无条件初始化。
+     * set_syntax_colorpairs 幂等：相同组合复用同一 pairnum，重复调用无副作用。 */
     if let Some(s) = &sntx {
-        let needs_parse = { let r = s.borrow(); r.filename.is_some() };
-        if needs_parse {
-            set_syntax_colorpairs(s);
-        }
+        set_syntax_colorpairs(s);
     }
 
     with_global_mut(|g| {
@@ -518,9 +517,9 @@ pub fn check_the_multis(line: &LineRef) {
         let astart_match = ink_ref.start.as_ref().map(|s| s.matches(&line_data)).unwrap_or(false);
         let afterstart = if astart_match { astart } else { 0 };
 
-        let anend = ink_ref.end.as_ref()
-            .and_then(|e| e.find_match_bytes(&line_data.as_bytes()[afterstart..]))
-            .is_some();
+        let anend_match = ink_ref.end.as_ref()
+            .and_then(|e| e.find_match_bytes(&line_data.as_bytes()[afterstart..]));
+        let anend = anend_match.is_some();
 
         let md = multidata.get(id as usize).copied().unwrap_or(0);
         if md == NOTHING as i16 {
@@ -537,8 +536,10 @@ pub fn check_the_multis(line: &LineRef) {
             }
         } else if md == JUSTONTHIS as i16 {
             if astart_match && anend {
+                /* 在 start 匹配之后再加上 end 匹配的终点，寻找第三个 start
+                 * （对应 C：regexec(start, data + startmatch.rm_eo + endmatch.rm_eo, ...)）。 */
                 let third = ink_ref.start.as_ref()
-                    .and_then(|s| s.find_match_bytes(&line_data.as_bytes()[afterstart + 0..]))
+                    .and_then(|s| s.find_match_bytes(&line_data.as_bytes()[afterstart + anend_match.unwrap().1..]))
                     .is_none();
                 if third {
                     continue;
@@ -626,9 +627,9 @@ pub fn precalc_multicolorinfo() {
 
         let mut line_iter = 0;
         while line_iter < lines.len() {
-            let line = &lines[line_iter];
+            let mut line = lines[line_iter].clone();
             let mut index = 0;
-            let data = line.borrow().data.clone();
+            let mut data = line.borrow().data.clone();
 
             /* 假设开始时不适用任何内容。 */
             line.borrow_mut().multidata.as_mut().map(|m| m[id as usize] = NOTHING as i16);
@@ -638,10 +639,11 @@ pub fn precalc_multicolorinfo() {
                 let startmatch = start_pat.as_ref()
                     .and_then(|s| s.find_match_bytes(&data.as_bytes()[index..]))
                     .map(|(so, eo)| (index + so, index + eo));
-                let Some((_, start_eo)) = startmatch else { break };
+                let Some((start_so, start_eo)) = startmatch else { break };
 
                 /* 在 start 匹配之后开始寻找 end 匹配。 */
                 index = start_eo;
+                let end_search_start = index;
 
                 /* 若同一行有 end 匹配，标记该行并继续找其他 start。 */
                 let endmatch = end_pat.as_ref()
@@ -649,10 +651,14 @@ pub fn precalc_multicolorinfo() {
                     .map(|(so, eo)| (index + so, index + eo));
                 if let Some((_, end_eo)) = endmatch {
                     line.borrow_mut().multidata.as_mut().map(|m| m[id as usize] = JUSTONTHIS as i16);
-                    index += end_eo;
+
+                    /* 总匹配长度 = start 匹配长度 + end 匹配长度
+                     * （对应 C 的 startmatch.rm_eo - startmatch.rm_so + endmatch.rm_eo）。 */
+                    let total_len = (start_eo - start_so) + (end_eo - end_search_start);
+                    index = end_eo;
 
                     /* 若总匹配长度为零，强制前进。 */
-                    if start_eo - 0 + end_eo == 0 {
+                    if total_len == 0 {
                         /* 位于行尾时没有其他 start。 */
                         if data.as_bytes().get(index).copied().unwrap_or(0) == 0 {
                             break;
@@ -664,11 +670,11 @@ pub fn precalc_multicolorinfo() {
 
                 /* 在后续行中寻找 end 匹配。 */
                 let mut tailline = line_iter + 1;
-                let mut tail_end_found = false;
+                let mut tail_eo: Option<usize> = None;
                 while tailline < lines.len() {
                     let tdata = lines[tailline].borrow().data.clone();
-                    if end_pat.as_ref().map(|e| e.find_match_bytes(tdata.as_bytes()).is_some()).unwrap_or(false) {
-                        tail_end_found = true;
+                    if let Some((_, eo)) = end_pat.as_ref().and_then(|e| e.find_match_bytes(tdata.as_bytes())) {
+                        tail_eo = Some(eo);
                         break;
                     }
                     tailline += 1;
@@ -681,7 +687,7 @@ pub fn precalc_multicolorinfo() {
                     lines[li].borrow_mut().multidata.as_mut().map(|m| m[id as usize] = WHOLELINE as i16);
                 }
 
-                if !tail_end_found {
+                if tail_eo.is_none() {
                     /* 跳到文件末尾。 */
                     line_iter = lines.len() - 1;
                     break;
@@ -689,12 +695,13 @@ pub fn precalc_multicolorinfo() {
 
                 lines[tailline].borrow_mut().multidata.as_mut().map(|m| m[id as usize] = ENDSHERE as i16);
 
-                /* 在 end 匹配后寻找可能的新的 start。 */
-                let end_eo = end_pat.as_ref()
-                    .and_then(|e| e.find_match_bytes(lines[tailline].borrow().data.as_bytes()))
-                    .map(|(_, eo)| eo)
-                    .unwrap_or(0);
-                index = end_eo;
+                /* 在 end 匹配后继续寻找可能的新的 start：把工作行推进到
+                 * tailline、从 end 匹配终点继续（对应 C 修改外层 line 指针
+                 * 并用 index = endmatch.rm_eo 继续内层 while）。 */
+                line_iter = tailline;
+                line = lines[tailline].clone();
+                data = line.borrow().data.clone();
+                index = tail_eo.unwrap();
             }
 
             line_iter += 1;

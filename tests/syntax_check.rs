@@ -6,6 +6,8 @@
 // 3. update_line 渲染不崩溃
 
 use nanoxide::definitions::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// 初始化全局状态与一个空缓冲。
 fn setup() {
@@ -188,4 +190,97 @@ fn syntax_binding_primes_colorpairs() {
             "attributes 应编码颜色对");
     let lookup = nanoxide::color::lookup_pair(pn as i32);
     assert!(lookup.is_some(), "颜色对表应有 pairnum={pn} 的条目");
+}
+
+/// 构造含一个多行规则（start="a"、end="b"）的临时语法并绑定到当前缓冲。
+fn bind_single_multiline_syntax() -> SyntaxRef {
+    let sntx = Rc::new(RefCell::new(SyntaxType::new()));
+    {
+        let mut s = sntx.borrow_mut();
+        s.name = Some("t".to_string());
+        s.multiscore = 1;
+        s.color = Some(Rc::new(RefCell::new(ColorType {
+            id: 0,
+            fg: 7,
+            bg: 0,
+            pairnum: 0,
+            attributes: 0,
+            start: Some(MatchPattern::from_regex("a", false).unwrap()),
+            end: Some(MatchPattern::from_regex("b", false).unwrap()),
+            next: None,
+        })));
+    }
+    with_global_mut(|g| {
+        let of = g.openfile.as_ref().unwrap().clone();
+        of.borrow_mut().syntax = Some(sntx.clone());
+    });
+    sntx
+}
+
+/// S2 回归：同一行内多对 start/end 时，precalc 的 index 推进必须正确。
+/// 行 "a1b2a3b" 有 start@0+end@2、start@4+end@6 两对；修复前第二次迭代
+/// `index += end_eo` 会把绝对偏移再叠加一次，导致后续切片越界 panic。
+#[test]
+fn precalc_multiple_pairs_on_one_line() {
+    setup();
+    bind_single_multiline_syntax();
+
+    nanoxide::text::inject(b"a1b2a3b", 7);
+    nanoxide::files::prepare_for_display();
+
+    nanoxide::color::precalc_multicolorinfo();
+
+    let line = with_global(|g| g.openfile.as_ref().unwrap().borrow().filetop.clone().unwrap());
+    let md = line.borrow().multidata.clone().expect("应有 multidata");
+    assert_eq!(md[0] as i32, JUSTONTHIS, "两对 start/end 都应标记 JUSTONTHIS");
+}
+
+/// S3 回归：check_the_multis 的 JUSTONTHIS 分支，第三个 start 的搜索起点应
+/// 加上 end 匹配长度（对应 C：data + startmatch.rm_eo + endmatch.rm_eo）。
+/// 行 "aab"：start@0、end@2（起点 afterstart=1），start 与 end 之间有一个 a，
+/// 但 end 之后没有 a —— C 语义下本行未变化，不应安排重绘。
+#[test]
+fn check_multis_justonthis_uses_end_offset() {
+    setup();
+    bind_single_multiline_syntax();
+
+    nanoxide::text::inject(b"aab", 3);
+    nanoxide::files::prepare_for_display();
+
+    /* 手工构造 precalc 后的状态：本行 JUSTONTHIS。 */
+    let line = with_global(|g| g.openfile.as_ref().unwrap().borrow().filetop.clone().unwrap());
+    line.borrow_mut().multidata = Some(vec![JUSTONTHIS as i16]);
+
+    with_global_mut(|g| g.refresh_needed = false);
+    nanoxide::color::check_the_multis(&line);
+    let refresh = with_global(|g| g.refresh_needed);
+    assert!(!refresh, "end 之后没有第三个 start，行应视为未变化（C 语义）");
+}
+
+/// S1 回归：find_and_prime_applicable_syntax 绑定语法后应自动分配 pairnum
+/// （对应 C 的 parse_one_include + set_syntax_colorpairs）。修复前该分支受
+/// filename.is_some() 保护而不可达，pairnum 恒为 0，语法前景/背景色不生效。
+#[test]
+fn binding_automatically_primes_syntax_colorpairs() {
+    setup();
+    parse_c_syntax();
+
+    let ok = nanoxide::files::open_buffer("test_syntax.c");
+    assert!(matches!(ok, nanoxide::files::OpenBufferResult::NewFile | nanoxide::files::OpenBufferResult::FileLoaded));
+    nanoxide::text::inject(b"int main(void) { return 0; }", 28);
+    nanoxide::files::prepare_for_display();
+
+    nanoxide::color::find_and_prime_applicable_syntax();
+
+    let bound = with_global(|g| g.openfile.as_ref().unwrap().borrow().syntax.clone());
+    let sntx = bound.expect("应为 .c 文件绑定 C 语法");
+
+    /* 不手动调用 set_syntax_colorpairs：pairnum 应由绑定流程分配。 */
+    let first = sntx.borrow().color.clone().expect("应有颜色规则");
+    let r = first.borrow();
+    let pn = r.pairnum;
+    assert!(pn > 0, "绑定后 pairnum 应已分配，实际 {pn}");
+    assert!(r.attributes >> 16 == pn as i32, "attributes 应编码颜色对编号");
+    assert!(nanoxide::color::lookup_pair(pn as i32).is_some(),
+            "颜色对表应有 pairnum={pn} 的条目（prepare_palette 应已填充）");
 }
