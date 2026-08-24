@@ -986,34 +986,84 @@ pub fn blank_edit() {
 }
 
 /// 放置光标（对应 `place_the_cursor`）。
-/// 行位置按 `current.lineno - edittop.lineno` 计算（与 C 一致），
-/// 并更新 `cursor_row`。
+/// 屏幕列按 C 版换算：非软换行减去视口左缘列（`get_page_start`），
+/// 软换行减去当前块的最左列并把行号累计为"含块的行数"（详见
+/// `cursor_screen_position`）。
 pub fn place_the_cursor() {
     let editwinrows = with_global(|g| g.editwinrows);
     let margin = current_margin();
-    with_global_mut(|g| {
-        let openfile = g.openfile.clone();
-        if let Some(of) = openfile {
-            let mut of_ref = of.borrow_mut();
-            let (cur, edittop) = match (&of_ref.current, &of_ref.edittop) {
-                (Some(c), Some(e)) => (c.clone(), e.clone()),
-                _ => return,
-            };
-            let row = {
-                let cur_lineno = cur.borrow().lineno;
-                let edit_lineno = edittop.borrow().lineno;
-                cur_lineno - edit_lineno
-            };
-            of_ref.cursor_row = row;
-            if row < editwinrows as isize {
-                /* 光标列用显示列宽计算（而非字节偏移），并加上行号边距。 */
-                let data = cur.borrow().data.clone();
-                let column = crate::utils::wideness(data.as_bytes(), of_ref.current_x);
-                let mut stdout = io::stdout();
-                let _ = execute!(stdout, cursor::MoveTo((column + margin) as u16, (row + 1) as u16));
+    let (cur, edittop, current_x, firstcolumn) = with_global(|g| {
+        if let Some(of) = &g.openfile {
+            let of = of.borrow();
+            if let (Some(c), Some(e)) = (&of.current, &of.edittop) {
+                return (Some(c.clone()), Some(e.clone()), of.current_x, of.firstcolumn);
             }
         }
+        (None, None, 0, 0)
     });
+    if let (Some(cur), Some(edittop)) = (cur, edittop) {
+        let (row, screen_column) = cursor_screen_position(&cur, &edittop, current_x, firstcolumn);
+        with_global_mut(|g| {
+            if let Some(of) = &g.openfile {
+                of.borrow_mut().cursor_row = row;
+            }
+        });
+        if row >= 0 && row < editwinrows as isize {
+            let mut stdout = io::stdout();
+            let _ = execute!(
+                stdout,
+                cursor::MoveTo((screen_column + margin) as u16, (row + 1) as u16)
+            );
+        }
+    }
+}
+
+/// 计算光标应处的屏幕行与列（编辑区相对坐标，行 0 对应编辑区首行）。
+///
+/// 注意：本函数内部会调用 `with_global`（经 ISSET/`get_page_start`/
+/// `chunk_for` 等），因此**必须在 `with_global`/`with_global_mut`
+/// 闭包之外调用**，否则会触发 RefCell 双重借用 panic。
+///
+/// 对齐 C 版 `place_the_cursor` 的换算：超长行时光标的绝对显示列
+/// （`wideness(current->data, current_x)`）必须折算为屏幕内相对列——
+/// 非软换行减去视口左缘列（`get_page_start`），软换行减去当前块的最
+/// 左列（leftedge）；软换行下行号还要累计 edittop 到当前行之间每行的
+/// "1 + 额外块数"以及当前行内光标之前的块数。若不折算，光标列超过
+/// 屏幕宽度后会被直接移出终端（表现为"移动到某个位置就停住"）。
+fn cursor_screen_position(
+    current: &LineRef,
+    edittop: &LineRef,
+    current_x: usize,
+    firstcolumn: usize,
+) -> (isize, usize) {
+    let column = crate::utils::wideness(current.borrow().data.as_bytes(), current_x);
+
+    let row: isize;
+    let screen_column: usize;
+    if ISSET(SOFTWRAP) {
+        /* edittop 上方被滚出屏的块数（取负），加上从 edittop 到当前行
+         * 之间各行的显示行数（每行 1 + 额外块数），再加上当前行中光标
+         * 之前的块数。 */
+        let mut row_acc: isize = -(chunk_for(firstcolumn, edittop) as isize);
+        let mut line: Option<LineRef> = Some(edittop.clone());
+        while let Some(l) = line {
+            if Rc::ptr_eq(&l, current) {
+                break;
+            }
+            row_acc += 1 + extra_chunks_in(&l) as isize;
+            let next = { let r = l.borrow(); r.next.clone() };
+            line = next;
+        }
+        let mut leftedge = 0usize;
+        row_acc += get_chunk_and_edge(column, current, Some(&mut leftedge)) as isize;
+        row = row_acc;
+        screen_column = column.saturating_sub(leftedge);
+    } else {
+        row = current.borrow().lineno as isize - edittop.borrow().lineno as isize;
+        screen_column = column.saturating_sub(crate::utils::get_page_start(column));
+    }
+
+    (row, screen_column)
 }
 
 /// 重绘标题栏。
@@ -2793,6 +2843,172 @@ mod tests {
         let rows2 = update_softwrapped_line(&second);
         assert_eq!(rows2, (extra_chunks_in(&second) + 1) as i32);
         assert_eq!(rows2, 1);
+
+        unset_flag(SOFTWRAP);
+    }
+
+    /// 光标在超长行的屏幕坐标换算（对应 C 版 place_the_cursor 的
+    /// column -= get_page_start / column -= leftedge 折算）：
+    /// 绝对显示列必须折算为屏幕内相对列，否则光标会被移出终端。
+    #[test]
+    fn cursor_screen_position_folds_horizontal_offset() {
+        crate::global::global_init();
+        make_new_buffer();
+        with_global_mut(|g| {
+            g.COLS = 80;
+            g.LINES = 24;
+            g.editwincols = 60;
+        });
+        unset_flag(SOFTWRAP);
+
+        // 200 列超长行，光标在字节 150（非软换行，页面滚动第二页）。
+        let long = vec![b'A'; 200];
+        crate::text::inject(&long, long.len());
+        with_global_mut(|g| {
+            let of = g.openfile.as_ref().unwrap().clone();
+            let mut of = of.borrow_mut();
+            of.current_x = 150;
+        });
+
+        let (cur, edittop, cx, fc) = with_global(|g| {
+            let of = g.openfile.as_ref().unwrap().borrow();
+            (of.current.clone().unwrap(), of.edittop.clone().unwrap(), of.current_x, of.firstcolumn)
+        });
+        let (row, col) = cursor_screen_position(&cur, &edittop, cx, fc);
+        /* 屏幕列 = 150 - get_page_start(150)；应落在 [0, editwincols) 内，
+         * 而不是原实现的 150（超出屏幕）。 */
+        assert_eq!(row, 0, "光标仍在首行");
+        let page = crate::utils::get_page_start(150);
+        assert_eq!(col, 150 - page);
+        assert!(col < 60, "折算后列必须在编辑窗口宽度内，实际 {col}");
+
+        // 光标移到行尾（列 200）：仍在屏幕内。
+        with_global_mut(|g| {
+            let of = g.openfile.as_ref().unwrap().clone();
+            let mut of = of.borrow_mut();
+            of.current_x = 200;
+        });
+        let (cur, edittop, cx, fc) = with_global(|g| {
+            let of = g.openfile.as_ref().unwrap().borrow();
+            (of.current.clone().unwrap(), of.edittop.clone().unwrap(), of.current_x, of.firstcolumn)
+        });
+        let (row, col) = cursor_screen_position(&cur, &edittop, cx, fc);
+        let page = crate::utils::get_page_start(200);
+        assert_eq!(col, 200 - page);
+        assert!(col < 60, "行尾列也必须折算到屏幕内，实际 {col}");
+        assert_eq!(row, 0);
+    }
+
+    /// 软换行下光标坐标：行号累计各块，列折算到当前块内。
+    #[test]
+    fn cursor_screen_position_softwrap_chunks() {
+        crate::global::global_init();
+        make_new_buffer();
+        with_global_mut(|g| {
+            g.COLS = 80;
+            g.LINES = 24;
+            g.editwincols = 20;
+        });
+        set_flag(SOFTWRAP);
+
+        // 50 列长行 + 一行短行。
+        let long = vec![b'C'; 50];
+        crate::text::inject(&long, long.len());
+        with_global_mut(|g| {
+            let of = g.openfile.as_ref().unwrap().clone();
+            let mut of = of.borrow_mut();
+            of.current_x = 50;
+        });
+        crate::text::do_enter();
+        crate::text::inject(b"short", 5);
+
+        // 光标在长行第三块内（字节 47 → 块 [40,50)）。
+        with_global_mut(|g| {
+            let of = g.openfile.as_ref().unwrap().clone();
+            let mut of = of.borrow_mut();
+            of.current = of.filetop.clone();
+            of.current_x = 47;
+        });
+        let (cur, edittop, cx, fc) = with_global(|g| {
+            let of = g.openfile.as_ref().unwrap().borrow();
+            (of.current.clone().unwrap(), of.edittop.clone().unwrap(), of.current_x, of.firstcolumn)
+        });
+        let (row, col) = cursor_screen_position(&cur, &edittop, cx, fc);
+        assert_eq!(row, 2, "第三块应显示在第 2 个屏幕行（0 基）");
+        assert_eq!(col, 7, "47 - 块左缘 40 = 7");
+        assert!(col < 20, "列必须在块宽内");
+
+        // 光标在短行（第二行）：行号累计 1 + 3 块 = 4，列 = 2。
+        with_global_mut(|g| {
+            let of = g.openfile.as_ref().unwrap().clone();
+            let mut of = of.borrow_mut();
+            let second = {
+                let ft = of.filetop.clone().unwrap();
+                let nxt = ft.borrow().next.clone();
+                nxt
+            };
+            of.current = second;
+            of.current_x = 2;
+        });
+        let (cur, edittop, cx, fc) = with_global(|g| {
+            let of = g.openfile.as_ref().unwrap().borrow();
+            (of.current.clone().unwrap(), of.edittop.clone().unwrap(), of.current_x, of.firstcolumn)
+        });
+        let (row, col) = cursor_screen_position(&cur, &edittop, cx, fc);
+        /* 长行 50 列 / 20 块宽 = 3 块：短行显示在第 1+extra(2) = 3 行之后，
+         * 即 row=3，列 = 2。 */
+        assert_eq!(row, 3, "长行占 3 个屏幕行，短行在其后");
+        assert_eq!(col, 2);
+
+        unset_flag(SOFTWRAP);
+    }
+
+    /// 软换行 + edittop 上方块滚出（firstcolumn > 0）时，光标行号
+    /// 从负偏移累计，仍落在正确屏幕行。
+    #[test]
+    fn cursor_screen_position_edittop_scrolled() {
+        crate::global::global_init();
+        make_new_buffer();
+        with_global_mut(|g| {
+            g.COLS = 80;
+            g.LINES = 24;
+            g.editwincols = 20;
+        });
+        set_flag(SOFTWRAP);
+
+        let long = vec![b'D'; 50];
+        crate::text::inject(&long, long.len());
+        with_global_mut(|g| {
+            let of = g.openfile.as_ref().unwrap().clone();
+            let mut of = of.borrow_mut();
+            of.current_x = 50;
+        });
+        crate::text::do_enter();
+        crate::text::inject(b"tail", 4);
+
+        with_global_mut(|g| {
+            let of = g.openfile.as_ref().unwrap().clone();
+            let mut of = of.borrow_mut();
+            // 模拟上两整块被滚出屏：edittop 从第三块（[40,50)）开始显示。
+            of.firstcolumn = 40;
+            let second = {
+                let ft = of.filetop.clone().unwrap();
+                let nxt = ft.borrow().next.clone();
+                nxt
+            };
+            of.current = second;
+            of.current_x = 0;
+        });
+
+        let (cur, edittop, cx, fc) = with_global(|g| {
+            let of = g.openfile.as_ref().unwrap().borrow();
+            (of.current.clone().unwrap(), of.edittop.clone().unwrap(), of.current_x, of.firstcolumn)
+        });
+        let (row, col) = cursor_screen_position(&cur, &edittop, cx, fc);
+        /* -chunk_for(40, edittop) = -2（长行第 3 块 [40,50)）；加 edittop 的
+         * 1+2 行；短行为首块。行 = -2 + 3 + 0 = 1，列 = 0。 */
+        assert_eq!(row, 1, "短行应显示在 edittop 最后一块之下");
+        assert_eq!(col, 0);
 
         unset_flag(SOFTWRAP);
     }
