@@ -593,9 +593,9 @@ pub fn refresh_screen() {
 
     if let Some(edittop) = edittop {
         let mut cur: Option<LineRef> = Some(edittop);
-        let mut row = 0u16;
+        let mut row = 0i32;
         while let Some(c) = cur {
-            if row >= edit_rows as u16 {
+            if row >= edit_rows as i32 {
                 break;
             }
             let x = if current.as_ref().map(|cc| Rc::ptr_eq(cc, &c)).unwrap_or(false) {
@@ -603,14 +603,14 @@ pub fn refresh_screen() {
             } else {
                 0
             };
-            update_line(&c, x);
+            /* update_line 返回该行消耗的屏幕行数（软换行时为块数）。 */
+            row += update_line(&c, x);
             let next = { let r = c.borrow(); r.next.clone() };
             cur = next;
-            row += 1;
         }
         // 清空剩余编辑行
-        while row < edit_rows as u16 {
-            let _ = execute!(stdout, cursor::MoveTo(0, 1 + row));
+        while row < edit_rows as i32 {
+            let _ = execute!(stdout, cursor::MoveTo(0, 1 + row as u16));
             let _ = execute!(stdout, Clear(ClearType::UntilNewLine));
             row += 1;
         }
@@ -1578,25 +1578,32 @@ fn reset_attributes(stdout: &mut io::Stdout) {
 /// 在 row 行绘制一行 converted 文本，并应用语法高亮（对应 C 的 `draw_row`）。
 /// 对当前行上匹配到的搜索字符串进行聚光高亮（对应 winio.c 的 spotlight）。
 /// 仅在 spotlighted 已设置且该行是当前行时生效。
-fn spotlight_line(stdout: &mut io::Stdout, row: u16, converted: &[u8], line: &LineRef, from_col: usize, margin: usize) {
+/// consume 为 TRUE 时画完即清除 spotlight
+/// 标志（单行、每行一次）；软换行多块绘制时传 FALSE，由调用方统
+/// 一清除，避免仅第一块被高亮。
+fn spotlight_line(
+    stdout: &mut io::Stdout,
+    row: u16,
+    converted: &[u8],
+    line: &LineRef,
+    from_col: usize,
+    margin: usize,
+    consume: bool,
+) {
     let (spotlighted, light_from_col, light_to_col) = with_global(|g| (g.spotlighted, g.light_from_col, g.light_to_col));
     if !spotlighted {
         return;
     }
 
-    let is_current = with_global(|g| {
-        g.openfile.as_ref()
-            .and_then(|of| of.borrow().current.clone())
-            .map(|c| Rc::ptr_eq(&c, line))
-            .unwrap_or(false)
-    });
-    if !is_current {
+    if !is_current_line(line) {
         return;
     }
 
-    /* 与 C 版一致：绘制后清除 spotlight，避免重复绘制（draw_row 会在
-     * paint_syntax 后调用；C 版在 redraw_line 中置 FALSE）。 */
-    with_global_mut(|g| g.spotlighted = false);
+    if consume {
+        /* 与 C 版一致：绘制后清除 spotlight，避免重复绘制（draw_row 会在
+         * paint_syntax 后调用；C 版在 redraw_line 中置 FALSE）。 */
+        with_global_mut(|g| g.spotlighted = false);
+    }
 
     /* light_from_col/light_to_col 是绝对列号；转换为相对屏幕行（converted）的列号。 */
     let conv_start_col = light_from_col.saturating_sub(from_col);
@@ -1627,22 +1634,35 @@ fn spotlight_line(stdout: &mut io::Stdout, row: u16, converted: &[u8], line: &Li
     reset_attributes(stdout);
 }
 
-fn draw_row(stdout: &mut io::Stdout, row: u16, converted: &[u8], line: &LineRef, from_col: usize) {
+fn draw_row(
+    stdout: &mut io::Stdout,
+    row: u16,
+    converted: &[u8],
+    line: &LineRef,
+    from_col: usize,
+    till_x: usize,
+) {
     let margin = current_margin();
 
-    let (ln, syntax, linenum_color, cols) = with_global(|g| {
+    let (ln, syntax, linenum_color) = with_global(|g| {
         let of = g.openfile.as_ref();
         let ln = line.borrow().lineno;
         let syntax = of.and_then(|o| o.borrow().syntax.clone());
         let linenum_color = g.interface_color_pair.get(LINE_NUMBER).copied().unwrap_or(0);
-        (ln, syntax, linenum_color, g.COLS)
+        (ln, syntax, linenum_color)
     });
 
     /* 行号。 */
     if margin > 0 {
         let _ = execute!(stdout, cursor::MoveTo(0, row));
         apply_attributes(stdout, linenum_color);
-        let _ = write!(stdout, "{:>width$} ", ln, width = margin - 1);
+        /* 软换行的后续块不重复显示行号，只留空白（对应 C 版
+         * draw_row 中 "%*s" 分支）。 */
+        if ISSET(SOFTWRAP) && from_col != 0 {
+            let _ = write!(stdout, "{:>width$} ", "", width = margin - 1);
+        } else {
+            let _ = write!(stdout, "{:>width$} ", ln, width = margin - 1);
+        }
         reset_attributes(stdout);
     }
 
@@ -1654,26 +1674,25 @@ fn draw_row(stdout: &mut io::Stdout, row: u16, converted: &[u8], line: &LineRef,
     /* 语法高亮。 */
     if let Some(sntx) = syntax {
         if !ISSET(NO_SYNTAX) {
-            paint_syntax_rules(stdout, row, converted, line, from_col, &sntx, cols, margin);
+            paint_syntax_rules(stdout, row, converted, line, from_col, till_x, &sntx, margin);
         }
     }
-
-    /* 搜索匹配聚光高亮（对应 C 版 draw_row 中的 spotlight 分支，绘制于语法高亮之后）。 */
-    spotlight_line(stdout, row, converted, line, from_col, margin);
+    /* 聚光高亮由调用方 update_line / update_softwrapped_line 在处理完
+     * 各自的行（或全部软换行块）后调用 spotlight_line 绘制。 */
 }
 
 /// 应用当前语法的全部颜色规则到一行（对应 C 的 draw_row 中 ENABLE_COLOR 部分）。
+/// till_x 是本行/块显示到的结束列（非软换行时为 from_col + 行宽）。
 fn paint_syntax_rules(
     stdout: &mut io::Stdout,
     row: u16,
     converted: &[u8],
     line: &LineRef,
     from_col: usize,
+    till_x: usize,
     sntx: &SyntaxRef,
-    cols: usize,
     margin: usize,
 ) {
-    let till_x = from_col + cols.saturating_sub(margin + 1);
     let from_x = from_col;
     let data = line.borrow().data.clone();
     let data_bytes = data.as_bytes();
@@ -1869,7 +1888,7 @@ fn paint_syntax_rules(
 /// 返回该行占用的行数（软换行时为块数，否则为 1）。
 pub fn update_line(line: &LineRef, index: usize) -> i32 {
     if ISSET(SOFTWRAP) {
-        return (extra_chunks_in(line) + 1) as i32;
+        return update_softwrapped_line(line);
     }
 
     let mut stdout = io::stdout();
@@ -1877,8 +1896,8 @@ pub fn update_line(line: &LineRef, index: usize) -> i32 {
     let data = line.borrow().data.clone();
 
     let from_col = crate::utils::get_page_start(crate::utils::wideness(data.as_bytes(), index));
-    let span = with_global(|g| g.COLS.saturating_sub(margin + 1));
-    let converted = display_string(data.as_bytes(), from_col, span, true, false);
+    let (cols, span) = with_global(|g| (g.COLS, g.COLS.saturating_sub(margin + 1)));
+    let (converted, has_more) = display_string(data.as_bytes(), from_col, span, true, false);
 
     /* 目标行号 = line.lineno - edittop.lineno（+1 因为编辑区从第 1 行开始）。 */
     let row = with_global(|g| {
@@ -1886,10 +1905,115 @@ pub fn update_line(line: &LineRef, index: usize) -> i32 {
         let edittop_lineno = of.edittop.as_ref().map(|e| e.borrow().lineno).unwrap_or(1);
         line.borrow().lineno - edittop_lineno
     });
+    let row = (1 + row) as u16;
 
-    draw_row(&mut stdout, (1 + row) as u16, converted.as_bytes(), line, from_col);
+    draw_row(&mut stdout, row, converted.as_bytes(), line, from_col, from_col + span);
+
+    /* 聚光高亮（对应 edit_draw 中 line == current 时的 spotlight 调用）。
+     * 单行绘制：画完即清除标志。 */
+    spotlight_line(&mut stdout, row, converted.as_bytes(), line, from_col, margin, true);
+
+    /* 超长行的截断标记：左边有内容被滚动出时画 '<'，右边还有内容
+     * 未显示时画 '>'（对应 edit_draw 中基于 from_col 与 has_more 的
+     * 两处 waddch；颜色用 hilite_attribute）。 */
+    let hilite = with_global(|g| g.hilite_attribute);
+    if from_col > 0 && !converted.is_empty() {
+        let _ = execute!(stdout, cursor::MoveTo(margin as u16, row));
+        apply_attributes(&mut stdout, hilite);
+        let _ = write!(stdout, "<");
+        reset_attributes(&mut stdout);
+    }
+    if has_more {
+        let _ = execute!(stdout, cursor::MoveTo(cols.saturating_sub(1) as u16, row));
+        apply_attributes(&mut stdout, hilite);
+        let _ = write!(stdout, ">");
+        reset_attributes(&mut stdout);
+    }
+
     let _ = stdout.flush();
     1
+}
+
+/// 软换行模式下重绘给定行的全部块（对应 winio.c 的
+/// `update_softwrapped_line`）。除非该行是 edittop（此时从列
+/// firstcolumn 开始显示），否则显示整行。返回占用的屏幕行数。
+fn update_softwrapped_line(line: &LineRef) -> i32 {
+    /* 编辑器显示区域的行数（对应 editwinrows）。 */
+    let editwinrows = with_global(|g| g.LINES.saturating_sub(4) as i32);
+
+    let (edittop, firstcolumn) = with_global(|g| {
+        let of = g.openfile.as_ref().expect("no open file").borrow();
+        (of.edittop.clone().expect("no edittop"), of.firstcolumn)
+    });
+    let is_edittop = Rc::ptr_eq(&edittop, line);
+
+    let mut screen_row: i32 = 0;
+    let mut from_col = 0usize;
+    if is_edittop {
+        from_col = firstcolumn;
+    } else {
+        /* edittop 的第一块可能在屏幕上方的滚动区域之外。 */
+        screen_row -= chunk_for(firstcolumn, &edittop) as i32;
+    }
+
+    /* 找出目标行应显示在哪个屏幕行。 */
+    let mut someline: Option<LineRef> = Some(edittop);
+    while let Some(s) = someline {
+        if Rc::ptr_eq(&s, line) {
+            break;
+        }
+        screen_row += 1 + extra_chunks_in(&s) as i32;
+        let next = { let r = s.borrow(); r.next.clone() };
+        someline = next;
+    }
+
+    /* 第一块在屏幕外：不显示。 */
+    if screen_row < 0 || screen_row >= editwinrows {
+        return 0;
+    }
+    let starting_row = screen_row;
+
+    let mut stdout = io::stdout();
+    let mut kickoff = true;
+    let mut end_of_line = false;
+    let data = line.borrow().data.clone();
+
+    /* 逐块转换并绘制。 */
+    while !end_of_line && screen_row < editwinrows {
+        let to_col = get_softwrap_breakpoint(data.as_bytes(), from_col, &mut kickoff, &mut end_of_line);
+
+        /* 进度守卫：editwincols<=1 的退化情形下断点可能不前进，避免死循环。 */
+        if to_col <= from_col {
+            break;
+        }
+
+        let (converted, _has_more) = display_string(data.as_bytes(), from_col, to_col - from_col, true, false);
+        draw_row(&mut stdout, (1 + screen_row) as u16, converted.as_bytes(), line, from_col, to_col);
+        /* 聚光高亮逐块绘制；consume 传 FALSE，避免第一块画完就清掉
+         * 标志导致后续块不高亮。 */
+        spotlight_line(&mut stdout, (1 + screen_row) as u16, converted.as_bytes(), line, from_col, current_margin(), false);
+
+        from_col = to_col;
+        screen_row += 1;
+    }
+
+    /* 软换行下聚光高亮跨多个块：块循环中不清除标志，当前行画完后
+     * 统一清除（单行路径的 clearing 在 spotlight_line(consume=TRUE) 中）。 */
+    if is_current_line(line) {
+        with_global_mut(|g| g.spotlighted = false);
+    }
+
+    screen_row - starting_row
+}
+
+/// 判断给定行是否为当前行。
+fn is_current_line(line: &LineRef) -> bool {
+    with_global(|g| {
+        g.openfile.as_ref()
+            .and_then(|of| of.borrow().current.clone())
+            .map(|c| Rc::ptr_eq(&c, line))
+            .unwrap_or(false)
+    })
 }
 
 // ======================== 字符串显示与逐字输入（对应 winio.c） ========================
@@ -1897,7 +2021,9 @@ pub fn update_line(line: &LineRef, index: usize) -> i32 {
 /// 将给定文本转换为可在终端显示的字符串：控制字符显示为 ^X，
 /// 制表符展开为空格，宽字符保留，零宽字符处理等。
 /// column 是起始列，span 是可用宽度（对应 `display_string`）。
-pub fn display_string(text: &[u8], column: usize, span: usize, isdata: bool, isprompt: bool) -> String {
+/// 返回 (转换后的字符串, has_more)——has_more 表示右侧还有内容未显示，
+/// 调用方应画 ">" 截断标记（对应 C 版返回后的全局 has_more）。
+pub fn display_string(text: &[u8], column: usize, span: usize, isdata: bool, isprompt: bool) -> (String, bool) {
     let start_x = crate::utils::actual_x(text, column);
     let start_col = crate::utils::wideness(text, start_x);
     let beyond = column + span;
@@ -2029,7 +2155,9 @@ pub fn display_string(text: &[u8], column: usize, span: usize, isdata: bool, isp
     }
 
     /* 若有更多文本无法显示，为 ">" 腾出空间。 */
-    if col > beyond || (chars::byte_at(text, pos) != 0 && (isprompt || (isdata && !ISSET(SOFTWRAP)))) {
+    let has_more = col > beyond
+        || (chars::byte_at(text, pos) != 0 && (isprompt || (isdata && !ISSET(SOFTWRAP))));
+    if has_more {
         /* 后退一个字符（跳过零宽字符）。 */
         loop {
             if converted.is_empty() {
@@ -2052,7 +2180,7 @@ pub fn display_string(text: &[u8], column: usize, span: usize, isdata: bool, isp
         }
     }
 
-    String::from_utf8_lossy(&converted).into_owned()
+    (String::from_utf8_lossy(&converted).into_owned(), has_more)
 }
 
 /// 读取一个逐字按键（一个或两个转义序列），返回其字节
@@ -2412,6 +2540,7 @@ fn execute_function(key: i32, _menu: i32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::definitions::{set_flag, unset_flag, SOFTWRAP};
     use crate::files::make_new_buffer;
 
     /// MYESNO 菜单（Yes/No 询问）的快捷键栏应能绘制 Y/N/^C 三项且不崩溃。
@@ -2518,5 +2647,153 @@ mod tests {
             v
         });
         assert_eq!(got, vec![97, 98]);
+    }
+
+    /// display_string 的 has_more：内容放得下时为 FALSE；
+    /// 放不下（非软换行的 data 行或 prompt）时置 TRUE，供画 ">" 标记。
+    #[test]
+    fn display_string_reports_has_more() {
+        crate::global::global_init();
+        with_global_mut(|g| g.COLS = 80);
+
+        // 短行：span 足够，无截断。
+        let (s, more) = display_string(b"hello", 0, 10, true, false);
+        assert_eq!(s, "hello");
+        assert!(!more);
+
+        // 长行：非软换行的 data 行溢出 span → has_more。
+        let (s, more) = display_string(b"hello world this is a very long line", 0, 10, true, false);
+        assert!(more);
+        assert!(s.chars().count() <= 10);
+
+        // prompt 模式下同样报告。
+        let (_, more) = display_string(b"abcdef", 0, 4, false, true);
+        assert!(more);
+
+        // 软换行下逐块显示：内容恰好填满一块（列未越过 beyond）时不报
+        // has_more——块尾无需画 ">"。
+        set_flag(SOFTWRAP);
+        let (s, more) = display_string(b"0123456789abcdef", 0, 10, true, false);
+        // 转换后超过 10 列？不会：col==beyond 即停
+        assert!(s.chars().count() <= 10);
+        assert!(!more, "软换行块尾不应报告 has_more");
+        unset_flag(SOFTWRAP);
+    }
+
+    /// 非软换行时 update_line 返回 1；软换行时返回 1 + extra_chunks_in，
+    /// 即该行占用的屏幕行数（对应 update_softwrapped_line 的返回值）。
+    #[test]
+    fn update_line_reports_consumed_rows() {
+        crate::global::global_init();
+        make_new_buffer();
+        with_global_mut(|g| {
+            g.COLS = 80;
+            g.LINES = 24;
+            g.editwincols = 60;
+        });
+
+        // 注入 200 字符的单行文本。
+        let long = vec![b'A'; 200];
+        crate::text::inject(&long, long.len());
+        let line = with_global(|g| g.openfile.as_ref().unwrap().borrow().current.clone().unwrap());
+
+        // 非软换行：恒为 1 行。
+        unset_flag(SOFTWRAP);
+        assert_eq!(update_line(&line, 0), 1);
+        // 光标在中部时同样 1 行（横向滚动，不占更多行）。
+        assert_eq!(update_line(&line, 100), 1);
+
+        // 软换行：200 列 / 60 列断点 = 4 块（200/60=3 余 20）。
+        set_flag(SOFTWRAP);
+        let consumed = update_line(&line, 0);
+        assert_eq!(consumed, (extra_chunks_in(&line) + 1) as i32);
+        assert_eq!(consumed, 4, "200 列文本在 60 列块宽下应占 4 行");
+
+        // 关闭软换行后恢复。
+        unset_flag(SOFTWRAP);
+    }
+
+    /// 超长行横向滚动时 update_line 绘制 "<" 与 ">" 截断标记不应崩溃
+    /// （from_col>0 与 has_more 两个分支）。
+    #[test]
+    fn update_line_draws_cutoff_markers() {
+        crate::global::global_init();
+        make_new_buffer();
+        with_global_mut(|g| {
+            g.COLS = 80;
+            g.LINES = 24;
+            g.editwincols = 60;
+        });
+        unset_flag(SOFTWRAP);
+
+        let long = vec![b'B'; 200];
+        crate::text::inject(&long, 0);
+        let line = with_global(|g| g.openfile.as_ref().unwrap().borrow().current.clone().unwrap());
+
+        // 光标在中后部：from_col > 0（行首画 '<'），右侧还有内容（画 '>'）。
+        with_global_mut(|g| {
+            let of = g.openfile.as_ref().unwrap().clone();
+            let mut of = of.borrow_mut();
+            of.current_x = 150;
+        });
+        assert_eq!(update_line(&line, 150), 1);
+    }
+
+    /// 软换行下 update_softwrapped_line 对 edittop（含 firstcolumn 偏移）
+    /// 与普通行都应给出合理的占用行数且不崩溃。
+    #[test]
+    fn update_softwrapped_line_edittop_offset_ok() {
+        crate::global::global_init();
+        make_new_buffer();
+        with_global_mut(|g| {
+            g.COLS = 80;
+            g.LINES = 24;
+            g.editwincols = 20;
+        });
+        set_flag(SOFTWRAP);
+
+        // 一行长文本 + 一行短文本。
+        let long = vec![b'C'; 50];
+        crate::text::inject(&long, long.len());
+        with_global_mut(|g| {
+            let of = g.openfile.as_ref().unwrap().clone();
+            let mut of = of.borrow_mut();
+            // 以换行断开：注入一个 MagicLine 后再追加文本
+            of.current_x = 50;
+        });
+        crate::text::do_enter(); // 拆出新行
+        crate::text::inject(b"short", 5);
+
+        with_global_mut(|g| {
+            let of = g.openfile.as_ref().unwrap().clone();
+            let mut of = of.borrow_mut();
+            /* edittop 保持第一行；firstcolumn 设到第三块内（模拟上方
+             * 块被滚出屏），行首只显示最后一小块。 */
+            of.firstcolumn = 45;
+        });
+
+        let (edittop, second) = with_global(|g| {
+            let of = g.openfile.as_ref().unwrap().borrow();
+            let filetop = of.filetop.clone().unwrap();
+            let second = {
+                let r = filetop.borrow();
+                r.next.clone().unwrap()
+            };
+            (of.edittop.clone().unwrap(), second)
+        });
+
+        /* edittop 行：50 列 / 20 列断点 = 3 块，但从 firstcolumn=45
+         * 起只剩 [45,50) 一块。 */
+        let rows1 = update_softwrapped_line(&edittop);
+        assert_eq!(rows1, 1, "firstcolumn=45 时 edittop 只显示最后一块");
+        assert!(rows1 < (extra_chunks_in(&edittop) + 1) as i32);
+
+        /* 第二行：edittop 有 3 块且首块已整块滚出（chunk_for(45)=2），
+         * 第二行应显示在其后；仍只占 1 行。 */
+        let rows2 = update_softwrapped_line(&second);
+        assert_eq!(rows2, (extra_chunks_in(&second) + 1) as i32);
+        assert_eq!(rows2, 1);
+
+        unset_flag(SOFTWRAP);
     }
 }

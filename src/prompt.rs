@@ -368,7 +368,7 @@ pub fn draw_the_promptbar() {
     /* 构造显示字符串：prompt: <答案（分页）> */
     let mut display = format!("{}:{}", prompt, if the_page == 0 { ' ' } else { '<' });
     let span = cols.saturating_sub(base);
-    let expanded = winio::display_string(answer.as_bytes(), the_page, span, false, true);
+    let expanded = winio::display_string(answer.as_bytes(), the_page, span, false, true).0;
     display.push_str(&expanded);
     if the_page < end_page && base + utils::breadth(answer.as_bytes()) - the_page > cols {
         display.push('>');

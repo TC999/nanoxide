@@ -316,7 +316,7 @@ fn search_filename(forwards: bool) {
     /* 若之前搜索过，显示在方括号中。 */
     let thedefault = if !last_search.is_empty() {
         let cols = with_global(|g| g.COLS);
-        let disp = winio::display_string(last_search.as_bytes(), 0, cols / 3, false, false);
+        let disp = winio::display_string(last_search.as_bytes(), 0, cols / 3, false, false).0;
         let dots = utils::breadth(last_search.as_bytes()) > cols / 3;
         format!(" [{}{}]", disp, if dots { "..." } else { "" })
     } else {

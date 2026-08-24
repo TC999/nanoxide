@@ -110,6 +110,13 @@ C 版 `nano.c` 有完整的信号处理，Rust 版新增 `signals.rs` 模块补�
 - ✅ `minibar`（极简状态栏）— 已实现（`MINIBAR` 模式时主循环调用）
 - ✅ `confirm_margin`（行号边距确认）— 已实现（原 `current_margin` 只读版升级为带副作用版本，主循环每轮调用）
 - ✅ `print_view_warning`（只读模式警告）— 已实现（`winio::print_view_warning`）
+- ✅ 超长行横向滚动的截断标记 — 已实现：`display_string` 返回 `(String, has_more)`，
+  `update_line` 依据 `from_col > 0` 在行首画 `<`、依据 `has_more` 在行尾画 `>`
+  （对应 C 版 `edit_draw` 两处 `waddch`）
+- ✅ 软换行分块绘制 — 已实现：新增 `update_softwrapped_line`（逐块 `display_string` +
+  `draw_row`，行号仅显示在第一块，聚光高亮跨块保留）；`update_line` 在 SOFTWRAP 下
+  返回真实占用行数，`refresh_screen` 的行循环消费该返回值（原实现只返回
+  `extra_chunks_in + 1` 而从不真正分块绘制）
 
 ### 7. 主循环差异 (`main.rs` vs `nano.c` main)
 

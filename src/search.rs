@@ -384,7 +384,7 @@ pub fn search_init(replacing: bool, retain_answer: bool) {
     /* 若之前搜索过，包含在提示中。 */
     let last_search = with_global(|g| g.last_search.clone()).unwrap_or_default();
     let thedefault = if !last_search.is_empty() {
-        let disp = winio::display_string(last_search.as_bytes(), 0, cols / 3, false, false);
+        let disp = winio::display_string(last_search.as_bytes(), 0, cols / 3, false, false).0;
         let dots = utils::breadth(last_search.as_bytes()) > cols / 3;
         format!(" [{} {}]", disp, if dots { "..." } else { "" })
     } else {
@@ -652,7 +652,7 @@ pub fn findnextstr(
 /// 报告给定字符串未找到（对应 `not_found_msg`）。
 fn not_found_msg(str: &str) {
     let cols = with_global(|g| g.COLS);
-    let disp = winio::display_string(str.as_bytes(), 0, (cols / 2) + 1, false, false);
+    let disp = winio::display_string(str.as_bytes(), 0, (cols / 2) + 1, false, false).0;
     let numchars = utils::actual_x(disp.as_bytes(), utils::wideness(disp.as_bytes(), cols / 2));
     let dots = if disp.as_bytes().get(numchars).copied().unwrap_or(0) == 0 { "" } else { "..." };
     winio::statusline(MessageType::Ahem, &crate::t!("search-not_found", pattern = format!("{}{}", &disp[..numchars.min(disp.len())], dots)));
