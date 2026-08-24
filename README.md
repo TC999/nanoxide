@@ -32,6 +32,7 @@ $ git clone https://github.com/TC999/nanoxide.git
 $ cd nanoxide
 $ cargo build --release
 $ ./target/release/nax --version
+nanoxide version 0.1.0
 ```
 
 [rust-lang]: https://rust-lang.org/
