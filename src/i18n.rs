@@ -144,6 +144,8 @@ thread_local! {
 /// 语言文件的默认根目录：可被环境变量 `NANORS_LOCALES` 覆盖，否则相对于可执行文件所在目录。
 /// 可执行文件旁没有 locales 目录时（例如测试二进制位于 target/debug/deps/ 下），
 /// 回退到当前工作目录下的 locales/（cargo 运行测试时 cwd 为 crate 根目录）。
+/// 类 UNIX 平台（如 Linux）还会额外检查系统级目录 /usr/share/nanoxide/locales
+/// （系统包安装时的位置），优先级低于 exe 旁，高于 cwd 回退。
 fn default_locales_dir() -> PathBuf {
     if let Ok(override_dir) = std::env::var("NANORS_LOCALES") {
         return PathBuf::from(override_dir);
@@ -154,6 +156,15 @@ fn default_locales_dir() -> PathBuf {
             if beside.is_dir() {
                 return beside;
             }
+        }
+    }
+    // 类 UNIX 平台：系统包安装时 locales 位于 /usr/share/nanoxide/locales；
+    // Windows 上该目录不存在，故用 cfg(unix) 仅在类 UNIX 平台检查。
+    #[cfg(unix)]
+    {
+        let system = PathBuf::from("/usr/share/nanoxide/locales");
+        if system.is_dir() {
+            return system;
         }
     }
     PathBuf::from("locales")
