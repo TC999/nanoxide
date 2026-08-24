@@ -189,25 +189,16 @@ pub fn prepare_color_pair(fg: i16, bg: i16, attributes: i32) -> i32 {
 /// 初始化 nano 界面元素的颜色对（对应 `set_interface_colorpairs`）。
 /// crossterm 架构下颜色对映射为属性值。
 pub fn set_interface_colorpairs_full() {
-    let defaults_allowed = false;
-    /* crossterm 无 use_default_colors 概念；默认颜色由 Color::Reset 表示。 */
-    let _ = defaults_allowed;
-
+    /* crossterm 下默认颜色由 Color::Reset 表示，与 C 版 use_default_colors()
+     * 成功时的行为一致：保持 THE_DEFAULT (-1) 不变。 */
     let elements = with_global(|g| g.color_combo.clone());
 
     for (index, combo) in elements.iter().enumerate() {
         if let Some(c) = combo {
             let c = c.borrow();
-            let mut fg = c.fg;
-            let mut bg = c.bg;
-            /* 若不允许默认颜色，把 THE_DEFAULT 替换为黑白。 */
-            if fg == THE_DEFAULT as i16 {
-                fg = 7; // COLOR_WHITE
-            }
-            if bg == THE_DEFAULT as i16 {
-                bg = 0; // COLOR_BLACK
-            }
-            init_pair(index as i16 + 1, fg, bg);
+            /* 保持 THE_DEFAULT (-1) 不变，由 nano_to_crossterm_color(-1) → Color::Reset
+             * 使用终端默认颜色。 */
+            init_pair(index as i16 + 1, c.fg, c.bg);
             set_interface_color_pair(index, COLOR_PAIR(index as i32 + 1) | c.attributes);
             with_global_mut(|g| g.rescind_colors = false);
         } else {
@@ -258,15 +249,9 @@ pub fn set_syntax_colorpairs(sntx: &SyntaxRef) {
     };
 
     for ink in &colors {
-        {
-            let mut ink_ref = ink.borrow_mut();
-            if ink_ref.fg == THE_DEFAULT as i16 {
-                ink_ref.fg = 7;
-            }
-            if ink_ref.bg == THE_DEFAULT as i16 {
-                ink_ref.bg = 0;
-            }
-        }
+        /* 保持 THE_DEFAULT (-1) 不变，由 apply_attributes 中的
+         * nano_to_crossterm_color(-1) → Color::Reset 使用终端默认颜色。
+         * 对应 C 版中 use_default_colors() 成功时的行为：不替换默认色。 */
 
         /* 找相同组合的旧颜色。 */
         let mut older_pair: Option<i16> = None;
