@@ -255,8 +255,11 @@ pub fn wgetch() -> i32 {
             }
             FOREIGN_SEQUENCE
         }
-        Ok(Event::FocusGained) => FOCUS_IN,
-        Ok(Event::FocusLost) => FOCUS_OUT,
+        // 焦点事件视为杂散码丢弃（对应 C 版 winio.c get_keycode() 中
+        // "if (keycode == mousefocusin || keycode == mousefocusout) return ERR;"）。
+        // 若不丢弃，0x491/0x499 会被 handle_input_key 当作普通 Unicode 字符
+        // （U+0491 'ґ'/U+0499 'ҙ'）插入文本，表现为切换窗口时出现随机字符。
+        Ok(Event::FocusGained) | Ok(Event::FocusLost) => ERR,
         _ => ERR,
     }
 }
