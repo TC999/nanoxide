@@ -15,8 +15,10 @@ Mono-licensed under GPL-3.0.
 
 The binary name for nanoxide is `nax`. Now you just go to the latest release.
 
-- Windows: Download which name with `windows` zip, 
-- Debian-based Linux: Download the `.deb` file and install.
+- Windows: Download which name with `windows` zip, extract all files to a new folder and add it to `%PATH%`
+- Linux:
+  - Debian/Ubuntu: Download the `.deb` file and install.
+  - Others: Download which name with `linux` zip, exract all files and run `./install.sh`
 
 ### Translation
 
