@@ -578,6 +578,13 @@ pub fn refresh_screen() {
     let mut stdout = io::stdout();
     let _margin = current_margin();
 
+    /* 绘制前隐藏光标，避免绘制过程中光标在屏幕上"乱飞"。
+     * 对应 C 版：read_keys_from() 在读取按键后 curs_set(0) 隐藏光标，
+     * 然后 edit_refresh() 绘制到虚拟缓冲区（光标始终隐藏），最后
+     * place_the_cursor() 设置虚拟光标位置 + wnoutrefresh() 安排更新，
+     * 再由 read_keys_from() 的 doupdate() + curs_set(1) 在正确位置显示。 */
+    let _ = execute!(stdout, Hide);
+
     let (cols, lines, edit_rows) =
         with_global(|g| (g.COLS, g.LINES, g.LINES.saturating_sub(4)));
 
@@ -634,9 +641,13 @@ pub fn refresh_screen() {
 
     let _ = stdout.flush();
 
-    /* 刷新后恢复光标：显示并移到编辑位置。 */
-    let _ = execute!(stdout, Show);
+    /* 刷新后恢复光标：先移到编辑位置（光标隐藏），再显示（在正确位置出现）。
+     * 对应 C 版：place_the_cursor() + wnoutrefresh(midwin) 设置光标位置，
+     * 然后 read_keys_from() 的 doupdate() + curs_set(1) 在正确位置显示。
+     * 若先 Show 再 place_the_cursor，光标会在底部快捷键行末尾闪现后
+     * 才跳到编辑区，造成"光标乱飞"的观感。 */
     place_the_cursor();
+    let _ = execute!(stdout, Show);
     let _ = stdout.flush();
 }
 
