@@ -84,6 +84,14 @@ fn main() {
         }
         /* 命令行 flags 与 rcfile flags 按位 OR：rcfile 不能取消命令行选项。 */
         g.flags.or_with(&g.cmdline_flags);
+        /* 从 fill 重新计算 wrap_at（命令行的 fill 优先于 rcfile）。 */
+        g.wrap_at = if g.fill > 0 {
+            g.fill as usize
+        } else if g.fill == 0 {
+            g.COLS
+        } else {
+            0
+        };
         /* 若 rcfile 未取消 nowrap，保持 breaklonglines。 */
         if !ISSET(NO_WRAP) {
             SET(BREAK_LONG_LINES);

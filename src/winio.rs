@@ -146,6 +146,23 @@ pub fn initscr() {
     update_screen_size();
 }
 
+/// 根据 `fill` 和 `COLS` 更新 `wrap_at`。
+/// 对应原版 C 中 `wrap_at` 的语义：
+/// - `fill > 0` → `wrap_at = fill`
+/// - `fill == 0` → `wrap_at = COLS`（终端宽度处换行）
+/// - `fill < 0` → `wrap_at = 0`（禁用换行）
+pub fn update_wrap_at() {
+    with_global_mut(|g| {
+        g.wrap_at = if g.fill > 0 {
+            g.fill as usize
+        } else if g.fill == 0 {
+            g.COLS
+        } else {
+            0
+        };
+    });
+}
+
 /// 更新屏幕尺寸。
 pub fn update_screen_size() {
     if let Ok((cols, rows)) = terminal::size() {
@@ -165,6 +182,7 @@ pub fn update_screen_size() {
             }
         });
     }
+    update_wrap_at();
 }
 
 /// 检查是否支持颜色（crossterm 总是支持）。

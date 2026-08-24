@@ -1969,6 +1969,12 @@ pub fn do_wrap() {
 
     let line_data = line.borrow().data.clone();
     let line_len = line_data.len();
+
+    /* wrap_at 为 0 表示换行被禁用（fill < 0），不换行。 */
+    if wrap_at == 0 {
+        return;
+    }
+
     let quot_len = quote_length(&line_data);
     let lead_len = quot_len + indent_length(&line_data.as_bytes()[quot_len..]);
     let cursor_x = current_x;
