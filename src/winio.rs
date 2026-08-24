@@ -1005,7 +1005,12 @@ pub fn place_the_cursor() {
         let (row, screen_column) = cursor_screen_position(&cur, &edittop, current_x, firstcolumn);
         with_global_mut(|g| {
             if let Some(of) = &g.openfile {
-                of.borrow_mut().cursor_row = row;
+                /* 钳位到 0：软换行下若光标列落在视口左缘（firstcolumn）
+                 * 所在块之前（被滚出屏），row 累计可为负；负值会被
+                 * adjust_viewport 的 STATIONARY 分支当作 goal 传入
+                 * go_back_chunks，导致向错误方向滚动。正常路径下光标
+                 * 总在屏内（row >= 0），钳位仅防御该异常状态。 */
+                of.borrow_mut().cursor_row = row.max(0);
             }
         });
         if row >= 0 && row < editwinrows as isize {
@@ -3009,6 +3014,50 @@ mod tests {
          * 1+2 行；短行为首块。行 = -2 + 3 + 0 = 1，列 = 0。 */
         assert_eq!(row, 1, "短行应显示在 edittop 最后一块之下");
         assert_eq!(col, 0);
+
+        unset_flag(SOFTWRAP);
+    }
+
+    /// 软换行下光标列落在视口左缘（firstcolumn 所在块）之前时，
+    /// cursor_screen_position 累计行号会为负；place_the_cursor 写回
+    /// cursor_row 时应钳位到 0，避免 adjust_viewport(STATIONARY) 把
+    /// 负 goal 传给 go_back_chunks 造成反向滚动。
+    #[test]
+    fn place_the_cursor_clamps_negative_row() {
+        crate::global::global_init();
+        make_new_buffer();
+        with_global_mut(|g| {
+            g.COLS = 80;
+            g.LINES = 24;
+            g.editwincols = 20;
+        });
+        set_flag(SOFTWRAP);
+
+        let long = vec![b'E'; 50];
+        crate::text::inject(&long, long.len());
+        with_global_mut(|g| {
+            let of = g.openfile.as_ref().unwrap().clone();
+            let mut of = of.borrow_mut();
+            of.current_x = 50;
+        });
+        crate::text::do_enter();
+        crate::text::inject(b"end", 3);
+
+        with_global_mut(|g| {
+            let of = g.openfile.as_ref().unwrap().clone();
+            let mut of = of.borrow_mut();
+            /* 光标回到首行（长行）开头：视口左缘在第 3 块（[40,50)），
+             * 而光标列 0 远在其左，行号累计为负（-2 + 0 + 0 = -2）。 */
+            of.current = of.filetop.clone();
+            of.firstcolumn = 40;
+            of.current_x = 0;
+        });
+
+        place_the_cursor();
+
+        let cursor_row = with_global(|g| g.openfile.as_ref().unwrap().borrow().cursor_row);
+        assert!(cursor_row >= 0, "cursor_row 必须被钳位为非负，实际 {cursor_row}");
+        assert_eq!(cursor_row, 0);
 
         unset_flag(SOFTWRAP);
     }
