@@ -2458,7 +2458,14 @@ fn execute_bound(bound: &BoundKey) -> bool {
         _ => {
             let handled = execute_by_id(bound.func);
             if handled {
-                edit_refresh();
+                /* 若函数已设置状态消息，则不再重绘整个屏幕，避免覆盖消息。
+                 * 对应 C 版：主循环只在 refresh_needed 时调用 edit_refresh。 */
+                let needs_refresh = with_global(|g| {
+                    matches!(g.lastmessage, MessageType::Vacuum | MessageType::Hush)
+                });
+                if needs_refresh {
+                    edit_refresh();
+                }
             }
             handled
         }
@@ -2527,7 +2534,7 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     if key == 12 { text::do_refresh(); edit_refresh(); return true; }           // Ctrl+L
     if key == 13 { text::do_enter(); edit_refresh(); return true; }             // Ctrl+M (Enter)
     if key == 14 { movement::do_down(); edit_refresh(); return true; }          // Ctrl+N
-    if key == 15 { files::do_writeout(); edit_refresh(); return true; }         // Ctrl+O
+    if key == 15 { files::do_writeout(); return true; }                         // Ctrl+O
     if key == 16 { movement::do_up(); edit_refresh(); return true; }            // Ctrl+P
     if key == 17 { text::do_refresh(); return true; }                           // Ctrl+Q
     if key == 18 { files::do_insertfile(); edit_refresh(); return true; }       // Ctrl+R

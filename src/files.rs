@@ -585,6 +585,8 @@ fn save_to(answer: &str) -> i32 {
                     }
                 }
             });
+            /* 更新标题栏（对应 C 版 write_file 中 titlebar(NULL)）。 */
+            winio::titlebar(None);
             let linecount = lines.len();
             let msg = if linecount == 1 {
                 crate::t!("files-wrote_one_line", count = linecount.to_string())
