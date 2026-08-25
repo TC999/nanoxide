@@ -589,9 +589,9 @@ fn save_to(answer: &str) -> i32 {
             winio::titlebar(None);
             let linecount = lines.len();
             let msg = if linecount == 1 {
-                crate::t!("files-wrote_one_line", count = linecount.to_string())
+                &format!("[ {} ]", crate::t!("files-wrote_one_line", count = linecount.to_string()))
             } else {
-                crate::t!("files-wrote_lines", count = linecount.to_string())
+                &format!("[ {} ]", crate::t!("files-wrote_lines", count = linecount.to_string()))
             };
             winio::statusline_centered(MessageType::Remark, &msg);
             content.len() as i32
