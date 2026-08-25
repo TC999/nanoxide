@@ -1,6 +1,6 @@
 # nanoxide(nax, nano + oxide)
 
-Language: English | 简体中文 |
+Language: English | [简体中文](doc/README.zh_CN.md) |
 
 nanoxide is a small and simple TUI text editor, it copied the interface and key bindings of the GNU nano editor, based on 9.2 version. It has first class support on Windows and Linux, with binary downloads available for every release.
 
