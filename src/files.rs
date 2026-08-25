@@ -593,7 +593,7 @@ fn save_to(answer: &str) -> i32 {
             } else {
                 crate::t!("files-wrote_lines", count = linecount.to_string())
             };
-            winio::statusline(MessageType::Remark, &msg);
+            winio::statusline_centered(MessageType::Remark, &msg);
             content.len() as i32
         }
         Err(e) => {
