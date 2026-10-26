@@ -233,19 +233,19 @@ fn handle_mouse_click(screen_column: u16, screen_row: u16) -> i32 {
     ERR
 }
 
-/// 根据 `fill` 和 `COLS` 更新 `wrap_at`。
-/// 对应原版 C 中 `wrap_at` 的语义：
+/// 根据 `fill` 和 `COLS` 更新 `wrap_at`（对应 C 版 window_init 中的计算）：
+/// - `COLS + fill < 0` → `wrap_at = 0`
+/// - `fill <= 0` → `wrap_at = COLS + fill`（默认 fill = -8）
 /// - `fill > 0` → `wrap_at = fill`
-/// - `fill == 0` → `wrap_at = COLS`（终端宽度处换行）
-/// - `fill < 0` → `wrap_at = 0`（禁用换行）
 pub fn update_wrap_at() {
     with_global_mut(|g| {
-        g.wrap_at = if g.fill > 0 {
-            g.fill as usize
-        } else if g.fill == 0 {
-            g.COLS
-        } else {
+        let combined = g.COLS as isize + g.fill;
+        g.wrap_at = if combined < 0 {
             0
+        } else if g.fill <= 0 {
+            combined as usize
+        } else {
+            g.fill as usize
         };
     });
 }

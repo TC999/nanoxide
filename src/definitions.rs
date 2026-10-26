@@ -830,7 +830,7 @@ impl GlobalState {
             cmdline_backup_dir: None, cmdline_word_chars: None,
             cmdline_operating_dir: None, cmdline_quotestr: None,
             cmdline_speller: None, cmdline_flags: GlobalFlags::new(),
-            COLS: 80, LINES: 24, fill: -1, wrap_at: 0,
+            COLS: 80, LINES: 24, fill: -(COLUMNS_FROM_EOL as isize), wrap_at: 0,
         }
     }
 }
