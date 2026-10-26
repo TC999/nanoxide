@@ -44,6 +44,9 @@ enum Planted {
 thread_local! {
     static PLANTED_QUEUE: std::cell::RefCell<std::collections::VecDeque<Planted>> =
         const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+    /* waiting_keycodes() 预读但尚未消费的终端事件（保持原有顺序）。 */
+    static PENDING_EVENTS: std::cell::RefCell<std::collections::VecDeque<Event>> =
+        const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
 }
 
 /// UTF-8 首字节的长度。
@@ -309,15 +312,27 @@ pub fn wgetch() -> i32 {
             }
         }
     }
+    /* 消费 waiting_keycodes() 预读的事件；否则阻塞读取下一个事件。 */
+    if let Some(event) = PENDING_EVENTS.with(|q| q.borrow_mut().pop_front()) {
+        return handle_event(event);
+    }
     match event::read() {
-        Ok(Event::Key(key)) => {
+        Ok(event) => handle_event(event),
+        Err(_) => ERR,
+    }
+}
+
+/// 把一个终端事件翻译为 nano 键码（对应 C 版 get_kbinput 的分支）。
+fn handle_event(event: Event) -> i32 {
+    match event {
+        Event::Key(key) => {
             if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat {
                 translate_keycode(key)
             } else {
                 ERR
             }
         }
-        Ok(Event::Mouse(mouse)) => {
+        Event::Mouse(mouse) => {
             /* 鼠标点击（对应 C 版 process_click）：仅启用鼠标时处理
              * 编辑区内的左键按下；其它按钮/拖动忽略。 */
             if ISSET(USE_MOUSE) && mouse.kind == MouseEventKind::Down(MouseButton::Left) {
@@ -326,7 +341,7 @@ pub fn wgetch() -> i32 {
                 ERR
             }
         }
-        Ok(Event::Resize(cols, rows)) => {
+        Event::Resize(cols, rows) => {
             with_global_mut(|g| {
                 g.COLS = cols as usize;
                 g.LINES = rows as usize;
@@ -334,7 +349,7 @@ pub fn wgetch() -> i32 {
             });
             THE_WINDOW_RESIZED
         }
-        Ok(Event::Paste(data)) => {
+        Event::Paste(data) => {
             // 括号粘贴：把粘贴文本作为普通输入插入缓冲区（支持多行）。
             // 返回 FOREIGN_SEQUENCE 让主循环跳过（文本已在此插入）。
             let text = data.replace("\r\n", "\n").replace('\r', "");
@@ -355,9 +370,14 @@ pub fn wgetch() -> i32 {
         // "if (keycode == mousefocusin || keycode == mousefocusout) return ERR;"）。
         // 若不丢弃，0x491/0x499 会被 handle_input_key 当作普通 Unicode 字符
         // （U+0491 'ґ'/U+0499 'ҙ'）插入文本，表现为切换窗口时出现随机字符。
-        Ok(Event::FocusGained) | Ok(Event::FocusLost) => ERR,
-        _ => ERR,
+        Event::FocusGained | Event::FocusLost => ERR,
     }
+}
+
+/// 是否是可执行的按键事件（按下或自动重复）。
+fn is_key_press(event: &Event) -> bool {
+    matches!(event, Event::Key(key)
+        if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat)
 }
 
 /// 获取按键代码（对应 get_keycode）。
@@ -506,12 +526,37 @@ pub fn translate_keycode(key: KeyEvent) -> i32 {
 }
 
 /// 等待按键代码。
-/// 返回是否有等待中的按键（非阻塞；对应 C 的 `waiting_codes` 计数）。
+/// 返回是否有等待中的可执行按键（非阻塞；对应 C 的 `waiting_codes` 计数）。
+///
+/// 这里只统计“按下/重复”的按键事件：crossterm 在 Windows 上也会投递
+/// 按键释放事件，若不丢弃，释放事件会让本函数永远返回 1，提示栏的
+/// 输入缓冲（puddle）就再也无法注入回答。预读到的事件存入
+/// `PENDING_EVENTS`，由 `wgetch` 按原顺序消费。
 pub fn waiting_keycodes() -> i32 {
-    if event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
-        1
-    } else {
-        0
+    loop {
+        let front = PENDING_EVENTS.with(|q| q.borrow().front().cloned());
+        if let Some(event) = front {
+            return if is_key_press(&event) { 1 } else { 0 };
+        }
+
+        if !event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
+            return 0;
+        }
+
+        match event::read() {
+            Ok(Event::Key(key))
+                if key.kind != KeyEventKind::Press && key.kind != KeyEventKind::Repeat =>
+            {
+                /* 丢弃按键释放事件，避免它被当成“还有按键等待”。 */
+                continue;
+            }
+            Ok(event) => {
+                let pending_key = is_key_press(&event);
+                PENDING_EVENTS.with(|q| q.borrow_mut().push_back(event));
+                return if pending_key { 1 } else { 0 };
+            }
+            Err(_) => return 0,
+        }
     }
 }
 
