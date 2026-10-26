@@ -437,11 +437,16 @@ pub fn translate_keycode(key: KeyEvent) -> i32 {
             if key.modifiers == KeyModifiers::CONTROL {
                 // Ctrl + 字符：按平台各自的编码规则转换为 nano 键码。
                 ctrl_char_code(c)
-            } else if key.modifiers == KeyModifiers::ALT {
-                // Alt + 字母
+            } else if key.modifiers.contains(KeyModifiers::ALT) {
+                // Alt + 字符（含 Alt+Shift 组合）：nano 的 Alt 字母组合按小写
+                // 字母识别，其余字符保持原样；键码统一为 0x200 + 字符。
+                let c = if key.modifiers.contains(KeyModifiers::SHIFT) && c.is_ascii_alphabetic() {
+                    c.to_ascii_lowercase()
+                } else {
+                    c
+                };
                 match c {
                     'h' => KEY_HOME,
-                    'H' => KEY_HOME,
                     _ => c as i32 | 0x200,
                 }
             } else {
@@ -449,11 +454,25 @@ pub fn translate_keycode(key: KeyEvent) -> i32 {
             }
         }
         KeyCode::Enter => 13, /* 主键盘 Enter 对应 '\r'（与 C 的 wgetch 一致） */
-        KeyCode::Backspace => KEY_BACKSPACE,
+        KeyCode::Backspace => {
+            /* --rebinddelete：VT100 兼容下 Backspace 与 Delete 互换
+             * （对应 C 版 winio.c:1334 的 KEY_BACKSPACE 分支）。 */
+            if ISSET(REBIND_DELETE) {
+                KEY_DC
+            } else {
+                KEY_BACKSPACE
+            }
+        }
         KeyCode::Tab => '\t' as i32,
-        KeyCode::BackTab => KEY_BTAB,
+        KeyCode::BackTab => SHIFT_TAB,
         KeyCode::Esc => ESC_CODE as i32,
-        KeyCode::Delete => KEY_DC,
+        KeyCode::Delete => {
+            if ISSET(REBIND_DELETE) {
+                KEY_BACKSPACE
+            } else {
+                KEY_DC
+            }
+        }
         KeyCode::Home => {
             if key.modifiers == KeyModifiers::CONTROL {
                 CONTROL_HOME
@@ -2536,6 +2555,9 @@ fn execute_by_id(func: FunctionId) -> bool {
         FunctionId::DoAnchor => text::do_anchor(),
         FunctionId::DoFullRefresh => full_refresh(),
         FunctionId::DoJustify => text::do_justify(),
+        FunctionId::DoFullJustify => text::do_full_justify(),
+        FunctionId::DoScrollLeft => movement::do_scroll_left(),
+        FunctionId::DoScrollRight => movement::do_scroll_right(),
         FunctionId::DoWordCompletion => text::complete_a_word(),
         FunctionId::DoPrevFile => files::switch_to_prev_buffer(),
         FunctionId::DoNextFile => files::switch_to_next_buffer(),
@@ -2723,7 +2745,9 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     if key == KEY_DC { cut::do_delete(); edit_refresh(); return true; }
     if key == KEY_BACKSPACE { cut::do_backspace(); edit_refresh(); return true; }
     if key == KEY_ENTER { text::do_enter(); edit_refresh(); return true; }
-    if key == 9 || key == KEY_BTAB { text::do_tab(); edit_refresh(); return true; }
+    if key == 9 { text::do_tab(); edit_refresh(); return true; }
+    /* Sh-Tab：反缩进（对应 C 版 global.c 的 "Sh-Tab" → do_unindent）。 */
+    if key == SHIFT_TAB { text::do_unindent(); edit_refresh(); return true; }
 
     // 修饰键
     if key == CONTROL_LEFT { movement::do_prev_word(); edit_refresh(); return true; }
@@ -2754,6 +2778,28 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     if key == 0x22C { files::switch_to_prev_buffer(); edit_refresh(); return true; } // M-,: 前一个缓冲区
     if key == 0x22E { files::switch_to_next_buffer(); edit_refresh(); return true; } // M-.: 下一个缓冲区
     if key == ESC_CODE as i32 { return true; } // 忽略单独的 Esc
+
+    /* 内置快捷键表兜底分发：C 版所有内置绑定都存放在 sclist 中，由
+     * find_shortcut 按当前菜单查找后执行。这里让上方兼容分支未覆盖的内置
+     * 绑定（M-J、M-W、M-Q、M-{、M-}、M-<、M->、M-B、M-F、M-M 等）也能
+     * 触达。key == 0 是 Ctrl+Space，不能当作“未指定键码”去查表。 */
+    if key != 0 {
+        if let Some(shortcut) = global::find_shortcut(key, currmenu) {
+            let (func, toggle) = {
+                let borrowed = shortcut.borrow();
+                (borrowed.func, borrowed.toggle)
+            };
+            if func == FunctionId::DoToggle {
+                TOGGLE(toggle as usize);
+                if toggle == USE_MOUSE as i32 {
+                    mouse_init();
+                }
+                edit_refresh();
+                return true;
+            }
+            return execute_by_id(func);
+        }
+    }
 
     false
 }

@@ -325,6 +325,17 @@ pub fn shortcut_init() {
     // 帮助页 Previous/Next（对应 C 的 M-B/M-F → do_findprevious/do_findnext）
     add_to_sclist(MMAIN | MBROWSER | MHELP, "M-B", 0x262, FunctionId::DoFindPrevious, 0);
     add_to_sclist(MMAIN | MBROWSER | MHELP, "M-F", 0x266, FunctionId::DoFindNext, 0);
+    /* 备用查找键（对应 global.c：M-W → findnext，M-Q → findprevious）。 */
+    add_to_sclist(MMAIN | MBROWSER | MHELP, "M-W", 0x277, FunctionId::DoFindNext, 0);
+    add_to_sclist(MMAIN | MBROWSER | MHELP, "M-Q", 0x271, FunctionId::DoFindPrevious, 0);
+    /* 缩进/反缩进：注意 C 版是 M-} 缩进、M-{ 反缩进（global.c:1345-1347）。 */
+    add_to_sclist(MMAIN, "M-}", 0x27D, FunctionId::DoIndent, 0);
+    add_to_sclist(MMAIN, "M-{", 0x27B, FunctionId::DoUnindent, 0);
+    add_to_sclist(MMAIN, "Sh-Tab", SHIFT_TAB, FunctionId::DoUnindent, 0);
+    /* 全文对齐与左右滚动（对应 global.c:1457-1462）。 */
+    add_to_sclist(MMAIN, "M-J", 0x26A, FunctionId::DoFullJustify, 0);
+    add_to_sclist(MMAIN, "M-<", ALT_LESS, FunctionId::DoScrollLeft, 0);
+    add_to_sclist(MMAIN, "M->", ALT_GREATER, FunctionId::DoScrollRight, 0);
     // 方向键（仅用于输入匹配，不显示在底部栏）
     add_to_sclist(MMAIN, "Left", KEY_LEFT, FunctionId::DoLeft, 0);
     add_to_sclist(MMAIN, "Right", KEY_RIGHT, FunctionId::DoRight, 0);
@@ -496,8 +507,9 @@ pub fn first_sc_for(menu: i32, func: FunctionId) -> Option<KeyRef> {
 }
 
 const ALT_BACKSPACE: i32 = 0x40A;
-const ALT_SHIFT_COMMA: i32 = 0x43C;
-const ALT_SHIFT_DOT: i32 = 0x43E;
+/// Alt+`<` / Alt+`>`：crossterm 把 Alt+字符统一编码为 0x200 + 字符。
+const ALT_LESS: i32 = 0x200 + b'<' as i32;
+const ALT_GREATER: i32 = 0x200 + b'>' as i32;
 
 /// 注册提示/浏览器/其他菜单的快捷键（对应 global.c 的其余部分）。
 pub fn shortcut_init_rest() {
@@ -543,8 +555,8 @@ pub fn shortcut_init_rest() {
     add_to_sclist(MBROWSER, "Down", KEY_DOWN, FunctionId::DoDown, 0);
     add_to_sclist(MBROWSER, "Left", KEY_LEFT, FunctionId::DoLeft, 0);
     add_to_sclist(MBROWSER, "Right", KEY_RIGHT, FunctionId::DoRight, 0);
-    add_to_sclist(MBROWSER, "M-<", ALT_SHIFT_COMMA, FunctionId::ToFirstFile, 0);
-    add_to_sclist(MBROWSER, "M->", ALT_SHIFT_DOT, FunctionId::ToLastFile, 0);
+    add_to_sclist(MBROWSER, "M-<", ALT_LESS, FunctionId::ToFirstFile, 0);
+    add_to_sclist(MBROWSER, "M->", ALT_GREATER, FunctionId::ToLastFile, 0);
     add_to_sclist(MBROWSER, "PageUp", KEY_PPAGE, FunctionId::DoPageUp, 0);
     add_to_sclist(MBROWSER, "PageDown", KEY_NPAGE, FunctionId::DoPageDown, 0);
 
