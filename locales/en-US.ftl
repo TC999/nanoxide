@@ -192,6 +192,10 @@ rcfile-no_key_bound = No key is bound to function '{func}' in menu '{menu}'.  Ex
 rcfile-die_hint = If needed, use nano with the -I option to adjust your nanorc settings.
 rcfile-invalid_multibyte = Argument is not a valid multibyte string
 
+# ---------- command line（对应 nano.c 的 usage / list_syntax_names） ----------
+cmdline-available_syntaxes = Available syntaxes:
+cmdline-type_help = Type '{arg}' -h for a list of available options.
+
 # ---------- history（历史记录/注册表） ----------
 history-error_reading = Error reading {name}: {err}
 history-error_writing = Error writing {name}: {err}

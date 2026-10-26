@@ -224,6 +224,39 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
         None
     };
 
+    /* -n/--noread：不读取文件内容，只建立带文件名的空缓冲区。
+     * 对应 C 版 open_buffer 中 `if (*filename && !ISSET(NOREAD_MODE))` 的门槛：
+     * 跳过后 descriptor 仍为 0，缓冲区保持 make_new_buffer 的空行。 */
+    if ISSET(NOREAD_MODE) {
+        with_global_mut(|g| {
+            let new_file = Rc::new(RefCell::new(OpenFileStruct {
+                filename: Some(filename.to_string()),
+                filetop: None, filebot: None, edittop: None,
+                current: None, totsize: 0, firstcolumn: 0,
+                current_x: 0, placewewant: 0, brink: 0, cursor_row: 0,
+                statinfo: None, spillage_line: None,
+                mark: None, mark_x: 0, softmark: false,
+                fmt: FormatType::NixFile, lock_filename: lock_filename.clone(),
+                undotop: None, current_undo: None, last_saved: None,
+                last_action: UndoType::Other, modified: false,
+                syntax: None, errormessage: None,
+                next: None, prev: None,
+            }));
+            let line = Rc::new(RefCell::new(LineStruct {
+                data: String::new(), lineno: 1,
+                next: None, prev: None,
+                multidata: None, has_anchor: false,
+            }));
+            new_file.borrow_mut().filetop = Some(line.clone());
+            new_file.borrow_mut().filebot = Some(line.clone());
+            new_file.borrow_mut().edittop = Some(line.clone());
+            new_file.borrow_mut().current = Some(line);
+            install_buffer(g, new_file, fresh);
+        });
+        crate::color::find_and_prime_applicable_syntax();
+        return OpenBufferResult::FileLoaded;
+    }
+
     // 文件不存在：视为新文件。
     if !path.exists() {
         with_global_mut(|g| {

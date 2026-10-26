@@ -1519,6 +1519,33 @@ pub fn get_syntaxes() -> Option<SyntaxRef> {
     with_global(|g| g.syntaxes.clone())
 }
 
+/// 列出可用语法的名称（对应 `list_syntax_names`，nano.c）。
+/// 每个名称前加一个空格，宽度超过 45 列时换行（与 C 版一致）。
+pub fn list_syntax_names() {
+    println!("{}", crate::t!("cmdline-available_syntaxes"));
+
+    let mut width = 0usize;
+    let mut current = with_global(|g| g.syntaxes.clone());
+    while let Some(syntax) = current {
+        let (name, next) = {
+            let borrowed = syntax.borrow();
+            (
+                borrowed.name.clone().unwrap_or_default(),
+                borrowed.next.clone(),
+            )
+        };
+        if width > 45 {
+            println!();
+            width = 0;
+        }
+        print!(" {}", name);
+        width += crate::utils::wideness(name.as_bytes(), 45 * 4);
+        current = next;
+    }
+
+    println!();
+}
+
 /// 获取当前缓冲区的注释字符串。
 pub fn get_comment_string() -> Option<String> {
     with_global(|g| {

@@ -571,158 +571,477 @@ pub fn shortcut_init_rest() {
 
 // ======================== 命令行参数解析（对应 nano.c 的 main） ========================
 
-/// 解析命令行参数。
-/// 解析命令行选项（对应 C 的 getopt_long 循环）。
-/// GNU getopt 默认会重排 argv，因此选项可以出现在文件名之后；
-/// 这里记录第一个文件名，同时继续解析后续选项。
-pub fn parse_args(args: &[String]) -> Option<String> {
-    let mut i = 1;
-    let mut filename: Option<String> = None;
-    while i < args.len() {
-        let arg = &args[i];
-        if arg.starts_with('-') {
-            match arg.as_str() {
-                "-V" | "--version" => {
-                    print_version();
-                    std::process::exit(0);
-                }
-                "-h" | "--help" => {
-                    print_usage();
-                    std::process::exit(0);
-                }
-                "-v" | "--view" => SET(VIEW_MODE),
-                "-x" | "--nohelp" => SET(NO_HELP),
-                "-S" | "--softwrap" => SET(SOFTWRAP),
-                "-m" | "--mouse" => SET(USE_MOUSE),
-                "-i" | "--autoindent" => SET(AUTOINDENT),
-                "-k" | "--cutfromcursor" => SET(CUT_FROM_CURSOR),
-                "-l" | "--linenumbers" => SET(LINE_NUMBERS),
-                "-b" | "--boldtext" => SET(BOLD_TEXT),
-                "-u" | "--unix" => SET(MAKE_IT_UNIX),
-                "-w" | "--nowrap" => SET(NO_WRAP),
-                "-c" | "--constantshow" => SET(CONSTANT_SHOW),
-                "-p" | "--preserve" => SET(PRESERVE),
-                "-A" | "--smarthome" => SET(SMART_HOME),
-                "-E" | "--tabstospaces" => SET(TABS_TO_SPACES),
-                "-Q" | "--quotestr" => {
-                    i += 1;
-                    if let Some(v) = args.get(i) {
-                        with_global_mut(|g| {
-                            g.quotestr = Some(v.clone());
-                            g.cmdline_quotestr = Some(v.clone());
-                        });
-                    }
-                }
-                "-r" | "--fill" => {
-                    i += 1;
-                    if i < args.len() {
-                        if let Ok(f) = args[i].parse::<isize>() {
-                            with_global_mut(|g| {
-                                g.fill = f;
-                                g.cmdline_fill = Some(f);
-                            });
-                        }
-                    }
-                }
-                "-T" | "--tabsize" => {
-                    i += 1;
-                    if i < args.len() {
-                        if let Ok(s) = args[i].parse::<usize>() {
-                            with_global_mut(|g| {
-                                g.tabsize = s;
-                                g.cmdline_tabsize = Some(s);
-                            });
-                            set_tabsize_independent(s);
-                        }
-                    }
-                }
-                "-R" | "--restricted" => SET(RESTRICTED),
-                "-o" | "--operatingdir" => {
-                    i += 1;
-                    if let Some(v) = args.get(i) {
-                        with_global_mut(|g| {
-                            g.operating_dir = Some(v.clone());
-                            g.cmdline_operating_dir = Some(v.clone());
-                        });
-                    }
-                }
-                "-f" | "--rcfile" => {
-                    i += 1;
-                    if let Some(v) = args.get(i) {
-                        with_global_mut(|g| g.custom_nanorc = Some(v.clone()));
-                    }
-                }
-                "-K" | "--rebinddelete" => SET(REBIND_DELETE),
-                "-s" | "--speller" => {
-                    i += 1;
-                    if let Some(v) = args.get(i) {
-                        with_global_mut(|g| {
-                            g.speller = Some(v.clone());
-                            g.cmdline_speller = Some(v.clone());
-                        });
-                    }
-                }
-                "-Y" | "--syntax" => {
-                    i += 1;
-                    // 设置语法
-                }
-                "-g" | "--positionlog" => SET(POSITIONLOG),
-                "-Z" | "--locking" => SET(LOCKING),
-                "-U" | "--quickblank" => SET(QUICK_BLANK),
-                "-j" | "--jumpyscrolling" => SET(JUMPY_SCROLLING),
-                "-e" | "--emptyline" => SET(EMPTY_LINE),
-                "-J" | "--guidestripe" => {
-                    i += 1;
-                    if let Some(v) = args.get(i) {
-                        if let Ok(n) = v.parse::<usize>() {
-                            with_global_mut(|g| {
-                                g.stripe_column = n;
-                                g.cmdline_stripe_column = Some(n);
-                            });
-                        }
-                    }
-                }
-                "-t" | "--saveonexit" => SET(SAVE_ON_EXIT),
-                "-0" | "--zero" => SET(ZERO),
-                "-M" | "--modernbindings" => SET(MODERN_BINDINGS),
-                "-H" | "--historylog" => SET(HISTORYLOG),
-                "-B" | "--backup" => SET(MAKE_BACKUP),
-                "-C" | "--backupdir" => {
-                    i += 1;
-                    if let Some(v) = args.get(i) {
-                        with_global_mut(|g| {
-                            g.backup_dir = Some(v.clone());
-                            g.cmdline_backup_dir = Some(v.clone());
-                        });
-                    }
-                }
-                "-I" | "--insecurebackup" => SET(INSECURE_BACKUP),
-                "-N" | "--noconvert" => SET(NO_CONVERT),
-                "-L" | "--nonewlines" => SET(NO_NEWLINES),
-                "-X" | "--wordbounds" => SET(WORD_BOUNDS),
-                "-W" | "--whitespacedisplay" => SET(WHITESPACE_DISPLAY),
-                "-O" | "--colonparsing" => SET(COLON_PARSING),
-                "-F" | "--multibuffer" => SET(NEW_BUFFER),
-                _ => {
-                    if arg == "--" {
-                        /* "--" 之后的参数都是文件名，不再解析选项。 */
-                        i += 1;
-                        if filename.is_none() {
-                            filename = args.get(i).cloned();
-                        }
-                        break;
-                    }
-                }
+/// 命令行解析结果（对应 C 版 main() 的局部变量 + 剩余的 argv）。
+pub struct ParsedCommandLine {
+    /// 文件参数（含 +LINE[,COLUMN] 与 +/pattern 关联信息）。
+    pub files: Vec<FileArg>,
+    /// -b 置 1、-w 置 0，默认 -2（对应 C 版 main 的 hardwrap 三态）。
+    pub hardwrap: i32,
+    /// -I：不读任何 rc 文件（对应 C 版 main 的 ignore_rcfiles）。
+    pub ignore_rcfiles: bool,
+    /// -z：列出可用语法后退出。
+    pub list_syntaxes: bool,
+    /// 遇到 -z 时是否应读取 rc 文件。C 版在 -z 分支里按当时的 -I 状态
+    /// 立即调用 do_rcfiles()，故 `-I -z` 不读、`-z -I` 要读。
+    pub list_syntaxes_reads_rc: bool,
+}
+
+/// 长选项表（对应 nano.c 的 long_options[]）。
+struct LongOption {
+    name: &'static str,
+    has_arg: bool,
+    ch: i32,
+}
+
+#[rustfmt::skip]
+const LONG_OPTIONS: &[LongOption] = &[
+    LongOption { name: "boldtext", has_arg: false, ch: b'D' as i32 },
+    LongOption { name: "multibuffer", has_arg: false, ch: b'F' as i32 },
+    LongOption { name: "newbuffer", has_arg: false, ch: b'F' as i32 },
+    LongOption { name: "ignorercfiles", has_arg: false, ch: b'I' as i32 },
+    LongOption { name: "rawsequences", has_arg: false, ch: b'K' as i32 },
+    LongOption { name: "trimblanks", has_arg: false, ch: b'M' as i32 },
+    LongOption { name: "quotestr", has_arg: true, ch: b'Q' as i32 },
+    LongOption { name: "restricted", has_arg: false, ch: b'R' as i32 },
+    LongOption { name: "quickblank", has_arg: false, ch: b'U' as i32 },
+    LongOption { name: "version", has_arg: false, ch: b'V' as i32 },
+    LongOption { name: "syntax", has_arg: true, ch: b'Y' as i32 },
+    LongOption { name: "breaklonglines", has_arg: false, ch: b'b' as i32 },
+    LongOption { name: "constantshow", has_arg: false, ch: b'c' as i32 },
+    LongOption { name: "rebinddelete", has_arg: false, ch: b'd' as i32 },
+    LongOption { name: "rcfile", has_arg: true, ch: b'f' as i32 },
+    LongOption { name: "showcursor", has_arg: false, ch: b'g' as i32 },
+    LongOption { name: "help", has_arg: false, ch: b'h' as i32 },
+    LongOption { name: "linenumbers", has_arg: false, ch: b'l' as i32 },
+    LongOption { name: "mouse", has_arg: false, ch: b'm' as i32 },
+    LongOption { name: "operatingdir", has_arg: true, ch: b'o' as i32 },
+    LongOption { name: "preserve", has_arg: false, ch: b'p' as i32 },
+    LongOption { name: "fill", has_arg: true, ch: b'r' as i32 },
+    LongOption { name: "speller", has_arg: true, ch: b's' as i32 },
+    LongOption { name: "saveonexit", has_arg: false, ch: b't' as i32 },
+    LongOption { name: "view", has_arg: false, ch: b'v' as i32 },
+    LongOption { name: "nowrap", has_arg: false, ch: b'w' as i32 },
+    LongOption { name: "nohelp", has_arg: false, ch: b'x' as i32 },
+    LongOption { name: "listsyntaxes", has_arg: false, ch: b'z' as i32 },
+    LongOption { name: "modernbindings", has_arg: false, ch: b'/' as i32 },
+    LongOption { name: "smarthome", has_arg: false, ch: b'A' as i32 },
+    LongOption { name: "backup", has_arg: false, ch: b'B' as i32 },
+    LongOption { name: "backupdir", has_arg: true, ch: b'C' as i32 },
+    LongOption { name: "tabstospaces", has_arg: false, ch: b'E' as i32 },
+    LongOption { name: "locking", has_arg: false, ch: b'G' as i32 },
+    LongOption { name: "historylog", has_arg: false, ch: b'H' as i32 },
+    LongOption { name: "guidestripe", has_arg: true, ch: b'J' as i32 },
+    LongOption { name: "nonewlines", has_arg: false, ch: b'L' as i32 },
+    LongOption { name: "noconvert", has_arg: false, ch: b'N' as i32 },
+    LongOption { name: "bookstyle", has_arg: false, ch: b'O' as i32 },
+    LongOption { name: "positionlog", has_arg: false, ch: b'P' as i32 },
+    LongOption { name: "softwrap", has_arg: false, ch: b'S' as i32 },
+    LongOption { name: "tabsize", has_arg: true, ch: b'T' as i32 },
+    LongOption { name: "wordbounds", has_arg: false, ch: b'W' as i32 },
+    LongOption { name: "wordchars", has_arg: true, ch: b'X' as i32 },
+    LongOption { name: "zap", has_arg: false, ch: b'Z' as i32 },
+    LongOption { name: "atblanks", has_arg: false, ch: b'a' as i32 },
+    LongOption { name: "emptyline", has_arg: false, ch: b'e' as i32 },
+    LongOption { name: "autoindent", has_arg: false, ch: b'i' as i32 },
+    LongOption { name: "jumpyscrolling", has_arg: false, ch: b'j' as i32 },
+    LongOption { name: "cutfromcursor", has_arg: false, ch: b'k' as i32 },
+    LongOption { name: "noread", has_arg: false, ch: b'n' as i32 },
+    LongOption { name: "indicator", has_arg: false, ch: b'q' as i32 },
+    LongOption { name: "unix", has_arg: false, ch: b'u' as i32 },
+    LongOption { name: "afterends", has_arg: false, ch: b'y' as i32 },
+    LongOption { name: "whitespacedisplay", has_arg: false, ch: 0xCC },
+    LongOption { name: "colonparsing", has_arg: false, ch: b'@' as i32 },
+    LongOption { name: "stateflags", has_arg: false, ch: b'%' as i32 },
+    LongOption { name: "minibar", has_arg: false, ch: b'_' as i32 },
+    LongOption { name: "zero", has_arg: false, ch: b'0' as i32 },
+    LongOption { name: "solosidescroll", has_arg: false, ch: b'1' as i32 },
+    LongOption { name: "magic", has_arg: false, ch: b'!' as i32 },
+];
+
+/// 短选项是否带参数（对应 getopt 字符串里带 ':' 的字母）。
+fn short_takes_argument(c: char) -> bool {
+    matches!(c, 'C' | 'J' | 'Q' | 'T' | 'X' | 'Y' | 'f' | 'o' | 'r' | 's')
+}
+
+/// 是否为 getopt 字符串中存在的短选项。
+/// 字母 A-Z/a-z 全在表中（部分带参数），另加 `! @ % _ 0 1 /`。
+fn is_short_option(c: char) -> bool {
+    matches!(c, 'A'..='Z' | 'a'..='z' | '!' | '@' | '%' | '_' | '0' | '1' | '/')
+}
+
+/// 输出 getopt 风格的错误，再按 C 版 default 分支提示 `-h` 并退出 1。
+fn command_line_error(program: &str, message: &str) -> ! {
+    eprintln!("{}: {}", program, message);
+    println!("{}", crate::t!("cmdline-type_help", arg = program));
+    std::process::exit(1);
+}
+
+fn invalid_guide_column(value: &str) -> ! {
+    eprintln!("{}", crate::t!("rcfile-guide_invalid", arg = value));
+    std::process::exit(1);
+}
+
+fn invalid_tab_size(value: &str) -> ! {
+    eprintln!("{}", crate::t!("rcfile-tabsize_invalid", arg = value));
+    std::process::exit(1);
+}
+
+fn invalid_fill_size(value: &str) -> ! {
+    eprintln!("{}", crate::t!("rcfile-fill_invalid", arg = value));
+    std::process::exit(1);
+}
+
+/// 解析一个长选项（允许 GNU getopt_long 的唯一前缀缩写）。
+fn resolve_long_option(program: &str, name: &str) -> &'static LongOption {
+    if let Some(exact) = LONG_OPTIONS.iter().find(|opt| opt.name == name) {
+        return exact;
+    }
+
+    let matches: Vec<&LongOption> = LONG_OPTIONS
+        .iter()
+        .filter(|opt| opt.name.starts_with(name))
+        .collect();
+
+    match matches.len() {
+        0 => command_line_error(program, &format!("unrecognized option '--{}'", name)),
+        1 => matches[0],
+        _ => command_line_error(program, &format!("option '--{}' is ambiguous", name)),
+    }
+}
+
+/// 应用一个命令行选项（对应 C 版 getopt 循环里的 switch 分支）。
+fn apply_option(ch: i32, value: Option<String>, state: &mut ParsedCommandLine) {
+    let value = value.unwrap_or_default();
+    match ch as u8 {
+        b'A' => SET(SMART_HOME),
+        b'B' => SET(MAKE_BACKUP),
+        b'C' => {
+            with_global_mut(|g| {
+                g.backup_dir = Some(value.clone());
+                g.cmdline_backup_dir = Some(value.clone());
+            });
+        }
+        b'D' => SET(BOLD_TEXT),
+        b'E' => SET(TABS_TO_SPACES),
+        b'F' => SET(NEW_BUFFER),
+        b'G' => SET(LOCKING),
+        b'H' => SET(HISTORYLOG),
+        b'I' => state.ignore_rcfiles = true,
+        b'J' => {
+            let mut column: isize = 0;
+            if !crate::utils::parse_num(&value, &mut column) || column <= 0 {
+                invalid_guide_column(&value);
             }
+            with_global_mut(|g| {
+                g.stripe_column = column as usize;
+                g.cmdline_stripe_column = Some(column as usize);
+            });
+        }
+        b'K' => SET(RAW_SEQUENCES),
+        b'L' => SET(NO_NEWLINES),
+        b'M' => SET(TRIM_BLANKS),
+        b'N' => SET(NO_CONVERT),
+        b'O' => SET(BOOKSTYLE),
+        b'P' => SET(POSITIONLOG),
+        b'Q' => {
+            with_global_mut(|g| {
+                g.quotestr = Some(value.clone());
+                g.cmdline_quotestr = Some(value.clone());
+            });
+        }
+        b'R' => SET(RESTRICTED),
+        b'S' => SET(SOFTWRAP),
+        b'T' => {
+            let mut size: isize = 0;
+            if !crate::utils::parse_num(&value, &mut size) || size <= 0 {
+                invalid_tab_size(&value);
+            }
+            with_global_mut(|g| {
+                g.tabsize = size as usize;
+                g.cmdline_tabsize = Some(size as usize);
+            });
+            set_tabsize_independent(size as usize);
+        }
+        b'U' => SET(QUICK_BLANK),
+        b'V' => {
+            print_version();
+            std::process::exit(0);
+        }
+        b'W' => SET(WORD_BOUNDS),
+        b'X' => {
+            with_global_mut(|g| {
+                g.word_chars = Some(value.clone());
+                g.cmdline_word_chars = Some(value.clone());
+            });
+        }
+        b'Y' => with_global_mut(|g| g.syntaxstr = Some(value.clone())),
+        b'Z' => SET(LET_THEM_ZAP),
+        b'a' => SET(AT_BLANKS),
+        b'b' => state.hardwrap = 1,
+        b'c' => SET(CONSTANT_SHOW),
+        b'd' => SET(REBIND_DELETE),
+        b'e' => SET(EMPTY_LINE),
+        b'f' => with_global_mut(|g| g.custom_nanorc = Some(value.clone())),
+        b'g' => SET(SHOW_CURSOR),
+        b'h' => {
+            print_usage();
+            std::process::exit(0);
+        }
+        b'i' => SET(AUTOINDENT),
+        b'j' => SET(JUMPY_SCROLLING),
+        b'k' => SET(CUT_FROM_CURSOR),
+        b'l' => SET(LINE_NUMBERS),
+        b'm' => SET(USE_MOUSE),
+        b'n' => SET(NOREAD_MODE),
+        b'o' => {
+            with_global_mut(|g| {
+                g.operating_dir = Some(value.clone());
+                g.cmdline_operating_dir = Some(value.clone());
+            });
+        }
+        b'p' => SET(PRESERVE),
+        b'q' => SET(INDICATOR),
+        b'r' => {
+            let mut fill: isize = 0;
+            if !crate::utils::parse_num(&value, &mut fill) {
+                invalid_fill_size(&value);
+            }
+            with_global_mut(|g| {
+                g.fill = fill;
+                g.cmdline_fill = Some(fill);
+            });
+        }
+        b's' => {
+            with_global_mut(|g| {
+                g.speller = Some(value.clone());
+                g.cmdline_speller = Some(value.clone());
+            });
+        }
+        b't' => SET(SAVE_ON_EXIT),
+        b'u' => SET(MAKE_IT_UNIX),
+        b'v' => SET(VIEW_MODE),
+        b'w' => state.hardwrap = 0,
+        b'x' => SET(NO_HELP),
+        b'y' => SET(AFTER_ENDS),
+        b'z' => {
+            state.list_syntaxes = true;
+            state.list_syntaxes_reads_rc = !state.ignore_rcfiles;
+        }
+        0xCC => SET(WHITESPACE_DISPLAY),
+        b'@' => SET(COLON_PARSING),
+        b'%' => SET(STATEFLAGS),
+        b'_' => SET(MINIBAR),
+        b'0' => SET(ZERO),
+        b'1' => SET(SOLO_SIDESCROLL),
+        b'/' => SET(MODERN_BINDINGS),
+        b'!' => SET(USE_MAGIC),
+        _ => {}
+    }
+}
+
+/// 把一个操作数（文件名或 `+定位`）加入结果（对应 C 版 main 的文件循环）。
+fn add_operand(
+    arg: &str,
+    files: &mut Vec<FileArg>,
+    givenline: &mut isize,
+    givencol: &mut isize,
+    searchstring: &mut Option<String>,
+) {
+    if let Some(rest) = arg.strip_prefix('+') {
+        let bs = rest.as_bytes();
+        /* 可选的搜索修饰符（可为空）：c/C/r/R（对应 C 版字母循环）。 */
+        let mut n = 0;
+        while n < bs.len() && bs[n].is_ascii_alphabetic() {
+            match bs[n] {
+                b'c' => SET(CASE_SENSITIVE),
+                b'C' => UNSET(CASE_SENSITIVE),
+                b'r' => SET(USE_REGEXP),
+                b'R' => UNSET(USE_REGEXP),
+                _ => crate::winio::statusline(
+                    MessageType::Alert,
+                    &crate::t!("search-invalid_modifier", ch = (bs[n] as char).to_string()),
+                ),
+            }
+            n += 1;
+        }
+        if n < bs.len() && (bs[n] == b'/' || bs[n] == b'?') {
+            /* 搜索串参数：+/pattern（正向），+?pattern（反向）。 */
+            if n + 1 < bs.len() {
+                let pattern = rest[n + 1..].to_string();
+                if bs[n] == b'?' {
+                    SET(BACKWARDS_SEARCH);
+                } else {
+                    UNSET(BACKWARDS_SEARCH);
+                }
+                *searchstring = Some(pattern);
+            } else {
+                crate::winio::statusline(
+                    MessageType::Alert,
+                    &crate::t!("search-empty_search_string"),
+                );
+            }
+        } else if rest.is_empty() {
+            /* "+" 单独出现：到文件末尾。 */
+            *givenline = -1;
         } else {
-            /* 文件名参数；继续解析后续选项（对应 GNU getopt 的重排）。 */
-            if filename.is_none() {
-                filename = Some(arg.clone());
+            /* 无搜索串：按行/列解析（含修饰字母而无 /? 时会失败提示，
+             * 与 C 版 parse_line_column 行为一致）。 */
+            let mut line = *givenline;
+            let mut col = *givencol;
+            if crate::utils::parse_line_column(rest, &mut line, &mut col) {
+                *givenline = line;
+                *givencol = col;
+            } else {
+                crate::winio::statusline(
+                    MessageType::Alert,
+                    &crate::t!("search-invalid_line_or_column"),
+                );
             }
         }
+        return;
+    }
+
+    /* 文件名。"-" 表示从标准输入读取（对应 C 版 argv == "-" 时
+     * 调用 scoop_stdin 的分支，由 main 处理）。 */
+    let mut name = arg.to_string();
+    let mut line = *givenline;
+    let mut col = *givencol;
+
+    /* colon-parsing：文件名含冒号、无定位且该文件不存在时，尝试
+     * 剥掉尾部的 ":行[:列]"（对应 C 版 COLON_PARSING 分支）。 */
+    if name != "-"
+        && ISSET(COLON_PARSING)
+        && line == 0
+        && col == 0
+        && name.contains(':')
+        && !std::path::Path::new(&name).exists()
+    {
+        if let Some((realname, l, c)) = colon_split(&name) {
+            name = realname;
+            line = l;
+            col = c;
+        }
+    }
+
+    files.push(FileArg {
+        name,
+        line,
+        col,
+        search: searchstring.take(),
+    });
+    *givenline = 0;
+    *givencol = 0;
+}
+
+/// 解析整条命令行：先按 getopt_long 的语义处理所有选项（GNU getopt 会重排
+/// argv，因此选项可出现在文件名之后），再按原相对顺序处理文件参数。
+pub fn parse_command_line(args: &[String]) -> ParsedCommandLine {
+    let program = args.first().cloned().unwrap_or_else(|| "nax".to_string());
+    let mut state = ParsedCommandLine {
+        files: Vec::new(),
+        hardwrap: -2,
+        ignore_rcfiles: false,
+        list_syntaxes: false,
+        list_syntaxes_reads_rc: false,
+    };
+    let mut operands: Vec<String> = Vec::new();
+    let mut no_more_options = false;
+    let mut i = 1;
+
+    while i < args.len() {
+        let arg = &args[i];
+
+        if no_more_options || arg == "-" || !arg.starts_with('-') {
+            operands.push(arg.clone());
+        } else if arg == "--" {
+            no_more_options = true;
+        } else if let Some(long) = arg.strip_prefix("--") {
+            let (name, inline) = match long.split_once('=') {
+                Some((name, value)) => (name, Some(value.to_string())),
+                None => (long, None),
+            };
+            let option = resolve_long_option(&program, name);
+
+            if option.has_arg {
+                let value = match inline {
+                    Some(value) => value,
+                    None => {
+                        i += 1;
+                        match args.get(i) {
+                            Some(value) => value.clone(),
+                            None => command_line_error(
+                                &program,
+                                &format!("option '--{}' requires an argument", option.name),
+                            ),
+                        }
+                    }
+                };
+                apply_option(option.ch, Some(value), &mut state);
+            } else {
+                if inline.is_some() {
+                    command_line_error(
+                        &program,
+                        &format!("option '--{}' doesn't allow an argument", option.name),
+                    );
+                }
+                apply_option(option.ch, None, &mut state);
+            }
+        } else {
+            /* 短选项簇：-ES、-T4、-T 4 均受支持。 */
+            let chars: Vec<char> = arg[1..].chars().collect();
+            let mut j = 0;
+            while j < chars.len() {
+                let option = chars[j];
+                if !is_short_option(option) {
+                    command_line_error(
+                        &program,
+                        &format!("invalid option -- '{}'", option),
+                    );
+                }
+                if short_takes_argument(option) {
+                    let rest: String = chars[j + 1..].iter().collect();
+                    let value = if !rest.is_empty() {
+                        rest
+                    } else {
+                        i += 1;
+                        match args.get(i) {
+                            Some(value) => value.clone(),
+                            None => command_line_error(
+                                &program,
+                                &format!("option requires an argument -- '{}'", option),
+                            ),
+                        }
+                    };
+                    apply_option(option as i32, Some(value), &mut state);
+                    break;
+                }
+                apply_option(option as i32, None, &mut state);
+                j += 1;
+            }
+        }
+
         i += 1;
     }
-    filename
+
+    let mut givenline = 0isize;
+    let mut givencol = 0isize;
+    let mut searchstring: Option<String> = None;
+    for operand in &operands {
+        add_operand(
+            operand,
+            &mut state.files,
+            &mut givenline,
+            &mut givencol,
+            &mut searchstring,
+        );
+    }
+
+    state
+}
+
+/// 解析命令行参数（兼容旧接口）：返回第一个文件名。
+pub fn parse_args(args: &[String]) -> Option<String> {
+    parse_command_line(args).files.first().map(|file| file.name.clone())
 }
 
 /// 解析命令行中的文件参数，返回 (文件名, 行号, 列号) 列表。
@@ -785,107 +1104,10 @@ fn colon_split(filename: &str) -> Option<(String, isize, isize)> {
     }
 }
 
-/// 解析命令行中剩余的“文件参数”（含 +LINE[,COLUMN] 定位与 +c/pattern
+/// 解析命令行中的“文件参数”（含 +LINE[,COLUMN] 定位与 +c/pattern
 /// 搜索参数，对应 C 版 main 的文件读取循环）。
 pub fn parse_file_args(args: &[String]) -> Vec<FileArg> {
-    use crate::winio;
-    let mut result = Vec::new();
-    let mut i = 1;
-    let mut givenline: isize = 0;
-    let mut givencol: isize = 0;
-    let mut searchstring: Option<String> = None;
-    while i < args.len() {
-        let arg = &args[i];
-        if let Some(rest) = arg.strip_prefix('+') {
-            let bs = rest.as_bytes();
-            /* 可选的搜索修饰符（可为空）：c/C/r/R（对应 C 版字母循环）。 */
-            let mut n = 0;
-            while n < bs.len() && bs[n].is_ascii_alphabetic() {
-                match bs[n] {
-                    b'c' => SET(CASE_SENSITIVE),
-                    b'C' => UNSET(CASE_SENSITIVE),
-                    b'r' => SET(USE_REGEXP),
-                    b'R' => UNSET(USE_REGEXP),
-                    _ => winio::statusline(
-                        MessageType::Alert,
-                        &crate::t!("search-invalid_modifier", ch = (bs[n] as char).to_string()),
-                    ),
-                }
-                n += 1;
-            }
-            if n < bs.len() && (bs[n] == b'/' || bs[n] == b'?') {
-                /* 搜索串参数：+/pattern（正向），+?pattern（反向）。 */
-                if n + 1 < bs.len() {
-                    let pattern = rest[n + 1..].to_string();
-                    if bs[n] == b'?' {
-                        SET(BACKWARDS_SEARCH);
-                    } else {
-                        UNSET(BACKWARDS_SEARCH);
-                    }
-                    searchstring = Some(pattern);
-                } else {
-                    winio::statusline(
-                        MessageType::Alert,
-                        &crate::t!("search-empty_search_string"),
-                    );
-                }
-            } else if rest.is_empty() {
-                /* "+" 单独出现：到文件末尾。 */
-                givenline = -1;
-            } else {
-                /* 无搜索串：按行/列解析（含修饰字母而无 /? 时会失败提示，
-                 * 与 C 版 parse_line_column 行为一致）。 */
-                let mut line = givenline;
-                let mut col = givencol;
-                if crate::utils::parse_line_column(rest, &mut line, &mut col) {
-                    givenline = line;
-                    givencol = col;
-                } else {
-                    winio::statusline(
-                        MessageType::Alert,
-                        &crate::t!("search-invalid_line_or_column"),
-                    );
-                }
-            }
-            i += 1;
-            continue;
-        }
-
-        if !arg.starts_with('-') || arg == "-" {
-            /* 文件名。"-" 表示从标准输入读取（对应 C 版 argv == "-" 时
-             * 调用 scoop_stdin 的分支，由 main 处理）。 */
-            let mut name = arg.clone();
-            let mut line = givenline;
-            let mut col = givencol;
-
-            /* colon-parsing：文件名含冒号、无定位且该文件不存在时，尝试
-             * 剥掉尾部的 ":行[:列]"（对应 C 版 COLON_PARSING 分支）。 */
-            if name != "-"
-                && ISSET(COLON_PARSING)
-                && line == 0
-                && col == 0
-                && name.contains(':')
-                && !std::path::Path::new(&name).exists()
-            {
-                if let Some((realname, l, c)) = colon_split(&name) {
-                    name = realname;
-                    line = l;
-                    col = c;
-                }
-            }
-
-            result.push(FileArg {
-                name,
-                line,
-                col,
-                search: searchstring.take(),
-            });
-            givenline = 0;
-            givencol = 0;
-        }
-        i += 1;
-    }
-    result
+    parse_command_line(args).files
 }
 /// 打印版本信息。
 fn print_version() {
@@ -894,31 +1116,90 @@ fn print_version() {
     println!("Compiled options: --enable-utf8");
 }
 
-/// 打印使用说明。
+/// 打印使用说明（对应 C 版 nano.c 的 usage()）。
 fn print_usage() {
-    println!("Usage: nax [OPTIONS] [FILE]");
-    println!("");
-    println!("GNU nano - a small, friendly text editor");
-    println!("");
-    println!("Basic options:");
-    println!("  -V, --version          Print version information");
-    println!("  -h, --help             Print this help message");
-    println!("  -v, --view             View mode (read-only)");
-    println!("  -x, --nohelp           Hide the help lines");
-    println!("  -S, --softwrap         Soft wrap lines");
-    println!("  -m, --mouse            Enable mouse");
-    println!("  -i, --autoindent       Auto-indent new lines");
-    println!("  -k, --cutfromcursor     Cut from cursor to end of line");
-    println!("  -l, --linenumbers      Show line numbers");
-    println!("  -b, --boldtext         Use bold text");
-    println!("  -u, --unix             Save in Unix format");
-    println!("  -w, --nowrap           Don't wrap long lines");
-    println!("  -c, --constantshow     Constantly show cursor position");
-    println!("  -p, --preserve         Preserve XON/XOFF");
-    println!("  -A, --smarthome        Smart home key");
-    println!("  -E, --tabstospaces     Convert typed tabs to spaces");
-    println!("  -T, --tabsize=N        Tab size (default 8)");
-    println!("  -r, --fill=N           Target width for wrap (default -2)");
+    let print_opt = |short: &str, long: &str, description: &str| {
+        println!(" {:<14} {:<24}{}", short, long, description);
+    };
+
+    println!("Usage: nax [OPTIONS] [[+LINE[,COLUMN]] FILE]...");
+    println!();
+    println!("To place the cursor on a specific line of a file, put the line number with");
+    println!("a '+' before the filename.  The column number can be added after a comma.");
+    println!("When a filename is '-', nax reads data from standard input.");
+    println!();
+    print_opt("Option", "Long option", "Meaning");
+    print_opt("-A", "--smarthome", "Enable smart home key");
+    if !ISSET(RESTRICTED) {
+        print_opt("-B", "--backup", "Save backups of existing files");
+        print_opt("-C <dir>", "--backupdir=<dir>", "Directory for saving unique backup files");
+    }
+    print_opt("-D", "--boldtext", "Use bold instead of reverse video text");
+    print_opt("-E", "--tabstospaces", "Convert typed tabs to spaces");
+    if !ISSET(RESTRICTED) {
+        print_opt("-F", "--newbuffer", "Read a file into a new buffer by default");
+    }
+    print_opt("-G", "--locking", "Use (vim-style) lock files");
+    if !ISSET(RESTRICTED) {
+        print_opt("-H", "--historylog", "Save & reload old search/replace strings");
+    }
+    print_opt("-I", "--ignorercfiles", "Don't look at nanorc files");
+    print_opt("-J <number>", "--guidestripe=<number>", "Show a guiding bar at this column");
+    print_opt("-K", "--rawsequences", "Fix numeric keypad key confusion problem");
+    print_opt("-L", "--nonewlines", "Don't add an automatic newline");
+    print_opt("-M", "--trimblanks", "Trim tail spaces when hard-wrapping");
+    print_opt("-N", "--noconvert", "Don't convert files from DOS format");
+    print_opt("-O", "--bookstyle", "Leading whitespace means new paragraph");
+    if !ISSET(RESTRICTED) {
+        print_opt("-P", "--positionlog", "Save & restore position of the cursor");
+    }
+    print_opt("-Q <regex>", "--quotestr=<regex>", "Regular expression to match quoting");
+    if !ISSET(RESTRICTED) {
+        print_opt("-R", "--restricted", "Restrict access to the filesystem");
+    }
+    print_opt("-S", "--softwrap", "Display overlong lines on multiple rows");
+    print_opt("-T <number>", "--tabsize=<number>", "Make a tab this number of columns wide");
+    print_opt("-U", "--quickblank", "Wipe status bar upon next keystroke");
+    print_opt("-V", "--version", "Print version information and exit");
+    print_opt("-W", "--wordbounds", "Detect word boundaries more accurately");
+    print_opt("-X <string>", "--wordchars=<string>", "Which other characters are word parts");
+    print_opt("-Y <name>", "--syntax=<name>", "Syntax definition to use for coloring");
+    print_opt("-Z", "--zap", "Let Bsp and Del erase a marked region");
+    print_opt("-a", "--atblanks", "When soft-wrapping, do it at whitespace");
+    print_opt("-b", "--breaklonglines", "Automatically hard-wrap overlong lines");
+    print_opt("-c", "--constantshow", "Constantly show cursor position");
+    print_opt("-d", "--rebinddelete", "Fix Backspace/Delete confusion problem");
+    print_opt("-e", "--emptyline", "Keep the line below the title bar empty");
+    print_opt("-f <file>", "--rcfile=<file>", "Use only this file for configuring nax");
+    print_opt("-g", "--showcursor", "Show cursor in file browser & help text");
+    print_opt("-h", "--help", "Show this help text and exit");
+    print_opt("-i", "--autoindent", "Automatically indent new lines");
+    print_opt("-j", "--jumpyscrolling", "Scroll per half-screen, not per line");
+    print_opt("-k", "--cutfromcursor", "Cut from cursor to end of line");
+    print_opt("-l", "--linenumbers", "Show line numbers in front of the text");
+    print_opt("-m", "--mouse", "Enable the use of the mouse");
+    print_opt("-n", "--noread", "Do not read the file (only write it)");
+    print_opt("-o <dir>", "--operatingdir=<dir>", "Set operating directory");
+    print_opt("-p", "--preserve", "Preserve XON (^Q) and XOFF (^S) keys");
+    print_opt("-q", "--indicator", "Show a position+portion indicator");
+    print_opt("-r <number>", "--fill=<number>", "Set width for hard-wrap and justify");
+    if !ISSET(RESTRICTED) {
+        print_opt("-s <program>", "--speller=<program>", "Use this alternative spell checker");
+    }
+    print_opt("-t", "--saveonexit", "Save changes on exit, don't prompt");
+    print_opt("-u", "--unix", "Save a file by default in Unix format");
+    print_opt("-v", "--view", "View mode (read-only)");
+    print_opt("-w", "--nowrap", "Don't hard-wrap long lines [default]");
+    print_opt("-x", "--nohelp", "Don't show the two help lines");
+    print_opt("-y", "--afterends", "Make Ctrl+Right stop at word ends");
+    print_opt("-z", "--listsyntaxes", "List the names of available syntaxes");
+    print_opt("-!", "--magic", "Also try magic to determine syntax");
+    print_opt("-@", "--colonparsing", "Accept 'filename:linenumber' notation");
+    print_opt("-%", "--stateflags", "Show some states on the title bar");
+    print_opt("-_", "--minibar", "Show a feedback bar at the bottom");
+    print_opt("-0", "--zero", "Hide all bars, use whole terminal");
+    print_opt("-1", "--solosidescroll", "Scroll only the current line sideways");
+    print_opt("-/", "--modernbindings", "Use better-known key bindings");
 }
 
 // ======================== rcfile 辅助（对应 global.c / rcfile.c） ========================

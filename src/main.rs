@@ -5,11 +5,13 @@
 // 快捷键 -> 历史 -> 打开文件 -> 显示 -> 主事件循环 -> 退出清理。
 
 use nanoxide::definitions::{
-    with_global, with_global_mut, ISSET, SET, MessageType, CONSTANT_SHOW, MINIBAR, ZERO,
-    RESTRICTED, NO_WRAP, BREAK_LONG_LINES,
+    with_global, with_global_mut, ISSET, SET, UNSET, clone_flags, restore_flags,
+    MessageType, CONSTANT_SHOW, MINIBAR, ZERO,
+    RESTRICTED, NO_WRAP, BREAK_LONG_LINES, NO_HELP, BOLD_TEXT,
+    MAKE_BACKUP, HISTORYLOG, POSITIONLOG,
+    RAW_SEQUENCES, MODERN_BINDINGS, PRESERVE, USE_MOUSE,
     FOREIGN_SEQUENCE, THE_WINDOW_RESIZED,
 };
-use nanoxide::global::parse_args;
 use nanoxide::winio::{handle_input_key, show_welcome_message, ERR};
 use nanoxide::{color, files, global, history, rcfile, signals, text, utils, winio};
 
@@ -22,8 +24,21 @@ fn main() {
     nanoxide::i18n::init();
 
     // 2. 解析命令行参数
+    // C 版 main 在 getopt 之前先 SET(NO_WRAP)：默认不做硬换行，只有 rc 的
+    // breaklonglines 或命令行的 -b 才打开（对应 nano.c 的 SET(NO_WRAP)）。
+    SET(NO_WRAP);
     let args: Vec<String> = std::env::args().collect();
-    parse_args(&args);
+    let options = global::parse_command_line(&args);
+
+    // 2b. -z / --listsyntaxes：读完 rc 后列出语法名并退出。C 版在 getopt
+    //     的 'z' 分支里按当时的 -I 状态决定是否先调用 do_rcfiles()。
+    if options.list_syntaxes {
+        if options.list_syntaxes_reads_rc {
+            rcfile::do_rcfiles();
+        }
+        rcfile::list_syntax_names();
+        return;
+    }
 
     // 3. 获取用户主目录
     utils::get_homedir();
@@ -41,73 +56,117 @@ fn main() {
     //     以便 rcfile 能 rebind/unbind 键，且 check_vitals_mapped 依赖函数列表）。
     global::shortcut_init();
 
-    // 5c. 备份命令行选项（对应 nano.c do_rcfiles 前的 *-cmdline 备份与清空）。
-    with_global_mut(|g| {
-        g.cmdline_flags = g.flags;
-        g.backup_dir = None;
-        g.word_chars = None;
-        g.operating_dir = None;
-        g.quotestr = None;
-        g.speller = None;
-    });
-
-    // 6. 读取 rc 文件
-    rcfile::do_rcfiles();
-
-    // 6a. 恢复命令行选项（对应 nano.c do_rcfiles 后的恢复：命令行优先）。
-    with_global_mut(|g| {
-        if let Some(f) = g.cmdline_fill {
-            g.fill = f;
-        }
-        if let Some(t) = g.cmdline_tabsize {
-            g.tabsize = t;
-        }
-        if let Some(s) = g.cmdline_stripe_column {
-            g.stripe_column = s;
-        }
-        if let Some(b) = g.cmdline_backup_dir.clone() {
-            g.backup_dir = Some(b);
-        }
-        if let Some(w) = g.cmdline_word_chars.clone() {
-            g.word_chars = Some(w);
-        }
-        if let Some(o) = g.cmdline_operating_dir.clone() {
-            g.operating_dir = Some(o);
-        } else if ISSET(RESTRICTED) {
+    // 5c. 备份命令行选项、读 rc、恢复命令行选项。
+    // 对应 C 版 main 的 `if (!ignore_rcfiles) { ...; do_rcfiles(); ... }`：
+    // 使用 -I 时整块跳过（包括默认 nowrap→breaklonglines 的转换）。
+    if !options.ignore_rcfiles {
+        // 备份命令行选项（对应 nano.c do_rcfiles 前的 *-cmdline 备份与清空）。
+        // 标志位实际存放在独立的 FLAGS_VALUE 中（GlobalState.flags 只是镜像），
+        // 因此必须用 clone_flags() 取真实值。
+        with_global_mut(|g| {
+            g.cmdline_flags = clone_flags();
+            g.backup_dir = None;
+            g.word_chars = None;
             g.operating_dir = None;
-        }
-        if let Some(q) = g.cmdline_quotestr.clone() {
-            g.quotestr = Some(q);
-        }
-        if let Some(s) = g.cmdline_speller.clone() {
-            g.speller = Some(s);
-        }
-        /* 命令行 flags 与 rcfile flags 按位 OR：rcfile 不能取消命令行选项。 */
-        g.flags.or_with(&g.cmdline_flags);
-        /* 从 fill 重新计算 wrap_at（命令行的 fill 优先于 rcfile）。 */
-        g.wrap_at = if g.fill > 0 {
-            g.fill as usize
-        } else if g.fill == 0 {
-            g.COLS
-        } else {
-            0
-        };
-        /* 若 rcfile 未取消 nowrap，保持 breaklonglines。 */
-        if !ISSET(NO_WRAP) {
-            SET(BREAK_LONG_LINES);
-        }
-    });
+            g.quotestr = None;
+            g.speller = None;
+        });
 
-    // 6b. 用 rcfile 中的 set <element>color 初始化界面颜色对
+        // 6. 读取 rc 文件
+        rcfile::do_rcfiles();
+
+        // 6a. 恢复命令行选项（对应 nano.c do_rcfiles 后的恢复：命令行优先）。
+        with_global_mut(|g| {
+            if let Some(f) = g.cmdline_fill {
+                g.fill = f;
+            }
+            if let Some(t) = g.cmdline_tabsize {
+                g.tabsize = t;
+            }
+            if let Some(s) = g.cmdline_stripe_column {
+                g.stripe_column = s;
+            }
+            if let Some(b) = g.cmdline_backup_dir.clone() {
+                g.backup_dir = Some(b);
+            }
+            if let Some(w) = g.cmdline_word_chars.clone() {
+                g.word_chars = Some(w);
+            }
+            if let Some(o) = g.cmdline_operating_dir.clone() {
+                g.operating_dir = Some(o);
+            } else if ISSET(RESTRICTED) {
+                g.operating_dir = None;
+            }
+            if let Some(q) = g.cmdline_quotestr.clone() {
+                g.quotestr = Some(q);
+            }
+            if let Some(s) = g.cmdline_speller.clone() {
+                g.speller = Some(s);
+            }
+            /* 命令行 flags 与 rcfile flags 按位 OR：rcfile 不能取消命令行选项。 */
+            let mut merged = clone_flags();
+            merged.or_with(&g.cmdline_flags);
+            restore_flags(merged);
+            /* 若 rcfile 未取消 nowrap，保持 breaklonglines（对应 C 版
+             * do_rcfiles 之后的 if (!ISSET(NO_WRAP)) SET(BREAK_LONG_LINES)）。 */
+            if !ISSET(NO_WRAP) {
+                SET(BREAK_LONG_LINES);
+            }
+        });
+    }
+
+    // 6b. 命令行 -b / -w 的三态覆盖（对应 C 版 main 末尾的 hardwrap 判断），
+    //     不论是否读取 rc 文件都生效。
+    if options.hardwrap == 0 {
+        UNSET(BREAK_LONG_LINES);
+    } else if options.hardwrap == 1 {
+        SET(BREAK_LONG_LINES);
+    }
+
+    // 6c. 依最终标志做后处理（对应 C 版 main 中 RESTRICTED / RAW_SEQUENCES /
+    //     MODERN_BINDINGS / ZERO 引起的调整）。
+    if ISSET(RESTRICTED) {
+        UNSET(MAKE_BACKUP);
+        UNSET(HISTORYLOG);
+        UNSET(POSITIONLOG);
+    }
+    if ISSET(RAW_SEQUENCES) {
+        UNSET(USE_MOUSE);
+    }
+    if ISSET(MODERN_BINDINGS) {
+        UNSET(PRESERVE);
+    }
+    if ISSET(ZERO) {
+        SET(NO_HELP);
+    }
+
+    /* --boldtext：高亮文字改用粗体而不是反显（对应 C 版 main 的
+     * `if (ISSET(BOLD_TEXT)) hilite_attribute = A_BOLD;`）。须在
+     * set_interface_colorpairs 之前设置。 */
+    if ISSET(BOLD_TEXT) {
+        with_global_mut(|g| g.hilite_attribute = color::A_BOLD);
+    }
+
+    // 6d. 按 fill 与终端宽度计算 wrap_at（对应 C 版 window_init 中的计算）。
+    winio::update_wrap_at();
+
+    // 6e. 用 rcfile 中的 set <element>color 初始化界面颜色对
     color::set_interface_colorpairs();
 
     // 6b2. 按 USE_MOUSE（命令行 -m 或 rcfile set mouse）启用/关闭鼠标捕获
     //      （对应 C 版 main 中 do_rcfiles 之后的 mouse_init()）。
     winio::mouse_init();
 
-    // 8. 加载历史记录
+    // 8. 加载历史记录（对应 C 版 main：只有 HISTORYLOG 置位才加载；
+    //    状态目录不可用时取消历史记录，同 C 的 have_statedir 分支）。
     history::history_init();
-    history::load_history();
+    if ISSET(HISTORYLOG) {
+        if history::have_statedir() {
+            history::load_history();
+        } else {
+            UNSET(HISTORYLOG);
+        }
+    }
 
     // 8b. 若指定了备份目录且未处于受限模式，校验其可用（对应 C 版 main 中
     //     backup_dir && !ISSET(RESTRICTED) 时的 init_backup_dir()）。
@@ -117,8 +176,7 @@ fn main() {
 
     // 9. 打开文件（支持多文件、+LINE,COLUMN 定位与 +c/pattern 搜索串，
     //     对应 C 版 main 的循环）
-    let args: Vec<String> = std::env::args().collect();
-    let files = global::parse_file_args(&args);
+    let files = options.files;
     let has_filename = !files.is_empty();
     for (idx, item) in files.iter().enumerate() {
         let name = &item.name;
@@ -196,7 +254,9 @@ fn main() {
     main_loop();
 
     // 14. 退出清理
-    history::save_history();
+    if ISSET(HISTORYLOG) {
+        history::save_history();
+    }
     winio::terminal_restore();
     with_global_mut(|g| g.we_are_running = false);
 

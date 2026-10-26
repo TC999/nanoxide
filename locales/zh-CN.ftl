@@ -198,6 +198,10 @@ rcfile-no_key_bound = 在菜单“{menu}”中没有键绑定到函数“{func}�
 rcfile-die_hint = 如有必要，请使用带 -I 选项的 nano 调整您的 nanorc 设置。
 rcfile-invalid_multibyte = 参数不是有效的多字节字符串
 
+# ---------- command line（对应 nano.c 的 usage / list_syntax_names） ----------
+cmdline-available_syntaxes = 可用的语法：
+cmdline-type_help = 输入“{arg} -h”以获取所有可用选项的列表。
+
 # ---------- history（历史记录/注册表） ----------
 history-error_reading = 读取 {name} 出错：{err}
 history-error_writing = 写入{name} 出错：{err}
