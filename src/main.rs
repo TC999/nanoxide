@@ -101,16 +101,36 @@ fn main() {
     // 6b. 用 rcfile 中的 set <element>color 初始化界面颜色对
     color::set_interface_colorpairs();
 
+    // 6b2. 按 USE_MOUSE（命令行 -m 或 rcfile set mouse）启用/关闭鼠标捕获
+    //      （对应 C 版 main 中 do_rcfiles 之后的 mouse_init()）。
+    winio::mouse_init();
+
     // 8. 加载历史记录
     history::history_init();
     history::load_history();
 
-    // 9. 打开文件（支持多文件与 +LINE,COLUMN 定位，对应 C 版 main 的循环）
+    // 8b. 若指定了备份目录且未处于受限模式，校验其可用（对应 C 版 main 中
+    //     backup_dir && !ISSET(RESTRICTED) 时的 init_backup_dir()）。
+    if with_global(|g| g.backup_dir.is_some() && !ISSET(RESTRICTED)) {
+        files::init_backup_dir();
+    }
+
+    // 9. 打开文件（支持多文件、+LINE,COLUMN 定位与 +c/pattern 搜索串，
+    //     对应 C 版 main 的循环）
     let args: Vec<String> = std::env::args().collect();
     let files = global::parse_file_args(&args);
     let has_filename = !files.is_empty();
-    for (idx, (name, line, col)) in files.iter().enumerate() {
-        let result = if idx == 0 {
+    for (idx, item) in files.iter().enumerate() {
+        let name = &item.name;
+        let result = if name == "-" {
+            /* 文件名为 "-"：从标准输入读入（对应 C 版 argv == "-" 时
+             * 的 scoop_stdin 分支）。 */
+            if files::scoop_stdin() {
+                files::OpenBufferResult::FileLoaded
+            } else {
+                files::OpenBufferResult::ErrorRead
+            }
+        } else if idx == 0 {
             files::open_buffer(name)
         } else {
             files::open_another_buffer(name)
@@ -136,9 +156,13 @@ fn main() {
             }
         }
 
-        /* 命令行给出的位置：跳到对应行/列（对应 C 的 goto_line_and_column）。 */
-        if *line != 0 || *col != 0 {
-            nanoxide::search::goto_line_and_column(*line, *col, true);
+        /* 命令行给出的位置：跳到对应行/列（对应 C 的 goto_line_and_column）；
+         * 否则若有命令行搜索串，从缓冲区顶部查找它（对应 C 版 main 的
+         * searchstring 处理块，find_at_start 内部按 '?' 决定反向）。 */
+        if item.line != 0 || item.col != 0 {
+            nanoxide::search::goto_line_and_column(item.line, item.col, true);
+        } else if let Some(pattern) = &item.search {
+            nanoxide::search::find_at_start(pattern);
         }
     }
 
@@ -185,9 +209,20 @@ pub fn main_loop() {
     with_global_mut(|g| g.we_are_running = true);
 
     while with_global(|g| g.we_are_running) {
-        // 收到 SIGHUP/SIGTERM：紧急保存所有缓冲区并退出
-        // （对应 C 版 handle_hupterm 的 die + emergency_save_all）。
+        // 收到 SIGHUP/SIGTERM（或 SIGSEGV/SIGABRT 崩溃）：紧急保存所有缓冲
+        // 区并退出（对应 C 版 handle_hupterm/handle_crash 的 die + emergency_save）。
         if signals::terminate_requested() {
+            /* 崩溃时先向 stderr 报告（对应 C 版 die 的消息输出）。 */
+            let crash_code = signals::take_crash_code();
+            if crash_code != 0 {
+                eprintln!(
+                    "{}",
+                    nanoxide::t!(
+                        "signals-crash_message",
+                        code = crash_code.to_string()
+                    )
+                );
+            }
             files::emergency_save_all();
             /* 对应 C 版 die()：遍历删除所有缓冲区的锁文件。 */
             files::delete_all_lockfiles();

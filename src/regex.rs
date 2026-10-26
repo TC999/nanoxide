@@ -384,7 +384,7 @@ impl<'a> Parser<'a> {
     }
 
     /// 解析一个原子（字符、类、分组、锚点、词边界、转义）。
-    fn parse_atom(&mut self, stop_at_paren: bool) -> Result<Node, String> {
+    fn parse_atom(&mut self, _stop_at_paren: bool) -> Result<Node, String> {
         let c = self.eat().ok_or("unexpected end")?;
         match c {
             b'.' => Ok(Node::Any),

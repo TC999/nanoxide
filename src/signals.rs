@@ -12,10 +12,13 @@
 //! 信号处理：SIGINT/SIGQUIT 忽略，SIGHUP/SIGTERM 触发退出前的紧急保存，
 //! SIGTSTP/SIGCONT 处理挂起与恢复，SIGWINCH 标记窗口尺寸变化。
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 /// 收到 SIGHUP 或 SIGTERM：请求优雅退出（先紧急保存）。
 static TERMINATE_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// 收到 SIGSEGV 或 SIGABRT：记录崩溃信号码（0 = 无崩溃）。
+static CRASH_CODE: AtomicI32 = AtomicI32::new(0);
 
 /// 收到 SIGWINCH：窗口尺寸已变化，需要重新查询终端尺寸并重绘。
 static WINDOW_RESIZED: AtomicBool = AtomicBool::new(false);
@@ -29,6 +32,11 @@ static RESUMED: AtomicBool = AtomicBool::new(false);
 /// 是否请求了优雅退出（SIGHUP/SIGTERM）。
 pub fn terminate_requested() -> bool {
     TERMINATE_REQUESTED.load(Ordering::SeqCst)
+}
+
+/// 消费崩溃信号码：返回收到的 SIGSEGV/SIGABRT 码；无崩溃时为 0。
+pub fn take_crash_code() -> i32 {
+    CRASH_CODE.swap(0, Ordering::SeqCst)
 }
 
 /// 消费"窗口已变化"标志。
@@ -66,6 +74,19 @@ extern "C" fn handle_sigcont(_signal: libc::c_int) {
     RESUMED.store(true, Ordering::SeqCst);
 }
 
+/// SIGSEGV/SIGABRT 处理器（对应 C 版 `handle_crash`）：
+/// 先把自身恢复为默认动作（对应 C 版 SA_RESETHAND，防止在崩溃点反复
+/// 触发造成死循环），再记录崩溃码并请求紧急保存退出；主循环随后执行
+/// `.save` 紧急保存与终端恢复。
+#[cfg(unix)]
+extern "C" fn handle_crash(signal: libc::c_int) {
+    unsafe {
+        libc::signal(signal, libc::SIG_DFL);
+    }
+    CRASH_CODE.store(signal, Ordering::SeqCst);
+    TERMINATE_REQUESTED.store(true, Ordering::SeqCst);
+}
+
 /// 注册 SIGWINCH 处理器（对应 `set_up_sigwinch_handler`）。
 #[cfg(unix)]
 pub fn set_up_sigwinch_handler() {
@@ -78,7 +99,9 @@ pub fn set_up_sigwinch_handler() {
 /// - SIGINT/SIGQUIT：忽略；
 /// - SIGHUP/SIGTERM：请求退出并紧急保存；
 /// - SIGTSTP：请求挂起；SIGCONT：标记恢复；
-/// - SIGWINCH：标记窗口尺寸变化。
+/// - SIGWINCH：标记窗口尺寸变化；
+/// - SIGSEGV/SIGABRT（未设置 NANO_NOCATCH 时）：记录崩溃并紧急保存
+///   （对应 C 版 handle_crash 分支）。
 #[cfg(unix)]
 pub fn set_up_signal_handlers() {
     unsafe {
@@ -88,6 +111,14 @@ pub fn set_up_signal_handlers() {
         libc::signal(libc::SIGTERM, handle_terminate as libc::sighandler_t);
         libc::signal(libc::SIGTSTP, handle_sigstop as libc::sighandler_t);
         libc::signal(libc::SIGCONT, handle_sigcont as libc::sighandler_t);
+    }
+    /* 崩溃陷阱（对应 C 版 !NANO_TINY && !DEBUG && getenv("NANO_NOCATCH")
+     * 为空的条件下注册 SIGSEGV/SIGABRT）。 */
+    if std::env::var("NANO_NOCATCH").is_err() {
+        unsafe {
+            libc::signal(libc::SIGSEGV, handle_crash as libc::sighandler_t);
+            libc::signal(libc::SIGABRT, handle_crash as libc::sighandler_t);
+        }
     }
     set_up_sigwinch_handler();
 }

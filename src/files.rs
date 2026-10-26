@@ -62,6 +62,82 @@ pub fn open_another_buffer(filename: &str) -> OpenBufferResult {
     result
 }
 
+/// 从标准输入读取数据到新缓冲区（对应 `scoop_stdin`，命令行文件名为
+/// "-" 时由 main 调用）。整份 stdin 作为缓冲区内容；内容非空且非只读
+/// 模式时置修改标记（对应 C 版 !VIEW_MODE && totsize > 0 的 set_modified）。
+/// 读取失败返回 FALSE（状态栏已提示）。
+pub fn scoop_stdin() -> bool {
+    let mut bytes: Vec<u8> = Vec::new();
+    if std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut bytes).is_err() {
+        winio::statusline(
+            MessageType::Alert,
+            &crate::t!("files-failed_to_open_stdin"),
+        );
+        return false;
+    }
+
+    /* 架构按 UTF-8 处理文本（字节保真度差异见 DIFFERENCES §六）。 */
+    let content = String::from_utf8_lossy(&bytes).into_owned();
+
+    /* 创建一个新缓冲区并把 stdin 内容读入其中（与 open_buffer_impl 的
+     * 读取分支同构，但缓冲区无文件名）。 */
+    make_new_buffer();
+    with_global_mut(|g| {
+        let mut lines: Vec<LineRef> = Vec::new();
+        let mut lineno = 1;
+        for line_str in content.lines() {
+            let line = Rc::new(RefCell::new(LineStruct {
+                data: line_str.to_string(),
+                lineno,
+                next: None, prev: None,
+                multidata: None, has_anchor: false,
+            }));
+            if let Some(prev) = lines.last() {
+                line.borrow_mut().prev = Some(Rc::downgrade(prev));
+                prev.borrow_mut().next = Some(line.clone());
+            }
+            lines.push(line);
+            lineno += 1;
+        }
+        if lines.is_empty() {
+            let line = Rc::new(RefCell::new(LineStruct {
+                data: String::new(), lineno: 1,
+                next: None, prev: None,
+                multidata: None, has_anchor: false,
+            }));
+            lines.push(line);
+        }
+
+        let filetop = lines.first().cloned();
+        let filebot = lines.last().cloned();
+
+        let new_file = Rc::new(RefCell::new(OpenFileStruct {
+            filename: None,
+            filetop: filetop.clone(),
+            filebot: filebot.clone(),
+            edittop: filetop.clone(),
+            current: filetop.clone(),
+            totsize: content.len(),
+            firstcolumn: 0, current_x: 0, placewewant: 0,
+            brink: 0, cursor_row: 0,
+            statinfo: None, spillage_line: None,
+            mark: None, mark_x: 0, softmark: false,
+            fmt: FormatType::NixFile, lock_filename: None,
+            undotop: None, current_undo: None, last_saved: None,
+            last_action: UndoType::Other, modified: false,
+            syntax: None, errormessage: None,
+            next: None, prev: None,
+        }));
+        install_buffer(g, new_file, true);
+    });
+    crate::color::find_and_prime_applicable_syntax();
+
+    if !ISSET(VIEW_MODE) && !content.is_empty() {
+        set_modified();
+    }
+    true
+}
+
 /// 把 new_file 安装为当前缓冲区。fresh 为 TRUE 时替换 make_new_buffer
 /// 刚创建的空缓冲区（保留链表位置并更新邻居指针），否则直接替换当前。
 fn install_buffer(g: &mut GlobalState, new_file: OpenFileRef, fresh: bool) {
@@ -489,47 +565,79 @@ fn make_backup_of(realname: &str) -> bool {
         /* 备份文件不存在则无需删除。 */
     }
 
-    match std::fs::copy(realname, &backupname) {
-        Ok(_) => true,
+    match fs::File::open(realname) {
         Err(e) => {
             winio::statusline(
                 MessageType::Alert,
                 &crate::t!("files-cannot_write_backup", filename = backupname, err = e.to_string()),
             );
-            false
+            return false;
+        }
+        Ok(original) => {
+            let mut original = original;
+            let mut backup_file = match fs::File::create(&backupname) {
+                Err(e) => {
+                    winio::statusline(
+                        MessageType::Alert,
+                        &crate::t!("files-cannot_write_backup", filename = backupname, err = e.to_string()),
+                    );
+                    return false;
+                }
+                Ok(f) => f,
+            };
+            /* 流式复制原文件内容到备份文件（对应 C 版 copy_file）。 */
+            match copy_file(&mut original, &mut backup_file, true) {
+                Ok(_) => true,
+                Err(e) => {
+                    winio::statusline(
+                        MessageType::Alert,
+                        &crate::t!("files-cannot_write_backup", filename = backupname, err = e.to_string()),
+                    );
+                    false
+                }
+            }
         }
     }
+}
+
+/// 收集给定缓冲区的全部行数据。
+fn lines_of(openfile: &OpenFileRef) -> Vec<String> {
+    let of_ref = openfile.borrow();
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = of_ref.filetop.clone();
+    while let Some(c) = current {
+        let data = c.borrow().data.clone();
+        lines.push(data);
+        let next = c.borrow().next.clone();
+        current = next;
+    }
+    lines
 }
 
 /// 将缓冲区写入给定文件（对应 files.c 的 `write_file` 核心）。
 /// 成功返回写入字节数；失败返回 -1。
 fn save_to(answer: &str) -> i32 {
-    /* 收集所有行数据（排除末尾魔法行）。 */
     let lines = with_global(|g| {
-        let openfile = g.openfile.clone();
-        match openfile {
-            Some(of) => {
-                let of_ref = of.borrow();
-                let mut lines: Vec<String> = Vec::new();
-                let mut current = of_ref.filetop.clone();
-                while let Some(c) = current {
-                    let data = c.borrow().data.clone();
-                    lines.push(data);
-                    let next = c.borrow().next.clone();
-                    current = next;
-                }
-                lines
-            }
-            None => Vec::new(),
-        }
+        g.openfile
+            .as_ref()
+            .map(lines_of)
+            .unwrap_or_default()
     });
+    finish_save(answer, &lines, true)
+}
 
+/// 将给定行集写出到文件（对应 files.c `write_file` 的行写出部分）：
+/// 剔除文件末尾的魔法空行 → 备份 → 写入 → （annotate 时）更新文件名/锁/
+/// 修改标记与标题栏 → 状态消息。成功返回写入字节数；失败返回 -1（状态栏已提示）。
+/// `annotate` 对应 C 版 `write_file` 的 annotate 参数：整缓冲区常规保存为 TRUE
+/// （收尾管理 buffer 元数据），区域写入 / 紧急保存为 FALSE（不触碰 buffer）。
+fn finish_save(answer: &str, lines: &[String], annotate: bool) -> i32 {
     if lines.is_empty() {
         return -1;
     }
 
     /* 魔法行：末尾的空行（非唯一行时）不写入。 */
-    let mut lines = lines;
+    let mut lines = lines.to_vec();
     if lines.len() > 1 && lines.last().map(|s| s.is_empty()).unwrap_or(false) {
         lines.pop();
     }
@@ -557,36 +665,42 @@ fn save_to(answer: &str) -> i32 {
 
     match fs::write(answer, &content) {
         Ok(_) => {
-            /* 保存成功：更新文件名、清除修改标记（对应 write_file 的收尾）。 */
-            with_global_mut(|g| {
-                if let Some(of) = &g.openfile {
-                    let mut of_ref = of.borrow_mut();
-                    let was_filename = of_ref.filename.clone();
-                    of_ref.modified = false;
-                    if !answer.is_empty() {
-                        of_ref.filename = Some(answer.to_string());
-                    }
-                    /* 文件名变化时，按需更新锁文件（对应 C 版 write_file 中
-                     * 删除旧锁后用 do_lockfile(realname, FALSE) 写新锁）。 */
-                    if was_filename.as_deref() != Some(answer) && !answer.is_empty() {
-                        if let Some(old_lock) = of_ref.lock_filename.take() {
-                            delete_lockfile(&old_lock);
+            /* 保存成功。对应 C 版 write_file 的收尾：仅当 annotate（常规整
+             * 缓冲区保存）时更新文件名/锁/修改标记并刷新标题栏；区域写入与
+             * 紧急保存不触碰 buffer（annotate == FALSE）。 */
+            if annotate {
+                with_global_mut(|g| {
+                    if let Some(of) = &g.openfile {
+                        let mut of_ref = of.borrow_mut();
+                        let was_filename = of_ref.filename.clone();
+                        of_ref.modified = false;
+                        if !answer.is_empty() {
+                            of_ref.filename = Some(answer.to_string());
                         }
-                        if ISSET(LOCKING) {
-                            if let DoLockfileResult::Locked(lockname) = do_lockfile(answer, false) {
-                                of_ref.lock_filename = Some(lockname);
+                        /* 文件名变化时，按需更新锁文件（对应 C 版 write_file 中
+                         * 删除旧锁后用 do_lockfile(realname, FALSE) 写新锁）。 */
+                        if was_filename.as_deref() != Some(answer) && !answer.is_empty() {
+                            if let Some(old_lock) = of_ref.lock_filename.take() {
+                                delete_lockfile(&old_lock);
+                            }
+                            if ISSET(LOCKING) {
+                                if let DoLockfileResult::Locked(lockname) =
+                                    do_lockfile(answer, false)
+                                {
+                                    of_ref.lock_filename = Some(lockname);
+                                }
+                            }
+                        } else if ISSET(LOCKING) && !ISSET(VIEW_MODE) && !answer.is_empty() {
+                            /* 同名保存：更新锁文件的 modified 位。 */
+                            if let Some(lock) = &of_ref.lock_filename {
+                                write_lockfile(lock, answer, false);
                             }
                         }
-                    } else if ISSET(LOCKING) && !ISSET(VIEW_MODE) && !answer.is_empty() {
-                        /* 同名保存：更新锁文件的 modified 位。 */
-                        if let Some(lock) = &of_ref.lock_filename {
-                            write_lockfile(lock, answer, false);
-                        }
                     }
-                }
-            });
-            /* 更新标题栏（对应 C 版 write_file 中 titlebar(NULL)）。 */
-            winio::titlebar(None);
+                });
+                /* 更新标题栏（对应 C 版 write_file 中 titlebar(NULL)）。 */
+                winio::titlebar(None);
+            }
             let linecount = lines.len();
             let msg = if linecount == 1 {
                 &format!("[ {} ]", crate::t!("files-wrote_one_line", count = linecount.to_string()))
@@ -601,6 +715,64 @@ fn save_to(answer: &str) -> i32 {
             -1
         }
     }
+}
+
+/// 将当前标记区域写入给定文件（对应 files.c 的 `write_region_to_file`）。
+/// 提示与写入方法与整文件保存共用 `finish_save`（覆盖写）。区域为空
+/// （无标记或零字符）时不写文件并返回 -1。
+pub fn write_region_to_file(answer: &str) -> i32 {
+    let region = with_global(|g| {
+        let of = g.openfile.as_ref()?.borrow();
+        let mark = of.mark.clone()?;
+        let current = of.current.clone()?;
+        /* 标记在光标前（或同处）时，区域 = 标记..光标；否则相反（对应
+         * C 版 mark_is_before_cursor 的 get_region 分支）。 */
+        let mark_before = {
+            let m_line = mark.borrow().lineno;
+            let c_line = current.borrow().lineno;
+            m_line < c_line || (Rc::ptr_eq(&mark, &current) && of.mark_x <= of.current_x)
+        };
+        let (top, top_x, bot, bot_x) = if mark_before {
+            (mark, of.mark_x, current, of.current_x)
+        } else {
+            (current, of.current_x, mark, of.mark_x)
+        };
+        Some((top, top_x, bot, bot_x))
+    });
+
+    let (top, top_x, bot, bot_x) = match region {
+        Some(r) => r,
+        None => return -1,
+    };
+
+    /* 收集区域的行集：起始行自 top_x 起，终止行截至 bot_x（不含）。
+     * bot_x == 0 且跨行时区域不含 bot 行——对应 C 版把 bot 行当魔法
+     * 空行剔除、只保留其上一整行作为末行的语义。 */
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = top.clone();
+    loop {
+        let is_top = Rc::ptr_eq(&line, &top);
+        let is_bot = Rc::ptr_eq(&line, &bot);
+        let data = line.borrow().data.clone();
+
+        if is_bot {
+            let end = bot_x.min(data.len());
+            let start = if is_top { top_x.min(end) } else { 0 };
+            if end > start {
+                lines.push(data[start..end].to_string());
+            }
+            break;
+        }
+        let start = if is_top { top_x.min(data.len()) } else { 0 };
+        lines.push(data[start..].to_string());
+        let next = line.borrow().next.clone();
+        match next {
+            Some(n) => line = n,
+            None => break,
+        }
+    }
+
+    finish_save(answer, &lines, false)
 }
 
 /// 将缓冲区写入文件（无提示直接保存；对应 files.c `write_file`，供紧急保存）。
@@ -620,22 +792,40 @@ pub fn write_it_out(_finalize: bool, _mark_only: bool) -> i32 {
 /// 写入文件（对应 files.c 的 `do_writeout`）：在状态栏显示
 /// "Write to File: <文件名>" 提示，冒号右侧可编辑要保存的文件名；
 /// 运行时不带文件名参数则提示处为空，直接输入新文件名即可。
+/// 当标记开启且非受限模式时，改为写入选中的区域（"Write Selection to File"，
+/// 对应 C 版 write_it_out 的 mark 分支）。
 pub fn do_writeout() {
-    let filename = with_global(|g| {
-        g.openfile
+    let (filename, mark_on) = with_global(|g| {
+        let filename = g
+            .openfile
             .as_ref()
             .and_then(|of| of.borrow().filename.clone())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        let mark_on = g
+            .openfile
+            .as_ref()
+            .map(|of| of.borrow().mark.is_some())
+            .unwrap_or(false);
+        (filename, mark_on)
     });
 
-    /* 对应 C：do_prompt(MWRITEFILE, given, NULL, edit_refresh, "Write to File")。
-     * prompt 栏显示 "Write to File: <回答>"，可编辑；Enter 保存，Esc 取消。 */
+    /* 受限模式下不提供区域写入（会允许把选区内内容写往命令行未指定的文件，
+     * 对应 C 版 !ISSET(RESTRICTED) 条件）。 */
+    let selection = mark_on && !in_restricted_mode();
+    let msg = if selection {
+        crate::t!("files-write_selection_to_file")
+    } else {
+        crate::t!("files-write_to_file")
+    };
+
+    /* 对应 C：do_prompt(MWRITEFILE, given, NULL, edit_refresh, msg)。
+     * prompt 栏显示 "<msg>: <回答>"，可编辑；Enter 保存，Esc 取消。 */
     let response = crate::prompt::do_prompt(
         MWRITEFILE,
         &filename,
         None,
         Some(winio::edit_refresh),
-        &crate::t!("files-write_to_file"),
+        &msg,
     );
 
     if response < 0 {
@@ -648,12 +838,33 @@ pub fn do_writeout() {
         return;
     }
 
-    save_to(&answer);
+    if selection {
+        write_region_to_file(&answer);
+    } else {
+        save_to(&answer);
+    }
 }
 
 /// 获取下一个可用文件名（用于紧急保存）。
-pub fn get_next_filename(basename: &str, suffix: &str) -> String {
-    format!("{}.{}", basename, suffix)
+/// 生成一个尚不存在的文件名：先试 `name + suffix`（suffix 通常形如
+/// ".save"），被占用则依次试 `name + suffix + ".1"`、".2"…（对应
+/// `get_next_filename`）。极限十万个仍冲突时返回空串（表示无可用名）。
+pub fn get_next_filename(name: &str, suffix: &str) -> String {
+    let mut i: u64 = 0;
+    loop {
+        let candidate = if i == 0 {
+            format!("{}{}", name, suffix)
+        } else {
+            format!("{}{}.{}", name, suffix, i)
+        };
+        if !Path::new(&candidate).exists() {
+            return candidate;
+        }
+        i += 1;
+        if i == 100_000 {
+            return String::new();
+        }
+    }
 }
 
 /// 准备显示（计算行号等）。
@@ -1207,6 +1418,81 @@ fn canonicalize_safely(path: &str) -> Option<String> {
         Err(_) => None,
     }
 }
+
+// ======================== 文件工具（对应 files.c / utils.c） ========================
+
+/// 判断给定路径是否是目录（对应 files.c 的 `is_dir`）。
+/// 与 C 版一致：先展开开头的 `~`，再检查 stat 的目录位。
+pub fn is_dir(path: &str) -> bool {
+    let thepath = expand_leading_tilde(path);
+    std::fs::metadata(&thepath).map(|m| m.is_dir()).unwrap_or(false)
+}
+
+/// 文件浏览器与文件名补全的排序例程（对应 files.c 的 `diralphasort`）：
+/// 目录排在文件之前，其余按不区分大小写的字符序排列；
+/// 不区分大小写相同时再按字节序比较（与 C 版 strcmp 兜底一致）。
+/// 两个参数均为完整路径（filelist 中存放的形式）。
+pub fn diralphasort(a: &str, b: &str) -> std::cmp::Ordering {
+    let aisdir = is_dir(a);
+    let bisdir = is_dir(b);
+
+    if aisdir && !bisdir {
+        return std::cmp::Ordering::Less;
+    }
+    if !aisdir && bisdir {
+        return std::cmp::Ordering::Greater;
+    }
+
+    let difference = crate::chars::mbstrcasecmp(a.as_bytes(), b.as_bytes());
+
+    /* 忽略大小写仍相同则按字节比较。 */
+    if difference == 0 {
+        a.as_bytes().cmp(b.as_bytes())
+    } else if difference < 0 {
+        std::cmp::Ordering::Less
+    } else {
+        std::cmp::Ordering::Greater
+    }
+}
+
+/// 将指定备份目录转换为绝对路径，并校验其可用（对应 `init_backup_dir`）。
+/// 若取不到绝对路径（目录不存在或不可访问），或不是目录，则致命退出
+/// （对应 C 版 die(_("Invalid backup directory: %s\n"), backup_dir)）。
+pub fn init_backup_dir() {
+    let target = with_global(|g| g.backup_dir.clone())
+        .and_then(|d| get_full_path(&d));
+
+    /* 可用的目录路径会被 get_full_path 补上结尾的 '/'。 */
+    let usable = match &target {
+        Some(t) => t.ends_with('/'),
+        None => false,
+    };
+
+    if !usable {
+        let dir = with_global(|g| g.backup_dir.clone()).unwrap_or_default();
+        crate::definitions::die(&crate::t!("files-invalid_backup_dir", dir = dir));
+    }
+
+    with_global_mut(|g| g.backup_dir = target);
+}
+
+/// 将 `inn` 中剩余的全部数据写入 `out`（对应 files.c 的 `copy_file`）。
+/// `inn` 与 `out` 在返回前都会被关闭（所有权释放）；调用方以 `close_out`
+/// 决定是否在返回前把 `out` 冲刷（`close_out` 为假时由调用方继续写并负责冲刷，
+/// 对应 C 版 `close_out == FALSE` 时的 fflush）。
+/// 成功返回复制的字节数，失败返回 Err。
+pub fn copy_file<R: std::io::Read, W: std::io::Write>(
+    mut inn: R,
+    mut out: W,
+    close_out: bool,
+) -> std::io::Result<u64> {
+    let copied = std::io::copy(&mut inn, &mut out)?;
+    if close_out {
+        out.flush()?;
+    }
+    Ok(copied)
+}
+
 // ======================== 行节点操作（对应 nano.c 的节点函数） ========================
 
 /// 将新节点插入既有 linestruct 链表中（对应 `splice_node`）。
@@ -1618,7 +1904,33 @@ pub fn in_restricted_mode() -> bool {
     }
 }
 
-/// 紧急保存所有缓冲区（对应 `emergency_save_all`）。
+/// 将单个缓冲区以 `.save` 后缀紧急写出（对应 C 版 `emergency_save`）：
+/// 未命名缓冲区用 "nano.<pid>"，目标名在冲突时由 `get_next_filename`
+/// 唯一化；成功/失败时向 stderr 报告（崩溃恢复场景下状态栏不可用）。
+fn emergency_save(openfile: &OpenFileRef) {
+    let filename = openfile.borrow().filename.clone().unwrap_or_default();
+    let plainname = if filename.is_empty() {
+        format!("nano.{}", std::process::id())
+    } else {
+        filename.clone()
+    };
+    let targetname = get_next_filename(&plainname, ".save");
+
+    if targetname.is_empty() {
+        eprintln!("\n{}", crate::t!("files-too_many_savefiles"));
+    } else {
+        /* annotate=FALSE：紧急保存不改写缓冲区文件名、不清除修改标记
+         * （对应 C 版 write_file(targetname, NULL, SPECIAL, NONOTES)）。 */
+        let lines = lines_of(openfile);
+        if finish_save(&targetname, &lines, false) >= 0 {
+            eprintln!("\n{}", crate::t!("files-buffer_written_to", name = targetname));
+        }
+    }
+}
+
+/// 紧急保存所有缓冲区（对应 C 版 `die()` 的保存循环）：对每个已修改且
+/// 非受限模式的缓冲区写 `<名字>.save`（未命名者写 `nano.<pid>.save`）。
+/// 与 C 一致：紧急保存不改写原文件，也不清除缓冲区的修改标记。
 pub fn emergency_save_all() {
     let openfiles: Vec<OpenFileRef> = {
         let mut result = Vec::new();
@@ -1636,15 +1948,10 @@ pub fn emergency_save_all() {
         result
     };
     for openfile in openfiles {
-        let filename = openfile.borrow().filename.clone().unwrap_or_default();
-        let plainname = if filename.is_empty() {
-            format!("nano.{}", std::process::id())
-        } else {
-            filename.clone()
-        };
-        let targetname = get_next_filename(&plainname, ".save");
-        if !targetname.is_empty() {
-            write_it_out(true, false);
+        let modified = openfile.borrow().modified;
+        /* 受限模式不写命令行未指定的文件（对应 C 版 !ISSET(RESTRICTED)）。 */
+        if modified && !in_restricted_mode() {
+            emergency_save(&openfile);
         }
     }
 }

@@ -100,7 +100,12 @@ fn do_lockfile_detects_existing_lock() {
     // 1. 无锁：创建锁文件。
     match nanoxide::files::do_lockfile(path.to_str().unwrap(), false) {
         nanoxide::files::DoLockfileResult::Locked(name) => {
-            assert_eq!(name, lockpath.to_str().unwrap())
+            /* 跨平台比较：lock_filename_for 以 '/' 拼接，Windows 的
+             * PathBuf::join 用 '\\'，归一化后再断言相等。 */
+            assert_eq!(
+                name.replace('\\', "/"),
+                lockpath.to_str().unwrap().replace('\\', "/")
+            )
         }
         other => panic!("expected Locked, got {other:?}"),
     }

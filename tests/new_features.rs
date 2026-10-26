@@ -195,10 +195,10 @@ fn parse_file_args_collects_all_files() {
     ];
     let files = nanoxide::global::parse_file_args(&args);
     assert_eq!(files.len(), 3);
-    assert_eq!(files[0].0, "a.txt");
-    assert_eq!(files[0].1, 5, "+5 应作用于 a.txt");
-    assert_eq!(files[1].0, "b.txt");
-    assert_eq!(files[2].0, "c.txt");
+    assert_eq!(files[0].name, "a.txt");
+    assert_eq!(files[0].line, 5, "+5 应作用于 a.txt");
+    assert_eq!(files[1].name, "b.txt");
+    assert_eq!(files[2].name, "c.txt");
 }
 
 #[test]

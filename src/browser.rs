@@ -105,12 +105,8 @@ fn read_the_list(path: &str) {
         filelist.push(format!("{}{}", path, name));
     }
 
-    /* 排序。 */
-    filelist.sort_by(|a, b| {
-        let ta = utils::tail(a);
-        let tb = utils::tail(b);
-        ta.to_lowercase().cmp(&tb.to_lowercase())
-    });
+    /* 排序：目录优先、忽略大小写、字节序兜底（对应 C 版 qsort(filelist, ..., diralphasort)）。 */
+    filelist.sort_by(|a, b| files::diralphasort(a, b));
 
     let list_length = filelist.len();
 

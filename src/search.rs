@@ -691,6 +691,63 @@ pub fn go_looking() {
     winio::edit_redraw(&was_current, UpdateType::Centering);
 }
 
+/// 从缓冲区顶部开始执行命令行给出的搜索（对应 C 版 main 的 searchstring
+/// 处理块）。方向由 `BACKWARDS_SEARCH` 标志决定（参数解析时已按 '/' 或
+/// '?' 设置）；找到时高亮并让视口居中，未找到时报告。
+pub fn find_at_start(pattern: &str) {
+    /* 从文件顶部开始（对应 C：current = filetop; current_x = 0）。 */
+    let has_buffer = with_global(|g| {
+        g.openfile.as_ref().map(|of| of.borrow().current.is_some()).unwrap_or(false)
+    });
+    if !has_buffer {
+        return;
+    }
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            let mut of_ref = of.borrow_mut();
+            of_ref.current = of_ref.filetop.clone();
+            of_ref.current_x = 0;
+        }
+    });
+
+    if ISSET(USE_REGEXP) {
+        regexp_init(pattern);
+    }
+
+    let mut match_len = 0;
+    let didfind = findnextstr(pattern, false, JUSTFIND, &mut match_len, false, None, 0);
+
+    if didfind == 0 {
+        not_found_msg(pattern);
+    } else if didfind == 1 {
+        /* 找到：收起状态栏并让视口居中（对应 C 版 lastmessage <= REMARK 时
+         * wipe_statusbar + placewewant = xplustabs + adjust_viewport(CENTERING)）。 */
+        winio::wipe_statusbar();
+        with_global_mut(|g| {
+            if let Some(of) = &g.openfile {
+                of.borrow_mut().placewewant = utils::xplustabs();
+            }
+        });
+        let cur = with_global(|g| {
+            g.openfile
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .current
+                .clone()
+                .unwrap()
+        });
+        winio::edit_redraw(&cur, UpdateType::Centering);
+    }
+
+    if ISSET(USE_REGEXP) {
+        tidy_up_after_search();
+    }
+
+    /* 记住搜索串，供后续重复搜索使用（对应 C 版 last_search = searchstring）。 */
+    with_global_mut(|g| g.last_search = Some(pattern.to_string()));
+}
+
 /// 询问并向前搜索（对应 `do_search_forward`）。
 pub fn do_search_forward() {
     UNSET(BACKWARDS_SEARCH);

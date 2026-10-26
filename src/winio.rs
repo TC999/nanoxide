@@ -21,7 +21,10 @@ use std::io::{self, Write};
 use std::rc::Rc;
 use crossterm::{
     cursor::{self, Hide, Show},
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+        KeyModifiers, MouseButton, MouseEventKind,
+    },
     execute,
     style::{Attribute, Color, SetAttribute, SetForegroundColor, SetBackgroundColor},
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, DisableLineWrap, EnableLineWrap},
@@ -146,6 +149,87 @@ pub fn initscr() {
     update_screen_size();
 }
 
+/// 按 USE_MOUSE 开关 crossterm 鼠标捕获（对应 C 版 `mouse_init`，以及
+/// `enable_mouse_support`/`disable_mouse_support` 的合并：置位时开启，
+/// 否则关闭）。
+pub fn mouse_init() {
+    let mut stdout = io::stdout();
+    if ISSET(USE_MOUSE) {
+        let _ = execute!(stdout, EnableMouseCapture);
+    } else {
+        let _ = execute!(stdout, DisableMouseCapture);
+    }
+}
+
+/// 处理编辑窗口内的鼠标左键点击（对应 C 版 `process_click` 的编辑区部分）：
+/// 点击行相对光标所在行移动光标，点击列按视口左缘（非软换行
+/// `get_page_start` / 软换行 `firstcolumn`）折算为文本列并钳到行尾。
+/// 标题栏、行号边距或编辑区之外的点击不处理（返回 ERR 由主循环跳过）。
+/// 软换行下按"每个显示行移动一块"近似（C 版 go_forward_chunks 语义）。
+fn handle_mouse_click(screen_column: u16, screen_row: u16) -> i32 {
+    let (editwinrows, margin) = with_global(|g| (g.editwinrows, current_margin()));
+
+    /* crossterm 的列/行均从 1 起；编辑区对应屏幕第 1..=editwinrows 行
+     * （第 0 行为标题栏，其下为底栏/状态栏）。 */
+    if screen_row < 1 || screen_row as usize > editwinrows as usize {
+        return ERR;
+    }
+    if (screen_column as usize) < margin {
+        return ERR;
+    }
+    let edit_row = (screen_row - 1) as usize;
+    let click_col = (screen_column as usize) - margin;
+
+    let cursor_row = with_global(|g| {
+        g.openfile
+            .as_ref()
+            .map(|of| of.borrow().cursor_row)
+            .unwrap_or(0)
+    }) as usize;
+    let diff = edit_row as isize - cursor_row as isize;
+
+    /* 逐行（非软换行）或逐块（软换行）移动光标，复用 Up/Down 的滚动处理。 */
+    for _ in 0..diff.abs() {
+        if diff > 0 {
+            crate::movement::do_down();
+        } else {
+            crate::movement::do_up();
+        }
+    }
+
+    /* 把光标放到被点击的列上：显示列 = 视口左缘 + 点击列，超出行宽则钳到行尾。 */
+    let placement = with_global(|g| -> Option<(usize, usize)> {
+        let of = g.openfile.as_ref()?.borrow();
+        let cur = of.current.clone()?;
+        let data = cur.borrow().data.clone();
+        let width = crate::utils::wideness(data.as_bytes(), data.len());
+        let leftedge = if ISSET(SOFTWRAP) {
+            of.firstcolumn
+        } else {
+            crate::utils::get_page_start(crate::utils::xplustabs())
+        };
+        let mut target = leftedge + click_col;
+        if target > width {
+            target = width;
+        }
+        let x = crate::utils::actual_x(data.as_bytes(), target);
+        Some((x, target))
+    });
+    let (new_x, placewewant) = match placement {
+        Some(v) => v,
+        None => return ERR,
+    };
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            let mut of_ref = of.borrow_mut();
+            of_ref.current_x = new_x;
+            of_ref.placewewant = placewewant;
+        }
+    });
+    edit_refresh();
+    ERR
+}
+
 /// 根据 `fill` 和 `COLS` 更新 `wrap_at`。
 /// 对应原版 C 中 `wrap_at` 的语义：
 /// - `fill > 0` → `wrap_at = fill`
@@ -213,6 +297,9 @@ pub fn wgetch() -> i32 {
                 /* 函数命令直接执行（对应 C 版主循环对 PLANTED_A_COMMAND 的处理）。 */
                 if func == FunctionId::DoToggle {
                     TOGGLE(toggle as usize);
+                    if toggle == USE_MOUSE as i32 {
+                        mouse_init();
+                    }
                     edit_refresh();
                 } else {
                     let _ = execute_by_id(func);
@@ -226,6 +313,15 @@ pub fn wgetch() -> i32 {
         Ok(Event::Key(key)) => {
             if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat {
                 translate_keycode(key)
+            } else {
+                ERR
+            }
+        }
+        Ok(Event::Mouse(mouse)) => {
+            /* 鼠标点击（对应 C 版 process_click）：仅启用鼠标时处理
+             * 编辑区内的左键按下；其它按钮/拖动忽略。 */
+            if ISSET(USE_MOUSE) && mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                handle_mouse_click(mouse.column, mouse.row)
             } else {
                 ERR
             }
@@ -2452,6 +2548,10 @@ fn execute_bound(bound: &BoundKey) -> bool {
         }
         FunctionId::DoToggle => {
             TOGGLE(bound.toggle as usize);
+            /* 切换鼠标开关后同步 crossterm 鼠标捕获（对应 C 版 mouse_init）。 */
+            if bound.toggle == USE_MOUSE as i32 {
+                mouse_init();
+            }
             edit_refresh();
             true
         }

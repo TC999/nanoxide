@@ -316,6 +316,8 @@ pub fn shortcut_init() {
     add_to_sclist(MMAIN, "M-A", 0, FunctionId::DoMark, 0);
     add_to_sclist(MMAIN, "M-6", 0, FunctionId::DoCopy, 0);
     add_to_sclist(MMAIN, "M-]", 0x25D, FunctionId::DoFindBracket, 0);
+    // 切换鼠标支持（对应 C 的 M-M → mouse toggle；切换后同步鼠标捕获）
+    add_to_sclist(MMAIN, "M-M", 0x26D, FunctionId::DoToggle, USE_MOUSE as i32);
     add_to_sclist(MMAIN, "^]", 29, FunctionId::DoWordCompletion, 0);
     // 多缓冲区切换（对应 C 版 rcfile 中常见的 prevfile/nextfile 绑定）
     add_to_sclist(MMAIN, "M-,", 0x22C, FunctionId::DoPrevFile, 0);
@@ -714,19 +716,113 @@ pub fn parse_args(args: &[String]) -> Option<String> {
 /// 解析命令行中的文件参数，返回 (文件名, 行号, 列号) 列表。
 /// 支持 `+LINE[,COLUMN]` 定位参数（作用于其后的文件）与多个文件名
 /// （对应 C 版 main() 的多文件处理）。
-pub fn parse_file_args(args: &[String]) -> Vec<(String, isize, isize)> {
+/// 一个命令行文件参数：文件名（"-" 表示从标准输入读取）、定位行/列、
+/// 以及命令行搜索串（"+c/pattern" 形式，对应 C 版 searchstring）。
+pub struct FileArg {
+    pub name: String,
+    pub line: isize,
+    pub col: isize,
+    pub search: Option<String>,
+}
+
+/// 尝试按 `文件名:行[:列]` 解释命令行参数（对应 C 版 COLON_PARSING 的
+/// 截断逻辑）：仅当给定文件不存在且串中含冒号时，从尾部剥掉 ":数字"（至多
+/// 两段，对应 C 的 maybe_two 再试一次）。成功返回 (真实文件名, 行, 列)。
+fn colon_split(filename: &str) -> Option<(String, isize, isize)> {
+    let s = filename.as_bytes();
+    /* coda 与 C 版指针语义一致：从串尾向左扫描到数字簇前的 ':'。 */
+    let mut coda = s.len();
+    loop {
+        /* while (--coda > filename + 1 && isdigit(*coda)) */
+        loop {
+            if coda <= 2 {
+                coda = 1;
+                break;
+            }
+            coda -= 1;
+            if !s[coda].is_ascii_digit() {
+                break;
+            }
+        }
+        if coda <= 1 || coda + 1 >= s.len() || s[coda] != b':' {
+            return None;
+        }
+        if !s[coda + 1].is_ascii_digit() {
+            return None;
+        }
+
+        let base = &filename[..coda];
+        let digits = &filename[coda + 1..];
+
+        /* 剥掉 ":数字" 后文件存在：解析行/列。 */
+        if std::path::Path::new(base).exists() {
+            let mut line = 0isize;
+            let mut col = 0isize;
+            if crate::utils::parse_line_column(digits, &mut line, &mut col) {
+                return Some((base.to_string(), line, col));
+            } else {
+                crate::definitions::die(&crate::t!("search-invalid_number"));
+            }
+        }
+
+        /* 该簇无对应文件：当数字区之后不再含冒号时再向左试更早的冒号簇
+         * （对应 C 版 !strchr(coda + 1, ':') 时 goto maybe_two）。 */
+        if filename[coda + 1..].contains(':') {
+            return None;
+        }
+    }
+}
+
+/// 解析命令行中剩余的“文件参数”（含 +LINE[,COLUMN] 定位与 +c/pattern
+/// 搜索参数，对应 C 版 main 的文件读取循环）。
+pub fn parse_file_args(args: &[String]) -> Vec<FileArg> {
     use crate::winio;
     let mut result = Vec::new();
     let mut i = 1;
     let mut givenline: isize = 0;
     let mut givencol: isize = 0;
+    let mut searchstring: Option<String> = None;
     while i < args.len() {
         let arg = &args[i];
         if let Some(rest) = arg.strip_prefix('+') {
-            /* +LINE[,COLUMN]：作用于其后的文件。 */
-            if rest.is_empty() {
+            let bs = rest.as_bytes();
+            /* 可选的搜索修饰符（可为空）：c/C/r/R（对应 C 版字母循环）。 */
+            let mut n = 0;
+            while n < bs.len() && bs[n].is_ascii_alphabetic() {
+                match bs[n] {
+                    b'c' => SET(CASE_SENSITIVE),
+                    b'C' => UNSET(CASE_SENSITIVE),
+                    b'r' => SET(USE_REGEXP),
+                    b'R' => UNSET(USE_REGEXP),
+                    _ => winio::statusline(
+                        MessageType::Alert,
+                        &crate::t!("search-invalid_modifier", ch = (bs[n] as char).to_string()),
+                    ),
+                }
+                n += 1;
+            }
+            if n < bs.len() && (bs[n] == b'/' || bs[n] == b'?') {
+                /* 搜索串参数：+/pattern（正向），+?pattern（反向）。 */
+                if n + 1 < bs.len() {
+                    let pattern = rest[n + 1..].to_string();
+                    if bs[n] == b'?' {
+                        SET(BACKWARDS_SEARCH);
+                    } else {
+                        UNSET(BACKWARDS_SEARCH);
+                    }
+                    searchstring = Some(pattern);
+                } else {
+                    winio::statusline(
+                        MessageType::Alert,
+                        &crate::t!("search-empty_search_string"),
+                    );
+                }
+            } else if rest.is_empty() {
+                /* "+" 单独出现：到文件末尾。 */
                 givenline = -1;
             } else {
+                /* 无搜索串：按行/列解析（含修饰字母而无 /? 时会失败提示，
+                 * 与 C 版 parse_line_column 行为一致）。 */
                 let mut line = givenline;
                 let mut col = givencol;
                 if crate::utils::parse_line_column(rest, &mut line, &mut col) {
@@ -739,11 +835,39 @@ pub fn parse_file_args(args: &[String]) -> Vec<(String, isize, isize)> {
                     );
                 }
             }
-        } else if !arg.starts_with('-') {
-            /* 文件名（"-" 表示 stdin，Rust 版简化为跳过）。 */
-            if arg != "-" {
-                result.push((arg.clone(), givenline, givencol));
+            i += 1;
+            continue;
+        }
+
+        if !arg.starts_with('-') || arg == "-" {
+            /* 文件名。"-" 表示从标准输入读取（对应 C 版 argv == "-" 时
+             * 调用 scoop_stdin 的分支，由 main 处理）。 */
+            let mut name = arg.clone();
+            let mut line = givenline;
+            let mut col = givencol;
+
+            /* colon-parsing：文件名含冒号、无定位且该文件不存在时，尝试
+             * 剥掉尾部的 ":行[:列]"（对应 C 版 COLON_PARSING 分支）。 */
+            if name != "-"
+                && ISSET(COLON_PARSING)
+                && line == 0
+                && col == 0
+                && name.contains(':')
+                && !std::path::Path::new(&name).exists()
+            {
+                if let Some((realname, l, c)) = colon_split(&name) {
+                    name = realname;
+                    line = l;
+                    col = c;
+                }
             }
+
+            result.push(FileArg {
+                name,
+                line,
+                col,
+                search: searchstring.take(),
+            });
             givenline = 0;
             givencol = 0;
         }
