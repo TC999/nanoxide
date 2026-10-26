@@ -2054,7 +2054,7 @@ fn paint_syntax_rules(
 
             /* 同一行有 end 匹配。 */
             let endmatch = end_pat.as_ref().and_then(|e| e.find_from(data_bytes, start_eo, start_eo != 0));
-            if let Some((_, end_eo)) = endmatch {
+            if let Some((end_so, end_eo)) = endmatch {
                 if end_eo > from_x && end_eo > start_so {
                     let paintlen = crate::utils::actual_x(
                         thetext,
@@ -2072,7 +2072,7 @@ fn paint_syntax_rules(
                 }
                 index = end_eo;
                 /* 若 start 与 end 都是零宽，强制前进。 */
-                if start_so == start_eo && end_eo == end_eo && data_bytes.get(index).copied().unwrap_or(0) == 0 {
+                if start_so == start_eo && end_so == end_eo && data_bytes.get(index).copied().unwrap_or(0) == 0 {
                     break;
                 }
                 if start_so == start_eo {
