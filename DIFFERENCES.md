@@ -195,7 +195,12 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ `diralphasort`、`init_backup_dir`（`tests/file_tools.rs`）
 - ✅ `outside_of_confinement` / `init_operating_dir`（`--operatingdir`：
   启动 chdir、打开/保存/插入与文件浏览器的越界检查；`tests/operating_dir.rs`）
-- ❌ `check_writable_directory`、`username_completion`；⚠️ `input_tab` 文件名补全是桩（`prompt.rs` 注释"简化：不执行文件补全"）
+- ✅ `filename_completion` / `input_tab` / `username_completion`：
+  文件名补全支持公共前缀、唯一目录补分隔符、`~user`、操作目录过滤
+  与 `MGOTODIR` 只补目录（`tests/filename_completion.rs`）。
+  简化：多候选在状态栏列出（C 在编辑区分栏绘制）；`username_completion`
+  仅在 Unix 生效（Windows 无 passwd）。
+- ❌ `check_writable_directory`
 
 ### 3. 文本编辑（`text.rs`）
 
@@ -289,3 +294,5 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   Windows 路径归一化），新增 `tests/operating_dir.rs`。
 - 本轮：`do_linter` 已接线（执行菜单 ^Y；解析 file:line[:col]: msg，
   ^Y/^V 切换、^X/Enter 退出；临时副本运行），新增 `tests/linter.rs`。
+- 再本轮：文件名补全已实现（`input_tab` / `filename_completion` /
+  `username_completion`），新增 `tests/filename_completion.rs`。
