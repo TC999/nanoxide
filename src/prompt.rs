@@ -31,6 +31,23 @@ pub fn set_answer(s: &str) {
     with_global_mut(|g| g.answer = Some(s.to_string()));
 }
 
+/// 在回答开头添加或移除管道符号 `|`（对应 prompt.c 的
+/// `add_or_remove_pipe_symbol_from_answer`，供 M-\ 切换管道模式）。
+pub fn add_or_remove_pipe_symbol_from_answer() {
+    let mut answer = get_answer();
+    if answer.starts_with('|') {
+        answer.remove(0);
+        let x = get_typing_x();
+        if x > 0 {
+            set_typing_x(x - 1);
+        }
+    } else {
+        answer.insert(0, '|');
+        set_typing_x(get_typing_x() + 1);
+    }
+    set_answer(&answer);
+}
+
 fn get_typing_x() -> usize {
     with_global(|g| g.typing_x)
 }

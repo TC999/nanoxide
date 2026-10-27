@@ -568,7 +568,6 @@ pub fn shortcut_init_rest() {
     add_to_sclist(mmi, "M-Backspace", ALT_BACKSPACE, FunctionId::DoBackspace, 0);
     add_to_sclist(mmi, "M-D", ALT_DELETE, FunctionId::DoCut, 0);
     add_to_sclist(mmi, "M-V", 0x256, FunctionId::DoVerbatimInput, 0);
-    add_to_sclist(mmi, "^X", 24, FunctionId::DoCut, 0);
     add_to_sclist(mmi, "^K", 11, FunctionId::DoCut, 0);
     add_to_sclist(mmi, "^U", 21, FunctionId::DoPaste, 0);
     add_to_sclist(mmi, "^H", 8, FunctionId::DoBackspace, 0);
@@ -585,6 +584,12 @@ pub fn shortcut_init_rest() {
     add_to_sclist(MWRITEFILE, "M-A", 0x261, FunctionId::AppendIt, 0);
     add_to_sclist(MWRITEFILE, "M-P", 0x270, FunctionId::PrependIt, 0);
     add_to_sclist(MWRITEFILE, "^T", 20, FunctionId::ToFiles, 0);
+
+    /* 插入/执行提示的翻转键（对应 global.c:1551-1559）。 */
+    add_to_sclist(MINSERTFILE | MEXECUTE, "^X", 24, FunctionId::FlipExecute, 0);
+    add_to_sclist(MINSERTFILE, "M-N", 0x26E, FunctionId::FlipConvert, 0);
+    add_to_sclist(MINSERTFILE | MEXECUTE, "M-F", 0x266, FunctionId::FlipNewBuffer, 0);
+    add_to_sclist(MEXECUTE, "M-\\", 0x25C, FunctionId::FlipPipe, 0);
 
     // 浏览器菜单
     add_to_sclist(MBROWSER, "^F", 6, FunctionId::DoSearchForward, 0);

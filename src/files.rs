@@ -1410,46 +1410,115 @@ fn run_shell_command(command: &str, input: &str, capture_output: bool) -> Result
 /// 插入文件或执行命令（对应 files.c 的 `insert_a_file_or`）。
 /// execute 为 TRUE 时运行命令并插入输出，否则插入文件内容。
 fn insert_a_file_or(execute: bool) {
+    let mut execute = execute;
     /* 若之前未运行的命令输入仍在，恢复它（对应 C 的 foretext）。 */
-    let given = with_global(|g| g.foretext.clone()).unwrap_or_default();
+    let mut given = with_global(|g| g.foretext.clone()).unwrap_or_default();
+    let was_multibuffer = ISSET(NEW_BUFFER);
     with_global_mut(|g| g.ran_a_tool = false);
 
     /* 历史列表：执行命令用 execute_history，插入文件用空。 */
     let mut history = with_global(|g| g.execute_history.clone()).unwrap_or_else(|| make_new_node(None));
 
-    let msg = if execute {
-        if ISSET(NEW_BUFFER) {
-            crate::t!("files-execute_new_buffer")
+    let proceed = loop {
+        let menu = if execute { MEXECUTE } else { MINSERTFILE };
+        let msg = if execute {
+            if ISSET(NEW_BUFFER) {
+                crate::t!("files-execute_new_buffer")
+            } else {
+                crate::t!("files-execute_command")
+            }
+        } else if ISSET(NEW_BUFFER) {
+            if ISSET(NO_CONVERT) {
+                crate::t!("files-insert_unconverted_new_buffer")
+            } else {
+                crate::t!("files-insert_new_buffer")
+            }
+        } else if ISSET(NO_CONVERT) {
+            crate::t!("files-insert_unconverted")
         } else {
-            crate::t!("files-execute_command")
+            crate::t!("files-insert_file")
+        };
+
+        let response = crate::prompt::do_prompt(
+            menu,
+            &given,
+            if execute { Some(&mut history) } else { None },
+            Some(winio::edit_refresh),
+            &msg,
+        );
+        with_global_mut(|g| g.execute_history = Some(history.clone()));
+
+        /* 取消，或空白回答且非新缓冲区模式时退出。 */
+        if response == -1 || (response == -2 && !ISSET(NEW_BUFFER)) {
+            winio::statusbar(&crate::t!("files-cancelled"));
+            break false;
         }
-    } else if ISSET(NEW_BUFFER) {
-        crate::t!("files-insert_new_buffer")
-    } else {
-        crate::t!("files-insert_file")
+
+        given = crate::prompt::get_answer();
+
+        /* 执行了工具时退出。 */
+        if with_global(|g| g.ran_a_tool) {
+            break false;
+        }
+
+        /* 提示期间的翻转键（对应 insert_a_file_or 的 flip_* 分支）。 */
+        let function = if response > 0 {
+            crate::global::find_shortcut(response, menu)
+                .map(|shortcut| shortcut.borrow().func)
+        } else {
+            None
+        };
+        match function {
+            Some(FunctionId::FlipNewBuffer) => {
+                if ISSET(VIEW_MODE) {
+                    winio::beep();
+                } else {
+                    TOGGLE(NEW_BUFFER);
+                }
+                continue;
+            }
+            Some(FunctionId::FlipConvert) => {
+                TOGGLE(NO_CONVERT);
+                continue;
+            }
+            Some(FunctionId::FlipExecute) => {
+                execute = !execute;
+                continue;
+            }
+            Some(FunctionId::FlipPipe) => {
+                crate::prompt::add_or_remove_pipe_symbol_from_answer();
+                given = crate::prompt::get_answer();
+                continue;
+            }
+            Some(FunctionId::ToFiles) => {
+                if let Some(chosen) = crate::browser::browse_in(&given) {
+                    given = chosen.clone();
+                    crate::prompt::set_answer(&given);
+                }
+                continue;
+            }
+            _ => {}
+        }
+
+        /* 其余功能键：重新提示（C 的 `response != 0` 分支）。 */
+        if response != 0 && (!ISSET(NEW_BUFFER) || response != -2) {
+            continue;
+        }
+
+        break true;
     };
 
-    let response = crate::prompt::do_prompt(
-        if execute { MEXECUTE } else { MINSERTFILE },
-        &given,
-        Some(&mut history),
-        Some(winio::edit_refresh),
-        &msg,
-    );
-    with_global_mut(|g| g.execute_history = Some(history));
-
-    /* 取消，或空白回答且非新缓冲区模式时退出。 */
-    if response == -1 || (response == -2 && !ISSET(NEW_BUFFER)) {
-        winio::statusbar(&crate::t!("files-cancelled"));
+    /* NEW_BUFFER 只是本次提示的临时状态，结束后恢复原值（C 的 was_multibuffer）。 */
+    if !proceed {
+        if was_multibuffer {
+            SET(NEW_BUFFER);
+        } else {
+            UNSET(NEW_BUFFER);
+        }
         return;
     }
 
-    let answer = crate::prompt::get_answer();
-
-    /* 用户取消或执行了工具时退出。 */
-    if with_global(|g| g.ran_a_tool) {
-        return;
-    }
+    let answer = given.clone();
 
     /* 记住用户最后输入的内容。 */
     if !answer.is_empty() {
@@ -1527,6 +1596,12 @@ fn insert_a_file_or(execute: bool) {
                 }
             }
         }
+    }
+
+    if was_multibuffer {
+        SET(NEW_BUFFER);
+    } else {
+        UNSET(NEW_BUFFER);
     }
 }
 
