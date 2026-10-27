@@ -66,6 +66,7 @@ files-no_linter_defined = No linter is defined for this type of file
 files-no_formatter_defined = No formatter is defined for this type of file
 files-no_speller_defined = No spell checker is defined
 files-no_more_open_buffers = No more open file buffers
+files-no_file_name = No file name
 files-lines_one = {name} -- {count} line
 files-lines_many = {name} -- {count} lines
 files-making_backup = Making backup...

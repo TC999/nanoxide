@@ -1099,6 +1099,14 @@ pub fn statusline_centered(typ: MessageType, msg: &str) {
     write_statusbar_impl(msg, true);
 }
 
+/// 显示警告并短暂停顿（对应 winio.c 的 `warn_and_briefly_pause`）。
+pub fn warn_and_briefly_pause(msg: &str) {
+    blank_bottombars();
+    statusline(MessageType::Alert, msg);
+    with_global_mut(|g| g.lastmessage = MessageType::Vacuum);
+    napms(1500);
+}
+
 /// 在指定位置显示文本。
 pub fn mvwaddstr(_win: bool, _row: i32, _col: i32, _text: &str) {
     // 简化

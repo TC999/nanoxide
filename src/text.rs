@@ -59,26 +59,60 @@ pub fn do_cancel() {}
 /// - "否"：直接退出；
 /// - 取消（^C）：返回编辑器，不退出。
 pub fn do_exit() {
-    /* 未修改时直接退出。 */
-    if !files::is_modified() {
+    /* 未修改（或只读模式）时直接退出；对应 C 版
+     * `if (!openfile->modified || ISSET(VIEW_MODE)) choice = NO;`。 */
+    if !files::is_modified() || ISSET(VIEW_MODE) {
+        if ISSET(POSITIONLOG) {
+            crate::history::update_positions_register();
+        }
         files::delete_lockfile_of_current_buffer();
         with_global_mut(|g| g.we_are_running = false);
         return;
     }
 
-    let choice = crate::prompt::ask_user(false, &crate::t!("prompt-save_modified_buffer"));
+    /* --saveonexit（-t）：有文件名就不询问、直接保存（对应 C 版
+     * `else if (ISSET(SAVE_ON_EXIT) && openfile->filename[0]) choice = YES;`）。
+     * 没有文件名时先警告 "No file name"，再按普通流程询问。 */
+    let has_filename = with_global(|g| {
+        g.openfile
+            .as_ref()
+            .and_then(|of| of.borrow().filename.clone())
+            .map(|name| !name.is_empty())
+            .unwrap_or(false)
+    });
+
+    let choice = if ISSET(SAVE_ON_EXIT) && has_filename {
+        YES
+    } else {
+        if ISSET(SAVE_ON_EXIT) {
+            winio::warn_and_briefly_pause(&crate::t!("files-no_file_name"));
+        }
+        crate::prompt::ask_user(false, &crate::t!("prompt-save_modified_buffer"))
+    };
 
     match choice {
-        /* "是"：跳转到 Write to File 逻辑；保存成功（修改标记被清除）后退出。 */
+        /* "是"：有文件名时直接写入（对应 C 版 write_it_out(TRUE, TRUE)）；
+         * 没有文件名时进入 Write to File 提示。 */
         YES => {
-            files::do_writeout();
-            if !files::is_modified() {
+            let close = if has_filename {
+                files::write_it_out(true, true) > 0
+            } else {
+                files::do_writeout();
+                !files::is_modified()
+            };
+            if close {
+                if ISSET(POSITIONLOG) {
+                    crate::history::update_positions_register();
+                }
                 files::delete_lockfile_of_current_buffer();
                 with_global_mut(|g| g.we_are_running = false);
             }
         }
         /* "否"：直接退出。 */
         NO => {
+            if ISSET(POSITIONLOG) {
+                crate::history::update_positions_register();
+            }
             files::delete_lockfile_of_current_buffer();
             with_global_mut(|g| g.we_are_running = false);
         }

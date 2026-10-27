@@ -71,6 +71,7 @@ files-no_linter_defined = 未为此文件类型定义检查器
 files-no_formatter_defined = 未为此文件类型定义格式化器
 files-no_speller_defined = 未定义拼写检查器
 files-no_more_open_buffers = 没有更多打开的文件缓冲区
+files-no_file_name = 无文件名
 files-lines_one = {name} -- {count} 行
 files-lines_many = {name} -- {count} 行
 files-making_backup = 正在备份...
