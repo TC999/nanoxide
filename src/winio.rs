@@ -2670,7 +2670,7 @@ fn execute_by_id(func: FunctionId) -> bool {
         FunctionId::DoReplace => search::do_replace(),
         FunctionId::DoGoToLine => search::do_gotolinecolumn(),
         FunctionId::DoWriteOut => {
-            files::do_writeout();
+            files::do_writeout(false);
         }
         FunctionId::DoInsertFile => files::do_insertfile(),
         FunctionId::DoExecute => files::do_execute(),
@@ -2855,7 +2855,7 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     if key == 12 { text::do_refresh(); edit_refresh(); return true; }           // Ctrl+L
     if key == 13 { text::do_enter(); edit_refresh(); return true; }             // Ctrl+M (Enter)
     if key == 14 { movement::do_down(); edit_refresh(); return true; }          // Ctrl+N
-    if key == 15 { files::do_writeout(); return true; }                         // Ctrl+O
+    if key == 15 { files::do_writeout(false); return true; }                    // Ctrl+O
     if key == 16 { movement::do_up(); edit_refresh(); return true; }            // Ctrl+P
     if key == 17 { text::do_refresh(); return true; }                           // Ctrl+Q
     if key == 18 { files::do_insertfile(); edit_refresh(); return true; }       // Ctrl+R
@@ -2942,6 +2942,195 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     }
 
     false
+}
+
+// ======================== 彩蛋（对应 winio.c 的 do_credits） ========================
+
+/// 彩蛋正文条数（对应 C 版 `CREDIT_LEN`）。
+const CREDIT_LEN: usize = 52;
+
+/// 需要翻译的行数（对应 C 版 `XLCREDIT_LEN`）。
+const XLCREDIT_LEN: usize = 9;
+
+/// 彩蛋正文（对应 C 版 `do_credits` 的 `credits[]`）。
+/// `None` 表示该行在运行时按顺序取译本（C 版用 NULL 占位）。
+///
+/// 与 C 版的差异：版本行显示本程序的 `CARGO_PKG_VERSION`，而不是 C 版
+/// 生成时写死的 VERSION（nano 9.2）。
+const CREDITS: [Option<&str>; CREDIT_LEN] = [
+    None,                            /* "The nano text editor" */
+    None,                            /* "version" */
+    Some(env!("CARGO_PKG_VERSION")),
+    Some(""),
+    None,                            /* "Brought to you by:" */
+    Some("Chris Allegretta"),
+    Some("Benno Schulenberg"),
+    Some("David Lawrence Ramsey"),
+    Some("Jordi Mallach"),
+    Some("David Benbennick"),
+    Some("Rocco Corsi"),
+    Some("Mike Frysinger"),
+    Some("Adam Rogoyski"),
+    Some("Rob Siemborski"),
+    Some("Mark Majeres"),
+    Some("Ken Tyler"),
+    Some("Sven Guckes"),
+    Some("Bill Soudan"),
+    Some("Christian Weisgerber"),
+    Some("Erik Andersen"),
+    Some("Big Gaute"),
+    Some("Joshua Jensen"),
+    Some("Ryan Krebs"),
+    Some("Albert Chin"),
+    Some(""),
+    None,                            /* "Special thanks to:" */
+    Some("Monique, Brielle & Joseph"),
+    Some("Plattsburgh State University"),
+    Some("Benet Laboratories"),
+    Some("Amy Allegretta"),
+    Some("Linda Young"),
+    Some("Jeremy Robichaud"),
+    Some("Richard Kolb II"),
+    None,                            /* "The Free Software Foundation" */
+    Some("Linus Torvalds"),
+    None,                            /* "the many translators and the TP" */
+    None,                            /* "For ncurses:" */
+    Some("Thomas Dickey"),
+    Some("Pavel Curtis"),
+    Some("Zeyd Ben-Halim"),
+    Some("Eric S. Raymond"),
+    None,                            /* "and anyone else we forgot..." */
+    Some(""),
+    Some(""),
+    None,                            /* "Thank you for using nano!" */
+    Some(""),
+    Some(""),
+    Some("(C) 2026"),
+    Some("Free Software Foundation, Inc."),
+    Some(""),
+    Some(""),
+    Some("https://nano-editor.org/"),
+];
+
+/// 按顺序展开彩蛋正文（把 C 版 NULL 占位替换为译本），供动画使用。
+pub fn credits_sequence() -> Vec<String> {
+    let translated = [
+        crate::t!("winio-credits_the_nano_text_editor"),
+        crate::t!("winio-credits_version"),
+        crate::t!("winio-credits_brought_to_you_by"),
+        crate::t!("winio-credits_special_thanks_to"),
+        crate::t!("winio-credits_the_free_software_foundation"),
+        crate::t!("winio-credits_the_many_translators"),
+        crate::t!("winio-credits_for_ncurses"),
+        crate::t!("winio-credits_and_anyone_else"),
+        crate::t!("winio-credits_thank_you"),
+    ];
+
+    let mut xlpos = 0;
+    let mut lines = Vec::with_capacity(CREDIT_LEN);
+    for entry in CREDITS.iter() {
+        match entry {
+            Some(text) => lines.push((*text).to_string()),
+            None => {
+                lines.push(translated[xlpos].clone());
+                xlpos += 1;
+            }
+        }
+    }
+    debug_assert_eq!(xlpos, XLCREDIT_LEN);
+    lines
+}
+
+/// 非阻塞检查按键：有事件则取出并丢弃，返回 true（对应 `nodelay` 下的
+/// `wgetch() != ERR`）。也消费 `waiting_keycodes` 预读的事件，避免漏判。
+fn credit_key_pressed() -> bool {
+    if PENDING_EVENTS.with(|q| !q.borrow().is_empty()) {
+        let _ = PENDING_EVENTS.with(|q| q.borrow_mut().pop_front());
+        return true;
+    }
+    if event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
+        let _ = event::read();
+        return true;
+    }
+    false
+}
+
+/// 绘制彩蛋窗口：每行先清空，再按显示宽度居中写入
+/// （对应 `mvwaddstr(midwin, editwinrows - 1, (COLS - breadth(text)) / 2, text)`）。
+fn draw_credit_window(visible: &[Option<String>]) {
+    let cols = with_global(|g| g.COLS);
+    let mut stdout = io::stdout();
+    for (row, text) in visible.iter().enumerate() {
+        let screen_row = row as u16;
+        let _ = execute!(
+            stdout,
+            cursor::MoveTo(0, screen_row),
+            Clear(ClearType::CurrentLine)
+        );
+        if let Some(text) = text {
+            let width = utils::breadth(text.as_bytes());
+            let col = cols.saturating_sub(width) / 2;
+            let _ = execute!(stdout, cursor::MoveTo(col as u16, screen_row));
+            let _ = write!(stdout, "{}", text);
+        }
+    }
+    let _ = stdout.flush();
+}
+
+/// 完全清空屏幕，然后缓慢向上滚动片尾字幕，任一按键中止
+/// （对应 winio.c 的 `do_credits`，C 版由 ENABLE_EXTRA 编译开关控制）。
+///
+/// C 版在 SET(ZERO) + SET(NO_HELP) 后重建窗口，此时编辑窗口占满整屏
+/// （`window_init` 中 `editwinrows = LINES`），因此这里也用整屏行数播放；
+/// 滚动效果用一块等高的虚拟窗口模拟（C 版用 `wscrl(midwin, 1)`）。
+pub fn do_credits() {
+    let with_interface = !ISSET(ZERO);
+    let with_help = !ISSET(NO_HELP);
+    let screen_rows = with_global(|g| g.LINES).max(1);
+    let lines = credits_sequence();
+
+    if with_interface || with_help {
+        SET(ZERO);
+        SET(NO_HELP);
+    }
+
+    let mut visible: Vec<Option<String>> = vec![None; screen_rows];
+    let mut stdout = io::stdout();
+    let _ = execute!(stdout, Clear(ClearType::All));
+    let _ = stdout.flush();
+    napms(600);
+
+    'crawl: for crpos in 0..(CREDIT_LEN + screen_rows / 2) {
+        if crpos < CREDIT_LEN {
+            visible[screen_rows - 1] = Some(lines[crpos].clone());
+            draw_credit_window(&visible);
+        }
+
+        if credit_key_pressed() {
+            break 'crawl;
+        }
+        napms(600);
+        visible.remove(0);
+        visible.push(None);
+        draw_credit_window(&visible);
+
+        if credit_key_pressed() {
+            break 'crawl;
+        }
+        napms(600);
+        visible.remove(0);
+        visible.push(None);
+        draw_credit_window(&visible);
+    }
+
+    if with_interface {
+        UNSET(ZERO);
+    }
+    if with_help {
+        UNSET(NO_HELP);
+    }
+
+    draw_all_subwindows();
 }
 
 #[cfg(test)]

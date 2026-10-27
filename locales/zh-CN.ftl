@@ -373,3 +373,15 @@ files-failed_to_open_stdin = 无法打开标准输入
 search-invalid_modifier = 无效的搜索修饰符 "{ch}"
 search-empty_search_string = 空搜索字符串
 search-invalid_number = 无效的数字
+
+# ---------- 彩蛋（对应 winio.c 的 do_credits，ENABLE_EXTRA） ----------
+files-too_tiny = 屏幕过小
+winio-credits_the_nano_text_editor = nano 文本编辑器
+winio-credits_version = 版本
+winio-credits_brought_to_you_by = 来自于：
+winio-credits_special_thanks_to = 特别感谢：
+winio-credits_the_free_software_foundation = 自由软件基金会
+winio-credits_the_many_translators = TP 项目和众多翻译人员
+winio-credits_for_ncurses = ncurses 部分：
+winio-credits_and_anyone_else = 以及其他我们不记得的人...
+winio-credits_thank_you = 感谢您使用 nano！

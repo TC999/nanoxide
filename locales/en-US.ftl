@@ -368,3 +368,15 @@ files-failed_to_open_stdin = Failed to open stdin
 search-invalid_modifier = Invalid search modifier "{ch}"
 search-empty_search_string = Empty search string
 search-invalid_number = Invalid number
+
+# ---------- 彩蛋（对应 winio.c 的 do_credits，ENABLE_EXTRA） ----------
+files-too_tiny = Too tiny
+winio-credits_the_nano_text_editor = The nano text editor
+winio-credits_version = version
+winio-credits_brought_to_you_by = Brought to you by:
+winio-credits_special_thanks_to = Special thanks to:
+winio-credits_the_free_software_foundation = The Free Software Foundation
+winio-credits_the_many_translators = the many translators and the TP
+winio-credits_for_ncurses = For ncurses:
+winio-credits_and_anyone_else = and anyone else we forgot...
+winio-credits_thank_you = Thank you for using nano!

@@ -943,16 +943,35 @@ pub fn write_it_out(_finalize: bool, _mark_only: bool) -> i32 {
     save_to(&filename)
 }
 
-/// 写入文件（对应 files.c 的 `do_writeout`）：在状态栏显示
-/// "Write to File: <文件名>" 提示，冒号右侧可编辑要保存的文件名；
-/// 运行时不带文件名参数则提示处为空，直接输入新文件名即可。
-/// 当标记开启且非受限模式时，改为写入选中的区域（"Write Selection to File"，
-/// 对应 C 版 write_it_out 的 mark 分支）。
+// 保存时是否已经看过彩蛋（对应 files.c `write_it_out` 里的
+// `static bool did_credits`）。
+thread_local! {
+    static DID_CREDITS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn did_credits() -> bool {
+    DID_CREDITS.with(|c| c.get())
+}
+
+fn set_did_credits() {
+    DID_CREDITS.with(|c| c.set(true));
+}
+
+/// 写入文件（对应 files.c 的 `write_it_out`，`withprompt` 恒为 TRUE）：
+/// 在状态栏显示 "Write to File: <文件名>" 提示，冒号右侧可编辑要保存的
+/// 文件名；运行时不带文件名参数则提示处为空，直接输入新文件名即可。
+/// 当标记开启、非受限模式且不是在退出时（`exiting` 为 FALSE）时，改为
+/// 写入选中的区域（"Write Selection to File"，对应 C 版 write_it_out 的
+/// mark 分支）。
 ///
 /// 提示期间支持 M-D（DOS 格式）、M-B（备份）、M-A/M-P（追加/前置）、
 /// ^Q（放弃写入）与 ^T（浏览文件），对应 C 版 write_it_out 的循环。
 /// 返回写入字节数；-1 失败；2 表示用户放弃。
-pub fn do_writeout() -> i32 {
+///
+/// `exiting` 为 TRUE 表示本次写入来自 `do_exit`（对应 C 版
+/// `write_it_out(TRUE, TRUE)`），此时忽略标记、整块保存，并可能触发
+/// 文件名输入 "zzy" 的彩蛋。
+pub fn do_writeout(exiting: bool) -> i32 {
     let (filename, mark_on) = with_global(|g| {
         let filename = g
             .openfile
@@ -968,8 +987,8 @@ pub fn do_writeout() -> i32 {
     });
 
     /* 受限模式下不提供区域写入（会允许把选区内内容写往命令行未指定的文件，
-     * 对应 C 版 !ISSET(RESTRICTED) 条件）。 */
-    let selection = mark_on && !in_restricted_mode();
+     * 对应 C 版 !ISSET(RESTRICTED) 条件）；退出时也整块保存，不写选区。 */
+    let selection = mark_on && !exiting && !in_restricted_mode();
     let mut given = if selection {
         String::new()
     } else {
@@ -1082,6 +1101,25 @@ pub fn do_writeout() -> i32 {
             }
             Some(FunctionId::DoHelp) => continue,
             _ => {}
+        }
+
+        /* 如果用户是在退出时（^X → "Y"）给无名缓冲区输入了 "zzy"，第一次
+         * 会滚动播放片尾字幕（对应 C 版 write_it_out 的 ENABLE_EXTRA 彩蛋）。
+         * 屏幕太小则拒绝并提示 "Too tiny"。 */
+        if exiting
+            && !ISSET(SAVE_ON_EXIT)
+            && filename.is_empty()
+            && given == "zzy"
+            && !did_credits()
+        {
+            if with_global(|g| g.LINES) > 5 && with_global(|g| g.COLS) > 31 {
+                winio::do_credits();
+                set_did_credits();
+            } else {
+                /* TRANSLATORS: Concisely say the screen is too small. */
+                winio::statusline(MessageType::Ahem, &crate::t!("files-too_tiny"));
+            }
+            return 0;
         }
 
         if given.is_empty() {
