@@ -241,9 +241,10 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   虚拟窗口重绘模拟 `wscrl`；`window_init` 的 ncurses 窗口重建省略。
   ⚠️ 动画本身依赖真实终端，仅静态核对与数据表测试
 - ❌ `get_mouseinput`（编辑器点击路径见 `handle_mouse_click`）
-- ⚠️ minibar 尚未显示“刚读/写过文件的行数”与多缓冲区 `[x/n]` 计数
-  （C 版在文件名后显示），`show_states_at` 的条件里相应按 `tallywidth = 0` 计算；
-  行/列位置已按 C 版只在 `CONSTANT_SHOW` 时显示，十六进制码仍未绘制。
+- ✅ minibar 的行数提示与多缓冲区 `[x/n]` 计数：`report_size` 在读取/保存后
+  置位、绘制后被消费；`tallywidth` 参与状态字符的空间判断；`buffer_number`
+  从第一个缓冲区计数（`tests/minibar_tally.rs`）。
+- ⚠️ minibar 的十六进制码（`CONSTANT_SHOW` 下 `U+XXXX` 与零宽后继码）尚未绘制。
 - ⚠️ 输入解析（`parse_kbinput` / `convert_CSI_sequence` 等）由 crossterm 事件替代，不是逐字节解析；原版对异常转义序列的容错行为不保证一致
 - ✅ `waiting_keycodes` 只统计按下/重复事件，并缓存预读事件供 `wgetch` 消费（修复 Windows 上按键释放事件导致提示栏输入迟迟不注入的问题）
 - ✅ `warn_and_briefly_pause`（`-t` 无文件名时的提示）与 `blank_it_when_expired`
@@ -269,13 +270,13 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 
 nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当前最需要处理的是：
 
-1. 命令行选项已全部处理：`-q`/`-%` 已接线（软换行滚动块与 minibar 状态字符
-   为简化/未接，见第三节），`-!` 因无 libmagic 被明确拒绝。
+1. 命令行选项已全部处理：`-q`/`-%` 已接线（滚动条在软换行下按行数近似，
+   见第三节），`-!` 因无 libmagic 被明确拒绝。
 2. `execute_by_id` 已审计：主菜单绑定全部可达；未分发的 rc 占位函数会显示
    “Function not implemented”而不是静默吞键。写文件提示的
    DosFormat/BackItUp/Append/Prepend/Discard 循环已移植。
-3. 显示层仍有简化：`do_credits` 的滚动/版本行、minibar 的行数/多缓冲区计数
-   与十六进制码、软换行滚动条、多候选补全的编辑区列表（见第三、六节）。
+3. 显示层仍有简化：`do_credits` 的滚动/版本行、minibar 的十六进制码、
+   软换行滚动条、多候选补全的编辑区列表（见第三、六节）。
 4. i18n 只有两种语言，且复数未处理。
 
 ## 七、与上一版文档的主要更正
@@ -317,3 +318,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：`-%` 的状态字符已显示在 minibar（`COLS - 11 - padding`，位置与
   C 一致）；minibar 的行/列位置改为只在 `CONSTANT_SHOW` 时显示；新增
   `minibar_right_positions` 与 `tests/indicator_stateflags.rs` 的位置断言。
+- 本轮：minibar 已显示刚读/写文件的行数与多缓冲区 `[x/n]` 计数
+  （`report_size` 的置位/消费、`buffer_number`）；保存后仅在非 MINIBAR 时
+  写 "Wrote" 消息；新增 `tests/minibar_tally.rs`。
