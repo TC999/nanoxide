@@ -172,7 +172,6 @@ const RCOPTS: &[RcOption] = &[
     RcOption { name: "fill", flag: 0 },
     RcOption { name: "historylog", flag: HISTORYLOG },
     RcOption { name: "linenumbers", flag: LINE_NUMBERS },
-    RcOption { name: "magic", flag: USE_MAGIC },
     RcOption { name: "mouse", flag: USE_MOUSE },
     RcOption { name: "multibuffer", flag: NEW_BUFFER },
     RcOption { name: "newbuffer", flag: NEW_BUFFER },

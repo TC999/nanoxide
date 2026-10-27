@@ -241,7 +241,6 @@ pub const INDICATOR: usize = 43;
 pub const BOOKSTYLE: usize = 44;
 pub const COLON_PARSING: usize = 45;
 pub const STATEFLAGS: usize = 46;
-pub const USE_MAGIC: usize = 47;
 pub const MINIBAR: usize = 48;
 pub const ZERO: usize = 49;
 pub const MODERN_BINDINGS: usize = 50;

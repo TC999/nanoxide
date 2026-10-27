@@ -688,7 +688,6 @@ const LONG_OPTIONS: &[LongOption] = &[
     LongOption { name: "minibar", has_arg: false, ch: b'_' as i32 },
     LongOption { name: "zero", has_arg: false, ch: b'0' as i32 },
     LongOption { name: "solosidescroll", has_arg: false, ch: b'1' as i32 },
-    LongOption { name: "magic", has_arg: false, ch: b'!' as i32 },
 ];
 
 /// 短选项是否带参数（对应 getopt 字符串里带 ':' 的字母）。
@@ -697,9 +696,11 @@ fn short_takes_argument(c: char) -> bool {
 }
 
 /// 是否为 getopt 字符串中存在的短选项。
-/// 字母 A-Z/a-z 全在表中（部分带参数），另加 `! @ % _ 0 1 /`。
+/// 字母 A-Z/a-z 全在表中（部分带参数），另加 `@ % _ 0 1 /`。
+/// 注意：9.2 的 `-!` 只在编译启用 libmagic 时存在；本项目没有 libmagic，
+/// 因此与未启用 libmagic 的 nano 一致，不把 `!` 当作有效短选项。
 fn is_short_option(c: char) -> bool {
-    matches!(c, 'A'..='Z' | 'a'..='z' | '!' | '@' | '%' | '_' | '0' | '1' | '/')
+    matches!(c, 'A'..='Z' | 'a'..='z' | '@' | '%' | '_' | '0' | '1' | '/')
 }
 
 /// 输出 getopt 风格的错误，再按 C 版 default 分支提示 `-h` 并退出 1。
@@ -867,7 +868,6 @@ fn apply_option(ch: i32, value: Option<String>, state: &mut ParsedCommandLine) {
         b'0' => SET(ZERO),
         b'1' => SET(SOLO_SIDESCROLL),
         b'/' => SET(MODERN_BINDINGS),
-        b'!' => SET(USE_MAGIC),
         _ => {}
     }
 }
@@ -1226,7 +1226,6 @@ fn print_usage() {
     print_opt("-x", "--nohelp", "Don't show the two help lines");
     print_opt("-y", "--afterends", "Make Ctrl+Right stop at word ends");
     print_opt("-z", "--listsyntaxes", "List the names of available syntaxes");
-    print_opt("-!", "--magic", "Also try magic to determine syntax");
     print_opt("-@", "--colonparsing", "Accept 'filename:linenumber' notation");
     print_opt("-%", "--stateflags", "Show some states on the title bar");
     print_opt("-_", "--minibar", "Show a feedback bar at the bottom");

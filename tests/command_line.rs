@@ -305,6 +305,12 @@ fn binary_rejects_bad_options() {
 
     let out = Command::new(exe).arg("-2").output().unwrap();
     assert_eq!(out.status.code(), Some(1), "未知短选项应报错退出");
+
+    /* 没有 libmagic 时，-! 与 --magic 应和未编译 libmagic 的 nano 一样被拒绝。 */
+    let out = Command::new(exe).arg("-!").output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "无 libmagic 时不接受 -!");
+    let out = Command::new(exe).arg("--magic").output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "无 libmagic 时不接受 --magic");
 }
 
 /// -z 可执行路径：-I -z 不读 rc，只打印语法标题后正常退出。
