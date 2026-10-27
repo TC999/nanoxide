@@ -1108,6 +1108,22 @@ fn draw_scrollbar(stdout: &mut io::Stdout, cols: usize) {
     }
 }
 
+/// 标题栏左上角文本：有多个缓冲区时显示 `[x/n]`，否则显示程序名与版本
+/// （对应 C 版 titlebar 的 `upperleft = ranking` / `BRANDING`）。
+/// C 版即使后来只剩一个缓冲区也保持 `more_than_one`，因此这里用该标志，
+/// 而不是当前缓冲区数量。
+pub fn titlebar_left_text() -> String {
+    if with_global(|g| g.more_than_one) {
+        let (index, total) = with_global(|g| match g.openfile.clone() {
+            Some(target) => (buffer_number(&target), buffer_total(&target)),
+            None => (1, 1),
+        });
+        format!(" [{}/{}] ", index, total)
+    } else {
+        format!(" nax {} ", env!("CARGO_PKG_VERSION"))
+    }
+}
+
 /// 绘制标题栏行（格式参照 C 版 titlebar）。
 fn draw_titlebar_line(stdout: &mut io::Stdout, cols: usize) {
     let (filename, modified, view_mode, restricted) = with_global(|g| {
@@ -1155,7 +1171,7 @@ fn draw_titlebar_line(stdout: &mut io::Stdout, cols: usize) {
         state_text
     };
 
-    let left_text = format!(" nax {} ", env!("CARGO_PKG_VERSION"));
+    let left_text = titlebar_left_text();
 
     let left_len = left_text.len();
     let right_len = right_text.len();

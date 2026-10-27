@@ -2446,6 +2446,9 @@ pub fn make_new_buffer() {
                 o.borrow_mut().next = Some(new_of.clone());
                 new_of.borrow_mut().prev = Some(o.clone());
                 g.openfile = Some(new_of);
+                /* 已有多个缓冲区：标题栏改为显示 [x/n]（对应 C 版
+                 * install_buffer 中的 `more_than_one = !inhelp || more_than_one`）。 */
+                g.more_than_one = !g.inhelp || g.more_than_one;
             }
         }
     });
