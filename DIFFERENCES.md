@@ -99,13 +99,13 @@ README 写的是 fluent，但项目并未依赖 fluent crate，格式只是类 f
 
 解析层已接受下列选项，但对应功能尚未接线，按 ⚠️ 看待：
 
-- `-u/--unix`、`-N/--noconvert`（当前读写固定按 Unix 文本处理）
 - `-q/--indicator`（侧边指示条未绘制）、`-%/--stateflags`
 - `-!/--magic`（无 libmagic；rc 的 `set magic` 同样只置位）
 
 已接线并有测试/静态证据：`-D`（粗体）、`-d`（Backspace/Delete 互换）、
 `-H`（历史记录，含 `have_statedir` 检查）、`-t`（有文件名时退出直接保存）、
-`-U`（状态栏消息 1 次按键后清除）、`-P`（记录并恢复光标位置）。
+`-U`（状态栏消息 1 次按键后清除）、`-P`（记录并恢复光标位置）、
+`-u`/`-N`（DOS 行尾的读取/保存转换，见 `tests/file_format.rs`）。
 
 rc 文件方面：9.2 的 69 个 `set` 选项名全部出现在 `rcfile.rs` 里，rc 指令（`set unset bind unbind color icolor syntax header magic comment formatter linter tabgives include extendsyntax`）也都有处理。❓ 但只做了字符串比对，**每个选项是否真正生效未逐一验证**。
 
@@ -165,7 +165,8 @@ rc 文件方面：9.2 的 69 个 `set` 选项名全部出现在 `rcfile.rs` 里�
 - ✅ 锁文件（`write_lockfile` / `delete_lockfile` / `lock_filename_for`，1024 字节 vim/nano 兼容格式）
 - ✅ 多缓冲区切换（`M-,` / `M-.`）
 - ⚠️ `make_backup_of`：只做 `文件名~`，没有 `backupdir`、`insecure_backup` 的完整逻辑
-- ⚠️ `save_to` 只做基础写入，没有 `write_file` 的追加 / 前置 / 格式转换
+- ⚠️ `save_to` 只做基础写入，没有 `write_file` 的追加 / 前置；行尾已按
+  DOS/Unix 格式转换（`-u`/`-N`，`tests/file_format.rs`）
 - ✅ `write_region_to_file`（写选区，`tests/write_region.rs`）、`do_savefile`
 - ✅ `scoop_stdin`（命令行 `-`，`tests/stdin_args.rs`）
 - ✅ `diralphasort`、`init_backup_dir`（`tests/file_tools.rs`）
@@ -222,7 +223,7 @@ rc 文件方面：9.2 的 69 个 `set` 选项名全部出现在 `rcfile.rs` 里�
 
 nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当前最需要处理的是：
 
-1. 部分已接受的选项仍只是置位（`-u` `-N` `-q` `-%` `-!`），见第三节。
+1. 部分已接受的选项仍只是置位（`-q` `-%` `-!`），见第三节。
 2. `execute_by_id` 的 `_ => {}` 兜底仍在，尚未逐个审计全部 `FunctionId`；F1–F12
    已按 9.2 的 `shortcut_init` 对齐。
 3. 操作目录限制（`outside_of_confinement`）、linter、目录/滚动条等显示功能仍缺失。
@@ -241,3 +242,5 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   按键释放事件问题。
 - 后续更新：`-t`、`-U`、`-P` 已接线；F1–F12 绑定已按 `global.c` 对齐；
   `-P` 的位置寄存器解析兼容 Windows 路径。
+- 再后续：`-u`/`-N` 已接线（CRLF 检测、保存回写、NO_CONVERT 保留 `\r`），
+  读取/插入/stdin 共用同一套分行逻辑；新增 `tests/file_format.rs`。
