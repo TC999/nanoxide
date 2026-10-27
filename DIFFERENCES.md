@@ -145,8 +145,8 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
    - 未分发的其余名字（`AppendIt`、`PrependIt`、`DosFormat`、`BackItUp`、
      `DiscardBuffer`、`Flip*`、`*Void` 等）多来自 rc 的 `bind` 占位名。
      C 版里这些函数本身是空函数（global.c 的 `{;}`），真正行为在写文件
-     提示循环中；Rust 尚未移植该循环。
-   - 现在这些按键不再静默：兜底分支会显示
+     提示循环中；该循环已在 `do_writeout` 中移植（M-A/M-P/M-D/M-B/^Q/^T）。
+   - 从主菜单直接 bind 这些占位名时，兜底分支会显示
      `Function not implemented: <名字>`（`tests/function_dispatch.rs`）。
      这是对 C 的偏离（C 中空函数无提示），用于避免“按键被吞”的错觉。⚠️
 7. ✅ **`-t` / `-U` / `-P` 已接线**：
@@ -180,9 +180,10 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ 锁文件（`write_lockfile` / `delete_lockfile` / `lock_filename_for`，1024 字节 vim/nano 兼容格式）
 - ✅ 多缓冲区切换（`M-,` / `M-.`）
 - ⚠️ `make_backup_of`：只做 `文件名~`，没有 `backupdir`、`insecure_backup` 的完整逻辑
-- ⚠️ `save_to` 只做基础写入，没有 `write_file` 的追加 / 前置；行尾已按
-  DOS/Unix 格式转换（`-u`/`-N`，`tests/file_format.rs`）
-- ✅ `write_region_to_file`（写选区，`tests/write_region.rs`）、`do_savefile`
+- ✅ `save_to` 支持覆盖/追加/前置（`WritingType`），行尾按 DOS/Unix 格式转换；
+  `do_writeout` 的提示循环支持 M-A/M-P/M-D/M-B/^Q/^T。
+  证据：`tests/file_format.rs`、`tests/write_methods.rs`
+- ✅ `write_region_to_file`（写选区，`tests/write_region.rs`；区域也可追加/前置）、`do_savefile`
 - ✅ `scoop_stdin`（命令行 `-`，`tests/stdin_args.rs`）
 - ✅ `diralphasort`、`init_backup_dir`（`tests/file_tools.rs`）
 - ❌ `check_writable_directory`、`outside_of_confinement`（操作目录限制，没找到同名或等价实现）
@@ -244,8 +245,8 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 1. 命令行选项已全部处理：`-q`/`-%` 已接线（软换行滚动块与 minibar 状态字符
    为简化/未接，见第三节），`-!` 因无 libmagic 被明确拒绝。
 2. `execute_by_id` 已审计：主菜单绑定全部可达；未分发的 rc 占位函数会显示
-   “Function not implemented”而不是静默吞键。真正缺口是写文件提示里的
-   DosFormat/BackItUp/Append/Prepend/Discard 循环，尚未移植。
+   “Function not implemented”而不是静默吞键。写文件提示的
+   DosFormat/BackItUp/Append/Prepend/Discard 循环已移植。
 3. 操作目录限制（`outside_of_confinement`）、linter、do_credits 等仍缺失。
 4. i18n 只有两种语言，且复数未处理。
 
@@ -268,3 +269,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   无 libmagic 时 `-!` / `--magic` / rc `set magic` 改为按未知选项拒绝。
 - 审计：`execute_by_id` 的 125 个 FunctionId 中 83 个有分发；主菜单可达绑定
   全部覆盖，rc 占位名改为显示未实现提示（不再 `_ => {}` 静默）。
+- 本轮：写文件提示循环已移植（M-A/M-P 追加/前置、M-D DOS、M-B 备份、
+  ^Q 放弃、^T 浏览）；`save_to` 支持 `WritingType`，新增
+  `tests/write_methods.rs`。
