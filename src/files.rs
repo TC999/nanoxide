@@ -203,6 +203,17 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
         return OpenBufferResult::FileLoaded;
     }
 
+    /* 操作目录限制（对应 files.c open_buffer 中的 outside_of_confinement）。
+     * 路径不在 --operatingdir 内时拒绝读取。 */
+    if with_global(|g| g.operating_dir.is_some()) && outside_of_confinement(filename, false) {
+        let dir = with_global(|g| g.operating_dir.clone()).unwrap_or_default();
+        winio::statusline(
+            MessageType::Alert,
+            &crate::t!("files-cant_read_outside", dir = dir),
+        );
+        return OpenBufferResult::ErrorRead;
+    }
+
     // 路径存在且是目录：显示 ALERT 提示。对应 files.c 的
     //   statusline(ALERT, _("'%s' is a directory"), realname);
     // C 版 statusline 对短消息会居中显示并自动加上 "[ ]" 方括号，
@@ -764,6 +775,20 @@ fn finish_save(
         }
     }
 
+    /* 操作目录限制（对应 write_file 中 `normal && operating_dir && ...`）：
+     * SPECIAL（紧急保存）不受限制。 */
+    if method != WritingType::Special
+        && !answer.is_empty()
+        && outside_of_confinement(answer, false)
+    {
+        let dir = with_global(|g| g.operating_dir.clone()).unwrap_or_default();
+        winio::statusline(
+            MessageType::Ahem,
+            &crate::t!("files-cant_write_outside", dir = dir),
+        );
+        return -1;
+    }
+
     /* 对已存在且为普通文件的文件做备份（对应 write_file 中 MAKE_BACKUP 分支）。 */
     if ISSET(MAKE_BACKUP) && !answer.is_empty() {
         if let Ok(meta) = fs::metadata(answer) {
@@ -776,17 +801,15 @@ fn finish_save(
     }
 
     /* 按 method 组合最终内容：Append = 原内容 + 缓冲区，
-     * Prepend = 缓冲区 + 原内容（C 版分别用 O_APPEND 与临时文件实现）。 */
+     * Prepend = 缓冲区 + 原内容（C 版分别用 O_APPEND 与临时文件实现）。
+     * Overwrite / Special 直接覆盖。 */
     let mut output = content.into_bytes();
-    if method != WritingType::Overwrite {
-        let existing = fs::read(answer).unwrap_or_default();
-        if method == WritingType::Append {
-            let mut merged = existing;
-            merged.extend_from_slice(&output);
-            output = merged;
-        } else {
-            output.extend_from_slice(&existing);
-        }
+    if method == WritingType::Append {
+        let mut merged = fs::read(answer).unwrap_or_default();
+        merged.extend_from_slice(&output);
+        output = merged;
+    } else if method == WritingType::Prepend {
+        output.extend_from_slice(&fs::read(answer).unwrap_or_default());
     }
 
     match fs::write(answer, &output) {
@@ -1146,9 +1169,70 @@ pub fn wipe_statusbar() {
     });
 }
 
-/// 初始化操作目录（用于文件浏览器）。
+/// 初始化操作目录（对应 files.c 的 `init_operating_dir`）：
+/// 解析为绝对路径并 chdir 过去；无效时 die。
 pub fn init_operating_dir() {
-    // 简化
+    let dir = match with_global(|g| g.operating_dir.clone()) {
+        Some(dir) => dir,
+        None => return,
+    };
+
+    let target = match get_full_path(&dir) {
+        Some(target) => target,
+        None => crate::definitions::die(&crate::t!(
+            "files-invalid_operating_dir",
+            dir = dir
+        )),
+    };
+
+    if std::env::set_current_dir(&target).is_err() {
+        crate::definitions::die(&crate::t!("files-invalid_operating_dir", dir = dir));
+    }
+
+    with_global_mut(|g| g.operating_dir = Some(target));
+}
+
+/// 归一化路径用于操作目录前缀比较：统一分隔符、去掉 Windows 的
+/// `\\?\` 前缀、Windows 下忽略大小写，并在目录末尾补 `/`。
+fn normalize_for_confinement(path: &str, is_dir: bool) -> String {
+    let mut normalized = path.replace('\\', "/");
+    if let Some(rest) = normalized.strip_prefix("//?/") {
+        normalized = rest.to_string();
+    }
+    #[cfg(windows)]
+    {
+        normalized = normalized.to_lowercase();
+    }
+    if is_dir && !normalized.ends_with('/') {
+        normalized.push('/');
+    }
+    normalized
+}
+
+/// 判断给定路径是否在操作目录之外（对应 `outside_of_confinement`）。
+/// `tabbing` 为 TRUE 时，尚不完整但可能长成操作目录的路径也算“在里面”，
+/// 以便文件名补全工作。
+pub fn outside_of_confinement(somepath: &str, tabbing: bool) -> bool {
+    let operating_dir = match with_global(|g| g.operating_dir.clone()) {
+        Some(dir) => dir,
+        None => return false,
+    };
+
+    let fullpath = match get_full_path(somepath) {
+        Some(path) => path,
+        /* 取不到绝对路径意味着路径不存在/不可读：非补全时不算越界，
+         * 补全时算越界（与 C 版一致）。 */
+        None => return tabbing,
+    };
+
+    let confined = normalize_for_confinement(&operating_dir, true);
+    let full_is_dir = Path::new(&fullpath).is_dir();
+    let full = normalize_for_confinement(&fullpath, full_is_dir);
+
+    let is_inside = full.starts_with(&confined);
+    let begins_to_be = tabbing && confined.starts_with(&full);
+
+    !is_inside && !begins_to_be
 }
 
 /// 计算左侧边缘偏移量。
@@ -1547,6 +1631,13 @@ fn insert_a_file_or(execute: bool) {
                 }
                 prepare_for_display();
             }
+        } else if outside_of_confinement(&answer, false) {
+            /* 与 open_buffer 相同的操作目录检查（C 的 open_buffer 也用于插入）。 */
+            let dir = with_global(|g| g.operating_dir.clone()).unwrap_or_default();
+            winio::statusline(
+                MessageType::Alert,
+                &crate::t!("files-cant_read_outside", dir = dir),
+            );
         } else {
             let was_lineno = with_global(|g| {
                 g.openfile.as_ref().and_then(|of| {
@@ -2243,7 +2334,7 @@ fn emergency_save(openfile: &OpenFileRef) {
         /* annotate=FALSE：紧急保存不改写缓冲区文件名、不清除修改标记
          * （对应 C 版 write_file(targetname, NULL, SPECIAL, NONOTES)）。 */
         let lines = lines_of(openfile);
-        if finish_save(&targetname, &lines, false, WritingType::Overwrite) >= 0 {
+        if finish_save(&targetname, &lines, false, WritingType::Special) >= 0 {
             eprintln!("\n{}", crate::t!("files-buffer_written_to", name = targetname));
         }
     }

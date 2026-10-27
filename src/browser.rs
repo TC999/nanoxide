@@ -397,6 +397,13 @@ pub fn browse(path: &str) -> Option<String> {
 
     let mut path = path.to_string();
 
+    /* 操作目录限制：入口路径越界时改用操作目录（对应 browse_in 末尾）。 */
+    if with_global(|g| g.operating_dir.is_some()) && files::outside_of_confinement(&path, false) {
+        if let Some(dir) = with_global(|g| g.operating_dir.clone()) {
+            path = dir;
+        }
+    }
+
     'read_directory_contents: loop {
         /* 规范化路径。 */
         if let Some(fp) = files::get_full_path(&path) {
@@ -559,9 +566,22 @@ pub fn browse(path: &str) -> Option<String> {
                         let mut newpath = files::expand_leading_tilde(&answer);
 
                         /* 相对路径时与当前路径连接。 */
-                        if !newpath.starts_with('/') {
+                        if !std::path::Path::new(&newpath).is_absolute() {
                             let pp = with_global(|g| g.present_path.clone()).unwrap_or_default();
                             newpath = format!("{}{}", pp, answer);
+                        }
+
+                        /* 操作目录限制（对应 browser.c 的 outside_of_confinement）。 */
+                        if with_global(|g| g.operating_dir.is_some())
+                            && files::outside_of_confinement(&newpath, false)
+                        {
+                            let dir = with_global(|g| g.operating_dir.clone()).unwrap_or_default();
+                            winio::statusline(
+                                MessageType::Alert,
+                                &crate::t!("files-cant_go_outside", dir = dir),
+                            );
+                            path = with_global(|g| g.present_path.clone()).unwrap_or_default();
+                            continue 'read_directory_contents;
                         }
 
                         /* 去掉尾部斜杠。 */
@@ -591,6 +611,18 @@ pub fn browse(path: &str) -> Option<String> {
                         /* 无法从根目录向上移动。 */
                         if item == "/.." {
                             winio::statusline(MessageType::Alert, &crate::t!("browser-cannot_go_up"));
+                            continue;
+                        }
+
+                        /* 操作目录限制：选中的文件/目录可能在 .. 或符号链接之外。 */
+                        if with_global(|g| g.operating_dir.is_some())
+                            && files::outside_of_confinement(&item, false)
+                        {
+                            let dir = with_global(|g| g.operating_dir.clone()).unwrap_or_default();
+                            winio::statusline(
+                                MessageType::Alert,
+                                &crate::t!("files-cant_go_outside", dir = dir),
+                            );
                             continue;
                         }
 

@@ -155,6 +155,12 @@ fn main() {
     // 6e. 用 rcfile 中的 set <element>color 初始化界面颜色对
     color::set_interface_colorpairs();
 
+    /* 6e2. --operatingdir：解析绝对路径并 chdir 过去（对应 C 版 main 中
+     * `if (operating_dir) init_operating_dir();`）。 */
+    if with_global(|g| g.operating_dir.is_some()) {
+        files::init_operating_dir();
+    }
+
     // 6b2. 按 USE_MOUSE（命令行 -m 或 rcfile set mouse）启用/关闭鼠标捕获
     //      （对应 C 版 main 中 do_rcfiles 之后的 mouse_init()）。
     winio::mouse_init();
