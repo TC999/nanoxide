@@ -687,6 +687,80 @@ fn buffer_total(from: &OpenFileRef) -> usize {
     total
 }
 
+/// 生成 minibar 的十六进制码（对应 C 版 minibar 的 hexadecimal 与
+/// successor 部分）：返回 (码文本, 是否附加了零宽后继码)。
+/// 光标处为行尾时显示换行码（有下一行）或 "  ----"（最后一行）；
+/// UTF-8 下按码点显示 `U+XXXX`，否则按字节显示 `  0xXX`。
+pub fn hexadecimal_under_cursor() -> (String, bool) {
+    let (data, x, has_next) = with_global(|g| {
+        let of = g.openfile.as_ref().map(|o| o.borrow());
+        let data = of
+            .as_ref()
+            .and_then(|r| r.current.clone())
+            .map(|c| c.borrow().data.clone())
+            .unwrap_or_default();
+        let x = of.as_ref().map(|r| r.current_x).unwrap_or(0);
+        let has_next = of
+            .as_ref()
+            .and_then(|r| r.current.clone())
+            .and_then(|c| c.borrow().next.clone())
+            .is_some();
+        (data, x, has_next)
+    });
+
+    let bytes = data.as_bytes();
+    let at = bytes.get(x).copied().unwrap_or(0);
+    let utf8 = chars::using_utf8();
+
+    /* 对应 C 版 minibar 中按 `*this_position` 分派的 if/else 链。 */
+    let mut text = if at == 0 {
+        if has_next {
+            if utf8 {
+                "U+000A".to_string()
+            } else {
+                "  0x0A".to_string()
+            }
+        } else {
+            "  ----".to_string()
+        }
+    } else if at == b'\n' {
+        "  0x00".to_string()
+    } else if at < 0x80 && utf8 {
+        format!("U+{:04X}", at)
+    } else if utf8 {
+        match chars::mbtowide(&bytes[x..]) {
+            Ok((wc, _)) => format!("U+{:04X}", wc),
+            Err(()) => format!("  0x{:02X}", at),
+        }
+    } else {
+        format!("  0x{:02X}", at)
+    };
+
+    /* 最多附加两个零宽后继码（对应 C 版 successor 循环）。 */
+    let mut has_successor = false;
+    if at != 0 {
+        let mut pos = x + chars::char_length(&bytes[x..]);
+        for _ in 0..2 {
+            if pos >= bytes.len() || bytes[pos] == 0 {
+                break;
+            }
+            if !chars::is_zerowidth(&bytes[pos..]) {
+                break;
+            }
+            match chars::mbtowide(&bytes[pos..]) {
+                Ok((wc, _)) => {
+                    text.push_str(&format!("|{:04X}", wc));
+                    pos += chars::char_length(&bytes[pos..]);
+                    has_successor = true;
+                }
+                Err(()) => break,
+            }
+        }
+    }
+
+    (text, has_successor)
+}
+
 /// 绘制极简状态栏（对应 winio.c 的 `minibar`）：在底部信息行显示
 /// 文件名、修改标记、光标行/列和行号百分比。
 /// 仅当 MINIBAR 模式、非 ZERO、且行数足够时由主循环调用。
@@ -838,8 +912,19 @@ pub fn minibar() {
         let _ = write!(stdout, "{}", location);
     }
 
-    /* 状态字符（对应 show_states_at）：I/M/L/R/S。 */
-    if ISSET(STATEFLAGS) {
+    /* 十六进制码：只在 CONSTANT_SHOW 且空间足够时显示，固定在 COLS - 23
+     * （对应 C 版 minibar 的 hexadecimal 部分）。 */
+    let mut has_successor = false;
+    if ISSET(CONSTANT_SHOW) && namewidth + tallywidth + 28 < cols {
+        let (hex, successor) = hexadecimal_under_cursor();
+        has_successor = successor;
+        let _ = execute!(stdout, cursor::MoveTo((cols - 23) as u16, status_row));
+        let _ = write!(stdout, "{}", hex);
+    }
+
+    /* 状态字符（对应 show_states_at）：I/M/L/R/S；显示了零宽后继码时
+     * 不绘制，避免覆盖十六进制码尾部（对应 C 版的 !successor 条件）。 */
+    if ISSET(STATEFLAGS) && !has_successor {
         if let Some(col) = states_col {
             let _ = execute!(stdout, cursor::MoveTo(col as u16, status_row));
             let _ = write!(stdout, "{}", states_string());
