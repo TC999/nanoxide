@@ -193,8 +193,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ `write_region_to_file`（写选区，`tests/write_region.rs`；区域也可追加/前置）、`do_savefile`
 - ✅ `scoop_stdin`（命令行 `-`，`tests/stdin_args.rs`）
 - ✅ `diralphasort`、`init_backup_dir`（`tests/file_tools.rs`）
-- ❌ `check_writable_directory`、`outside_of_confinement`（操作目录限制，没找到同名或等价实现）
-- ❌ `username_completion`；⚠️ `input_tab` 文件名补全是桩（`prompt.rs` 注释"简化：不执行文件补全"）
+- ✅ `outside_of_confinement` / `init_operating_dir`（`--operatingdir`：
+  启动 chdir、打开/保存/插入与文件浏览器的越界检查；`tests/operating_dir.rs`）
+- ❌ `check_writable_directory`、`username_completion`；⚠️ `input_tab` 文件名补全是桩（`prompt.rs` 注释"简化：不执行文件补全"）
 
 ### 3. 文本编辑（`text.rs`）
 
@@ -254,7 +255,7 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 2. `execute_by_id` 已审计：主菜单绑定全部可达；未分发的 rc 占位函数会显示
    “Function not implemented”而不是静默吞键。写文件提示的
    DosFormat/BackItUp/Append/Prepend/Discard 循环已移植。
-3. 操作目录限制（`outside_of_confinement`）、linter、do_credits 等仍缺失。
+3. linter、do_credits 等仍缺失。
 4. i18n 只有两种语言，且复数未处理。
 
 ## 七、与上一版文档的主要更正
@@ -281,3 +282,5 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   `tests/write_methods.rs`。
 - 后续：插入/执行提示循环已移植（^X/M-F/M-N/M-\ 翻转键、NEW_BUFFER
   恢复、管道符号），新增 `tests/insert_flip.rs`。
+- 再后续：`--operatingdir` 已接线（chdir、打开/保存/插入/浏览器越界检查，
+  Windows 路径归一化），新增 `tests/operating_dir.rs`。
