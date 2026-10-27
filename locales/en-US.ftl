@@ -12,6 +12,8 @@
 # ---------- 全局/欢迎 ----------
 welcome-message = Welcome to nano.  For basic help, type Ctrl+G.
 winio-modified =  Modified
+winio-view =  View
+winio-restricted =  Restricted
 winio-new_buffer = New Buffer
 winio-cursor_position = line {lineno}/{filebot_lineno} ({linepct}%), col {column}/{fullwidth} ({colpct}%), char {sum}/{totsize} ({charpct}%)
 winio-view_warning = Key is invalid in view mode

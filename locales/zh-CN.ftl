@@ -17,6 +17,8 @@
 # ---------- 全局/欢迎 ----------
 welcome-message = 欢迎使用 nano。  如需基本帮助信息，请按下 Ctrl+G。
 winio-modified = 已更改
+winio-view = 查看
+winio-restricted = 受限
 winio-new_buffer = 新缓冲区
 winio-cursor_position = 行 {lineno}/{filebot_lineno} ({linepct}%)，列 {column}/{fullwidth} ({colpct}%)，字符 {sum}/{totsize} ({charpct}%)
 winio-view_warning = 该键在查看模式中无效

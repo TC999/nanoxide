@@ -269,7 +269,19 @@ pub fn update_screen_size() {
             }
         });
     }
+    update_sidebar();
     update_wrap_at();
+}
+
+/// 按 -q/--indicator 与窗口大小决定是否显示右侧滚动条
+/// （对应 C 版 `sidebar = (ISSET(INDICATOR) && LINES > 5 && COLS > 9) ? 1 : 0;`
+/// 及随后的 editwincols 计算）。
+pub fn update_sidebar() {
+    with_global_mut(|g| {
+        g.sidebar = ISSET(INDICATOR) && g.LINES > 5 && g.COLS > 9;
+        let sidebar_width = if g.sidebar { 1 } else { 0 };
+        g.editwincols = (g.COLS as i32 - g.margin - sidebar_width).max(1) as usize;
+    });
 }
 
 /// 检查是否支持颜色（crossterm 总是支持）。
@@ -791,11 +803,15 @@ pub fn refresh_screen() {
         }
     }
 
+    /* -q/--indicator：在编辑区最右列绘制滚动条（对应 C 的 draw_scrollbar）。 */
+    if with_global(|g| g.sidebar) {
+        draw_scrollbar(&mut stdout, cols);
+    }
+
     // 绘制状态栏（倒数第3行）
     let status_row = (lines.saturating_sub(3)) as u16;
     let _ = execute!(stdout, cursor::MoveTo(0, status_row));
     draw_statusbar_line(&mut stdout, cols);
-
     // 绘制底部快捷键（倒数第2行和倒数第1行）
     draw_bottombars_lines(&mut stdout, cols, lines);
 
@@ -811,53 +827,147 @@ pub fn refresh_screen() {
     let _ = stdout.flush();
 }
 
+/// 绘制右侧的位置/比例指示条（对应 winio.c 的 `draw_scrollbar`）。
+/// 简化：非软换行时按 C 的公式计算可见块；软换行下按行数近似。
+fn draw_scrollbar(stdout: &mut io::Stdout, cols: usize) {
+    let (fromline, totallines, rows, softwrap) = with_global(|g| {
+        let of = g.openfile.as_ref().map(|o| o.borrow());
+        let fromline = of
+            .as_ref()
+            .and_then(|r| r.edittop.as_ref())
+            .map(|line| line.borrow().lineno)
+            .unwrap_or(1)
+            .max(1)
+            - 1;
+        let totallines = of
+            .as_ref()
+            .and_then(|r| r.filebot.as_ref())
+            .map(|line| line.borrow().lineno)
+            .unwrap_or(1)
+            .max(1);
+        (fromline, totallines, g.editwinrows.max(1) as isize, ISSET(SOFTWRAP))
+    });
+
+    let mut lowest = (fromline * rows) / totallines;
+    let mut highest = lowest + (rows * rows) / totallines;
+
+    if rows > totallines && !softwrap {
+        highest = rows;
+    }
+    if highest >= rows {
+        highest = rows - 1;
+    }
+    if lowest > highest {
+        lowest = highest;
+    }
+
+    for row in 0..rows {
+        let active = row >= lowest && row <= highest;
+        let mut attrs = color::interface_color_pair(SCROLL_BAR);
+        if active {
+            attrs |= color::A_REVERSE;
+        }
+        let _ = execute!(stdout, cursor::MoveTo((cols - 1) as u16, (1 + row) as u16));
+        apply_attributes(stdout, attrs);
+        let _ = write!(stdout, " ");
+        reset_attributes(stdout);
+    }
+}
+
 /// 绘制标题栏行（格式参照 C 版 titlebar）。
 fn draw_titlebar_line(stdout: &mut io::Stdout, cols: usize) {
-    with_global(|g| {
+    let (filename, modified, view_mode, restricted) = with_global(|g| {
         // C 版 titlebar: openfile->filename[0] == '\0' 时显示 "New Buffer"。
         // Rust 版 filename 为 Some("")（空串）表示"无文件名"，须同样回退。
-        let filename = g.openfile.as_ref()
+        let filename = g
+            .openfile
+            .as_ref()
             .and_then(|of| of.borrow().filename.clone())
             .unwrap_or_default();
-        let filename = if filename.is_empty() {
-            crate::t!("winio-new_buffer")
-        } else {
-            filename
-        };
-        let modified = g.openfile.as_ref()
+        let modified = g
+            .openfile
+            .as_ref()
             .map(|of| of.borrow().modified)
             .unwrap_or(false);
-        let state = if modified { &crate::t!("winio-modified") } else { "" };
-        let left_text = format!(" nax {} ", env!("CARGO_PKG_VERSION"));
-        let right_text = state;
-
-        let left_len = left_text.len();
-        let right_len = right_text.len();
-        let path_max = cols.saturating_sub(left_len + right_len + 2);
-
-        // 文件名居中或左对齐
-        let path_display = if filename.len() > path_max {
-            format!("...{}", &filename[filename.len().saturating_sub(path_max.saturating_sub(3))..])
-        } else {
-            filename.clone()
-        };
-
-        let _ = write!(stdout, "{}", left_text);
-        // 填充空格使文件名居中
-        let mid_pad = cols.saturating_sub(left_len + path_display.len() + right_len) / 2;
-        if mid_pad > 0 {
-            let _ = write!(stdout, "{:width$}", "", width = mid_pad);
-        }
-        let _ = write!(stdout, "{}", path_display);
-        // 右对齐状态
-        if right_len > 0 {
-            let right_pad = cols.saturating_sub(left_len + mid_pad + path_display.len() + right_len);
-            if right_pad > 0 {
-                let _ = write!(stdout, "{:width$}", "", width = right_pad);
-            }
-            let _ = write!(stdout, "{}", right_text);
-        }
+        (filename, modified, ISSET(VIEW_MODE), ISSET(RESTRICTED))
     });
+    let filename = if filename.is_empty() {
+        crate::t!("winio-new_buffer")
+    } else {
+        filename
+    };
+
+    /* C 版 titlebar 的状态词优先级：View > Modified > Restricted。 */
+    let state_text = if view_mode {
+        crate::t!("winio-view")
+    } else if modified {
+        crate::t!("winio-modified")
+    } else if restricted {
+        crate::t!("winio-restricted")
+    } else {
+        String::new()
+    };
+
+    /* -%/--stateflags：用 5 个状态字符替代状态词（C 的 "+.xxxxx" 布局）。
+     * modified 时再在前面加 " *"（对应 titlebar 中的 " *"）。 */
+    let right_text = if ISSET(STATEFLAGS) && !view_mode {
+        let mut text = String::new();
+        if modified {
+            text.push_str(" *");
+        }
+        text.push_str(&states_string());
+        text
+    } else {
+        state_text
+    };
+
+    let left_text = format!(" nax {} ", env!("CARGO_PKG_VERSION"));
+
+    let left_len = left_text.len();
+    let right_len = right_text.len();
+    let path_max = cols.saturating_sub(left_len + right_len + 2);
+
+    // 文件名居中或左对齐
+    let path_display = if filename.len() > path_max {
+        format!("...{}", &filename[filename.len().saturating_sub(path_max.saturating_sub(3))..])
+    } else {
+        filename.clone()
+    };
+
+    let _ = write!(stdout, "{}", left_text);
+    // 填充空格使文件名居中
+    let mid_pad = cols.saturating_sub(left_len + path_display.len() + right_len) / 2;
+    if mid_pad > 0 {
+        let _ = write!(stdout, "{:width$}", "", width = mid_pad);
+    }
+    let _ = write!(stdout, "{}", path_display);
+    // 右对齐状态
+    if right_len > 0 {
+        let right_pad = cols.saturating_sub(left_len + mid_pad + path_display.len() + right_len);
+        if right_pad > 0 {
+            let _ = write!(stdout, "{:width$}", "", width = right_pad);
+        }
+        let _ = write!(stdout, "{}", right_text);
+    }
+}
+
+/// 五个状态字符：I（自动缩进）、M（标记）、L（硬换行）、R（录制宏）、
+/// S（软换行），对应 C 版 `show_states_at` 的内容。
+pub fn states_string() -> String {
+    with_global(|g| {
+        let marked = g
+            .openfile
+            .as_ref()
+            .map(|of| of.borrow().mark.is_some())
+            .unwrap_or(false);
+        let mut states = String::with_capacity(5);
+        states.push(if ISSET(AUTOINDENT) { 'I' } else { ' ' });
+        states.push(if marked { 'M' } else { ' ' });
+        states.push(if ISSET(BREAK_LONG_LINES) { 'L' } else { ' ' });
+        states.push(if g.recording { 'R' } else { ' ' });
+        states.push(if ISSET(SOFTWRAP) { 'S' } else { ' ' });
+        states
+    })
 }
 
 /// 把消息按显示宽度截断到 cols 列（ASCII 占 1 列，其他如中文占 2 列），

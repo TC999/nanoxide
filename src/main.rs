@@ -147,7 +147,9 @@ fn main() {
         with_global_mut(|g| g.hilite_attribute = color::A_BOLD);
     }
 
-    // 6d. 按 fill 与终端宽度计算 wrap_at（对应 C 版 window_init 中的计算）。
+    // 6d. 按 rcfile 与终端宽度决定是否显示 -q 滚动条，再计算 wrap_at
+    //     （对应 C 版 window_init 中的 sidebar / wrap_at 计算）。
+    winio::update_sidebar();
     winio::update_wrap_at();
 
     // 6e. 用 rcfile 中的 set <element>color 初始化界面颜色对
