@@ -200,7 +200,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   与 `MGOTODIR` 只补目录（`tests/filename_completion.rs`）。
   简化：多候选在状态栏列出（C 在编辑区分栏绘制）；`username_completion`
   仅在 Unix 生效（Windows 无 passwd）。
-- ❌ `check_writable_directory`
+- ✅ `check_writable_directory` / `safe_tempfile`：`$TMPDIR` → 系统临时目录 →
+  当前目录依次尝试，保留缓冲区扩展名；临时文件用 create_new 保证唯一。
+  证据：`tests/tempfile.rs`
 
 ### 3. 文本编辑（`text.rs`）
 
@@ -296,3 +298,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   ^Y/^V 切换、^X/Enter 退出；临时副本运行），新增 `tests/linter.rs`。
 - 再本轮：文件名补全已实现（`input_tab` / `filename_completion` /
   `username_completion`），新增 `tests/filename_completion.rs`。
+- 本轮：`check_writable_directory` 与 `safe_tempfile` 已实现（临时目录
+  探测、保留扩展名）；`get_full_path` 在 Windows 上用 `\` 结尾，修复
+  verbatim 路径拼接。
