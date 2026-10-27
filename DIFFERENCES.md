@@ -188,7 +188,8 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ 多缓冲区切换（`M-,` / `M-.`）
 - ⚠️ `make_backup_of`：只做 `文件名~`，没有 `backupdir`、`insecure_backup` 的完整逻辑
 - ✅ `save_to` 支持覆盖/追加/前置（`WritingType`），行尾按 DOS/Unix 格式转换；
-  `do_writeout` 的提示循环支持 M-A/M-P/M-D/M-B/^Q/^T。
+  `do_writeout` 的提示循环支持 M-A/M-P/M-D/M-B/^Q/^T；`exiting` 为真时
+  忽略标记、整块保存（对应 C 版 `write_it_out` 的 `exiting` 参数）。
   证据：`tests/file_format.rs`、`tests/write_methods.rs`
 - ✅ `write_region_to_file`（写选区，`tests/write_region.rs`；区域也可追加/前置）、`do_savefile`
 - ✅ `scoop_stdin`（命令行 `-`，`tests/stdin_args.rs`）
@@ -232,7 +233,12 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ 软换行分块绘制 `update_softwrapped_line`
 - ✅ `draw_scrollbar`（`-q`；软换行下按行数近似）、`show_states_at`
   （`states_string`，`-%` 的标题栏状态字符）
-- ❌ `do_credits`
+- ✅ `do_credits`（`^X` → "Y" → 无名缓冲区输入 `zzy` 的彩蛋；
+  `tests/credits.rs` 校验 52 行文本表与翻译键）：全屏向上滚动字幕，
+  任一按键中止；期间临时置位 ZERO/NO_HELP，结束后恢复并重绘。
+  差异：版本行显示本程序版本（非 C 版编译期写死的 9.2）；滚动用等高的
+  虚拟窗口重绘模拟 `wscrl`；`window_init` 的 ncurses 窗口重建省略。
+  ⚠️ 动画本身依赖真实终端，仅静态核对与数据表测试
 - ❌ `get_mouseinput`（编辑器点击路径见 `handle_mouse_click`）
 - ⚠️ `-%` 的状态字符尚未显示在 minibar 状态栏（C 版在二者都显示）
 - ⚠️ 输入解析（`parse_kbinput` / `convert_CSI_sequence` 等）由 crossterm 事件替代，不是逐字节解析；原版对异常转义序列的容错行为不保证一致
@@ -265,7 +271,8 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 2. `execute_by_id` 已审计：主菜单绑定全部可达；未分发的 rc 占位函数会显示
    “Function not implemented”而不是静默吞键。写文件提示的
    DosFormat/BackItUp/Append/Prepend/Discard 循环已移植。
-3. do_credits 等仍缺失。
+3. 显示层仍有简化：`do_credits` 的滚动/版本行、`-%` 的 minibar 状态字符、
+   软换行滚动条、多候选补全的编辑区列表（见第三、六节）。
 4. i18n 只有两种语言，且复数未处理。
 
 ## 七、与上一版文档的主要更正
@@ -301,3 +308,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：`check_writable_directory` 与 `safe_tempfile` 已实现（临时目录
   探测、保留扩展名）；`get_full_path` 在 Windows 上用 `\` 结尾，修复
   verbatim 路径拼接。
+- 本轮：`do_credits` 彩蛋已实现（退出时文件名输入 `zzy` 触发，临时置位
+  ZERO/NO_HELP、全屏滚动、任一键中止）；`do_writeout` 增加 `exiting`
+  参数，退出时忽略标记；新增 `tests/credits.rs`。
