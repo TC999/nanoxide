@@ -17,6 +17,7 @@ winio-restricted =  Restricted
 winio-new_buffer = New Buffer
 winio-cursor_position = line {lineno}/{filebot_lineno} ({linepct}%), col {column}/{fullwidth} ({colpct}%), char {sum}/{totsize} ({charpct}%)
 winio-view_warning = Key is invalid in view mode
+winio-function_not_implemented = Function not implemented: {func}
 winio-nameless = (nameless)
 
 # ---------- browser（文件浏览器） ----------

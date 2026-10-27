@@ -2738,7 +2738,19 @@ fn execute_by_id(func: FunctionId) -> bool {
             let _ = crate::browser::browse_in(&start);
         }
         FunctionId::DoNothing => return false,
-        _ => {}
+        _ => {
+            /* 没有分发分支的 FunctionId 主要来自 rc 的 `bind` 占位名
+             * （C 版中 dos_format / append_it / flip_* 等本身就是空函数，
+             * 行为在写文件提示循环里）。这里至少给出提示，不静默吞键。 */
+            statusline(
+                MessageType::Ahem,
+                &crate::t!(
+                    "winio-function_not_implemented",
+                    func = format!("{:?}", func)
+                ),
+            );
+            beep();
+        }
     }
     true
 }

@@ -22,6 +22,7 @@ winio-restricted = 受限
 winio-new_buffer = 新缓冲区
 winio-cursor_position = 行 {lineno}/{filebot_lineno} ({linepct}%)，列 {column}/{fullwidth} ({colpct}%)，字符 {sum}/{totsize} ({charpct}%)
 winio-view_warning = 该键在查看模式中无效
+winio-function_not_implemented = 功能未实现：{func}
 winio-nameless = (未命名)
 
 # ---------- browser（文件浏览器） ----------
