@@ -91,9 +91,9 @@ fn stateflags_titlebar_does_not_panic() {
 /// 百分比在 `COLS - 4 - padding`；文件名过长时 padding 从 2 降为 0。
 #[test]
 fn minibar_right_positions_follow_c_offsets() {
-    /* 80 列、短文件名：两侧各留 2 列。 */
+    /* 80 列、短文件名、没有行数文本：两侧各留 2 列。 */
     let (padding, states, anchor, percent) =
-        nanoxide::winio::minibar_right_positions(80, 10);
+        nanoxide::winio::minibar_right_positions(80, 10, 0);
     assert_eq!(padding, 2);
     assert_eq!(states, Some(67)); // 80 - 11 - 2
     assert_eq!(anchor, Some(73)); // 80 - 5 - 2
@@ -101,7 +101,7 @@ fn minibar_right_positions_follow_c_offsets() {
 
     /* 文件名过长（namewidth + 19 > COLS）时放弃两侧空格。 */
     let (padding, states, anchor, percent) =
-        nanoxide::winio::minibar_right_positions(80, 70);
+        nanoxide::winio::minibar_right_positions(80, 70, 0);
     assert_eq!(padding, 0);
     assert_eq!(states, None, "70 + 14 + 0 不满足 < 80");
     assert_eq!(anchor, Some(75));
@@ -109,11 +109,17 @@ fn minibar_right_positions_follow_c_offsets() {
 
     /* 窄屏时同样先放弃两侧空格，各元素再按各自的条件隐藏。 */
     let (padding, states, anchor, percent) =
-        nanoxide::winio::minibar_right_positions(20, 5);
+        nanoxide::winio::minibar_right_positions(20, 5, 0);
     assert_eq!(padding, 0, "5 + 19 > 20，放弃两侧空格");
     assert_eq!(states, Some(9)); // 5 + 14 + 0 < 20
     assert_eq!(anchor, Some(15));
     assert_eq!(percent, Some(16));
+
+    /* 行数文本（tallywidth）计入状态字符的空间判断（C 版同名条件）。 */
+    let (_, states, _, _) = nanoxide::winio::minibar_right_positions(40, 5, 9);
+    assert_eq!(states, Some(27), "5 + 9 + 14 + 4 < 40");
+    let (_, states, _, _) = nanoxide::winio::minibar_right_positions(40, 5, 20);
+    assert_eq!(states, None, "5 + 20 + 14 + 4 不满足 < 40");
 }
 
 /// `-%` 打开时 minibar 会绘制状态字符（含 CONSTANT_SHOW 的位置与十六进制

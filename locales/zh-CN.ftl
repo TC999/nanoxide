@@ -385,3 +385,10 @@ winio-credits_the_many_translators = TP 项目和众多翻译人员
 winio-credits_for_ncurses = ncurses 部分：
 winio-credits_and_anyone_else = 以及其他我们不记得的人...
 winio-credits_thank_you = 感谢您使用 nano！
+
+# ---------- minibar 的行数与缓冲区计数（对应 winio.c 的 minibar） ----------
+winio-dos = DOS
+winio-minibar_line_one = ({count} 行)
+winio-minibar_line_many = ({count} 行)
+winio-minibar_line_dos_one = ({count} 行，{fmt})
+winio-minibar_line_dos_many = ({count} 行，{fmt})

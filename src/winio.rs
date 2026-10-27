@@ -650,6 +650,43 @@ pub fn print_view_warning() {
     statusline(MessageType::Ahem, &crate::t!("winio-view_warning"));
 }
 
+/// 计算给定缓冲区在链表中的序号（对应 winio.c 的 `buffer_number`：从
+/// `startfile` 沿 prev 数到该缓冲区）。Rust 的缓冲区链表不是循环的，
+/// 首个缓冲区的 prev 为 None。
+pub fn buffer_number(target: &OpenFileRef) -> usize {
+    let mut count = 1;
+    let mut current = target.clone();
+    loop {
+        let prev = { current.borrow().prev.clone() };
+        match prev {
+            Some(p) => {
+                current = p;
+                count += 1;
+            }
+            None => return count,
+        }
+    }
+}
+
+/// 缓冲区总数（C 版用 `buffer_number(startfile->prev)` 取到同一个数）。
+fn buffer_total(from: &OpenFileRef) -> usize {
+    let mut first = from.clone();
+    loop {
+        let prev = { first.borrow().prev.clone() };
+        match prev {
+            Some(p) => first = p,
+            None => break,
+        }
+    }
+    let mut total = 0;
+    let mut current = Some(first);
+    while let Some(c) = current {
+        total += 1;
+        current = { c.borrow().next.clone() };
+    }
+    total
+}
+
 /// 绘制极简状态栏（对应 winio.c 的 `minibar`）：在底部信息行显示
 /// 文件名、修改标记、光标行/列和行号百分比。
 /// 仅当 MINIBAR 模式、非 ZERO、且行数足够时由主循环调用。
@@ -711,6 +748,74 @@ pub fn minibar() {
     let _ = execute!(stdout, cursor::MoveTo(0, status_row));
     let _ = write!(stdout, "{}", left);
 
+    /* 行/列文本的宽度在 ranking 与 location 两处都会用到。 */
+    let location = format!("{},{}", lineno, column);
+    let placewidth = utils::breadth(location.as_bytes());
+
+    /* 刚读过/写过文件时显示行数；否则在有多个缓冲区时显示 [x/n]
+     * （对应 C 版 minibar 的 report_size 与 ranking 分支）。 */
+    let mut tallywidth = 0usize;
+    if with_global(|g| g.report_size) && cols > 35 {
+        /* C 的 count = filebot->lineno - (filebot->data[0] == '\0')。 */
+        let (count, is_dos) = with_global(|g| {
+            let fmt = g
+                .openfile
+                .as_ref()
+                .map(|of| of.borrow().fmt)
+                .unwrap_or(FormatType::Unspecified);
+            let (lineno, empty) = g
+                .openfile
+                .as_ref()
+                .and_then(|of| of.borrow().filebot.clone())
+                .map(|b| (b.borrow().lineno, b.borrow().data.is_empty()))
+                .unwrap_or((1, true));
+            (
+                lineno.saturating_sub(if empty { 1 } else { 0 }),
+                fmt == FormatType::DosFile,
+            )
+        });
+        let number = count.to_string();
+        let text = match (is_dos, count == 1) {
+            (false, true) => crate::t!("winio-minibar_line_one", count = number),
+            (false, false) => crate::t!("winio-minibar_line_many", count = number),
+            (true, true) => crate::t!(
+                "winio-minibar_line_dos_one",
+                count = number,
+                fmt = crate::t!("winio-dos")
+            ),
+            (true, false) => crate::t!(
+                "winio-minibar_line_dos_many",
+                count = number,
+                fmt = crate::t!("winio-dos")
+            ),
+        };
+        /* ftl 会丢掉值首尾的空白，C 消息里的前导空格在代码里补上。 */
+        let text = format!(" {}", text);
+        let width = utils::breadth(text.as_bytes());
+        if namewidth + width + 11 < cols {
+            let _ = write!(stdout, "{}", text);
+            /* C 版把 tallywidth 传给状态字符的空间判断。 */
+            tallywidth = width;
+        }
+        with_global_mut(|g| g.report_size = false);
+    } else if cols > 35 {
+        let current = with_global(|g| g.openfile.clone());
+        if let Some(target) = current {
+            let has_siblings = {
+                let r = target.borrow();
+                r.next.is_some() || r.prev.is_some()
+            };
+            if has_siblings {
+                let index = buffer_number(&target);
+                let total = buffer_total(&target);
+                let ranking = format!(" [{}/{}]", index, total);
+                if namewidth + placewidth + utils::breadth(ranking.as_bytes()) + 32 < cols {
+                    let _ = write!(stdout, "{}", ranking);
+                }
+            }
+        }
+    }
+
     /* 右侧：百分比 / 锚点 / 状态字符 / 光标位置。
      * 偏移量对应 C 版 minibar 的 `COLS - 4 - padding`、`COLS - 5 - padding`、
      * `COLS - 11 - padding`。 */
@@ -721,12 +826,10 @@ pub fn minibar() {
     };
 
     let (_padding, states_col, anchor_col, percent_col) =
-        minibar_right_positions(cols, namewidth);
+        minibar_right_positions(cols, namewidth, tallywidth);
 
     /* 光标位置：与 C 版一致，只在 CONSTANT_SHOW 且右侧放得下时显示，
      * 固定在 COLS - 27 - placewidth（右侧留给十六进制/状态字符）。 */
-    let location = format!("{},{}", lineno, column);
-    let placewidth = utils::breadth(location.as_bytes());
     if ISSET(CONSTANT_SHOW) && namewidth + placewidth + 32 < cols {
         let _ = execute!(
             stdout,
@@ -764,15 +867,16 @@ pub fn minibar() {
 /// 计算 minibar 右侧元素（状态字符、锚点、百分比）的起始列，对应 C 版
 /// minibar 中的 `padding` 与 `COLS - 11 - padding` / `COLS - 5 - padding` /
 /// `COLS - 4 - padding`。空间不足时该元素返回 `None`（C 版同样跳过绘制）。
-/// C 版条件里的 `tallywidth`（刚读过/写过文件时的行数提示）在 Rust 的
-/// minibar 中尚未实现，按 0 计。
+/// `tallywidth` 是紧跟文件名后的行数文本宽度（C 版同名变量），会参与状态
+/// 字符的空间判断；未显示行数时传 0。
 pub fn minibar_right_positions(
     cols: usize,
     namewidth: usize,
+    tallywidth: usize,
 ) -> (usize, Option<usize>, Option<usize>, Option<usize>) {
     /* 文件名过长时放弃两侧空格（对应 C 版 `if (namewidth + 19 > COLS)`）。 */
     let padding = if namewidth + 19 > cols { 0 } else { 2 };
-    let states = if namewidth + 14 + 2 * padding < cols {
+    let states = if namewidth + tallywidth + 14 + 2 * padding < cols {
         Some(cols - 11 - padding)
     } else {
         None

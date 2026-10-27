@@ -360,6 +360,9 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
                 install_buffer(g, new_file, fresh);
             });
             crate::color::find_and_prime_applicable_syntax();
+            /* 对应 C 版 read_file 末尾的 report_size = TRUE：MINIBAR 下
+             * 下一次刷新时显示读入后的行数。 */
+            with_global_mut(|g| g.report_size = true);
             OpenBufferResult::FileLoaded
         }
         Err(e) => {
@@ -850,13 +853,21 @@ fn finish_save(
                 /* 更新标题栏（对应 C 版 write_file 中 titlebar(NULL)）。 */
                 winio::titlebar(None);
             }
-            let linecount = lines.len();
-            let msg = if linecount == 1 {
-                &format!("[ {} ]", crate::t!("files-wrote_one_line", count = linecount.to_string()))
-            } else {
-                &format!("[ {} ]", crate::t!("files-wrote_lines", count = linecount.to_string()))
-            };
-            winio::statusline_centered(MessageType::Remark, &msg);
+            /* 刚保存后：MINIBAR 模式下改为在 minibar 里显示行数，不再往
+             * 状态栏写消息（对应 C 版 write_file 末尾的 report_size 分支）；
+             * 紧急保存（SPECIAL）不显示 "Wrote" 消息。 */
+            let normal = method != WritingType::Special;
+            if ISSET(MINIBAR) && !ISSET(ZERO) && with_global(|g| g.LINES) > 1 && annotate {
+                with_global_mut(|g| g.report_size = true);
+            } else if normal {
+                let linecount = lines.len();
+                let msg = if linecount == 1 {
+                    &format!("[ {} ]", crate::t!("files-wrote_one_line", count = linecount.to_string()))
+                } else {
+                    &format!("[ {} ]", crate::t!("files-wrote_lines", count = linecount.to_string()))
+                };
+                winio::statusline_centered(MessageType::Remark, &msg);
+            }
             output.len() as i32
         }
         Err(e) => {
@@ -1716,6 +1727,8 @@ fn insert_a_file_or(execute: bool) {
                     if now_lineno != was_lineno || now_x != was_x {
                         set_modified();
                     }
+                    /* 对应 C 版 read_file 末尾的 report_size = TRUE。 */
+                    with_global_mut(|g| g.report_size = true);
                 }
                 Err(e) => {
                     winio::statusline(
