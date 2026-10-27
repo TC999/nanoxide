@@ -693,10 +693,11 @@ pub fn minibar() {
     });
 
     /* 文件名（过长时省略号截断）加修改星号。 */
+    let namewidth = utils::breadth(filename.as_bytes());
     let mut left = String::new();
     if cols > 4 {
         let name_max = cols.saturating_sub(10);
-        if utils::breadth(filename.as_bytes()) > name_max {
+        if namewidth > name_max {
             let start = utils::actual_x(filename.as_bytes(), name_max.saturating_sub(8));
             left.push_str("...");
             left.push_str(&filename[start..]);
@@ -706,43 +707,87 @@ pub fn minibar() {
         left.push_str(if modified { " *" } else { "  " });
     }
 
-    /* 右侧：行号百分比。 */
+    /* 先写文件名（含修改星号）。 */
+    let _ = execute!(stdout, cursor::MoveTo(0, status_row));
+    let _ = write!(stdout, "{}", left);
+
+    /* 右侧：百分比 / 锚点 / 状态字符 / 光标位置。
+     * 偏移量对应 C 版 minibar 的 `COLS - 4 - padding`、`COLS - 5 - padding`、
+     * `COLS - 11 - padding`。 */
     let pct = if filebot_lineno > 0 {
         100 * lineno / filebot_lineno
     } else {
         0
     };
-    let right = format!("{:3}%", pct);
-    let right_len = utils::breadth(right.as_bytes());
 
-    /* 光标位置（行,列）尽量显示。 */
+    let (_padding, states_col, anchor_col, percent_col) =
+        minibar_right_positions(cols, namewidth);
+
+    /* 光标位置：与 C 版一致，只在 CONSTANT_SHOW 且右侧放得下时显示，
+     * 固定在 COLS - 27 - placewidth（右侧留给十六进制/状态字符）。 */
     let location = format!("{},{}", lineno, column);
-    let loc_len = utils::breadth(location.as_bytes());
-    let anchor_mark = if has_anchor { "†" } else { "" };
-
-    let _ = execute!(stdout, cursor::MoveTo(0, status_row));
-    let mut col = 0usize;
-    let _ = write!(stdout, "{}", left);
-    col += utils::breadth(left.as_bytes());
-
-    /* 行/列位置：放在中间偏右。 */
-    if col + loc_len + right_len + 6 < cols {
-        let _ = execute!(stdout, cursor::MoveTo((cols - right_len - loc_len - 6).min(cols.saturating_sub(1)) as u16, status_row));
+    let placewidth = utils::breadth(location.as_bytes());
+    if ISSET(CONSTANT_SHOW) && namewidth + placewidth + 32 < cols {
+        let _ = execute!(
+            stdout,
+            cursor::MoveTo((cols - 27 - placewidth) as u16, status_row)
+        );
         let _ = write!(stdout, "{}", location);
     }
 
+    /* 状态字符（对应 show_states_at）：I/M/L/R/S。 */
+    if ISSET(STATEFLAGS) {
+        if let Some(col) = states_col {
+            let _ = execute!(stdout, cursor::MoveTo(col as u16, status_row));
+            let _ = write!(stdout, "{}", states_string());
+        }
+    }
+
     /* 锚点标记。 */
-    if col + 6 < cols && !anchor_mark.is_empty() {
-        let _ = execute!(stdout, cursor::MoveTo(cols.saturating_sub(right_len + 5) as u16, status_row));
-        let _ = write!(stdout, "{}", anchor_mark);
+    if has_anchor {
+        if let Some(col) = anchor_col {
+            let _ = execute!(stdout, cursor::MoveTo(col as u16, status_row));
+            let _ = write!(stdout, "\u{2020}");
+        }
     }
 
     /* 百分比（最右）。 */
-    let _ = execute!(stdout, cursor::MoveTo(cols.saturating_sub(right_len + 1) as u16, status_row));
-    let _ = write!(stdout, "{}", right);
+    if let Some(col) = percent_col {
+        let _ = execute!(stdout, cursor::MoveTo(col as u16, status_row));
+        let _ = write!(stdout, "{:3}%", pct);
+    }
 
     reset_attributes(&mut stdout);
     let _ = stdout.flush();
+}
+
+/// 计算 minibar 右侧元素（状态字符、锚点、百分比）的起始列，对应 C 版
+/// minibar 中的 `padding` 与 `COLS - 11 - padding` / `COLS - 5 - padding` /
+/// `COLS - 4 - padding`。空间不足时该元素返回 `None`（C 版同样跳过绘制）。
+/// C 版条件里的 `tallywidth`（刚读过/写过文件时的行数提示）在 Rust 的
+/// minibar 中尚未实现，按 0 计。
+pub fn minibar_right_positions(
+    cols: usize,
+    namewidth: usize,
+) -> (usize, Option<usize>, Option<usize>, Option<usize>) {
+    /* 文件名过长时放弃两侧空格（对应 C 版 `if (namewidth + 19 > COLS)`）。 */
+    let padding = if namewidth + 19 > cols { 0 } else { 2 };
+    let states = if namewidth + 14 + 2 * padding < cols {
+        Some(cols - 11 - padding)
+    } else {
+        None
+    };
+    let anchor = if namewidth + 7 < cols {
+        Some(cols - 5 - padding)
+    } else {
+        None
+    };
+    let percent = if namewidth + 6 < cols {
+        Some(cols - 4 - padding)
+    } else {
+        None
+    };
+    (padding, states, anchor, percent)
 }
 
 /// 刷新屏幕（逐行覆盖重绘，避免全屏 Clear 造成的闪烁）。
