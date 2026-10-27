@@ -139,8 +139,16 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
    F11=报告位置、F12=拼写；帮助页 F1=退出）。证据：同一测试文件。
 5. **输入批处理**：C 版 `process_a_keystroke` 把连续输入攒成 puddle 再一次注入，
    Rust 版逐键处理。大段粘贴的性能与撤销粒度可能不同。❓
-6. **`execute_by_id` 的兜底分支 `_ => {}`** 仍在：未被显式分发的 `FunctionId`
-   会静默消费按键。第四节前三条已接上，但尚未逐个审计全部 `FunctionId`。⚠️
+6. **`execute_by_id` 兜底与分发审计**：FunctionId 共 125 个，其中 83 个有
+   `execute_by_id` 分支。审计结果：
+   - 主菜单（MMAIN）的可达绑定都能命中硬编码分支或 `execute_by_id`；
+   - 未分发的其余名字（`AppendIt`、`PrependIt`、`DosFormat`、`BackItUp`、
+     `DiscardBuffer`、`Flip*`、`*Void` 等）多来自 rc 的 `bind` 占位名。
+     C 版里这些函数本身是空函数（global.c 的 `{;}`），真正行为在写文件
+     提示循环中；Rust 尚未移植该循环。
+   - 现在这些按键不再静默：兜底分支会显示
+     `Function not implemented: <名字>`（`tests/function_dispatch.rs`）。
+     这是对 C 的偏离（C 中空函数无提示），用于避免“按键被吞”的错觉。⚠️
 7. ✅ **`-t` / `-U` / `-P` 已接线**：
    - `-t`：`do_exit` 在有文件名时直接 `write_it_out`，无文件名时先提示
      "No file name" 再询问（`tests/save_onexit.rs`）。
@@ -235,8 +243,9 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 
 1. 命令行选项已全部处理：`-q`/`-%` 已接线（软换行滚动块与 minibar 状态字符
    为简化/未接，见第三节），`-!` 因无 libmagic 被明确拒绝。
-2. `execute_by_id` 的 `_ => {}` 兜底仍在，尚未逐个审计全部 `FunctionId`；F1–F12
-   已按 9.2 的 `shortcut_init` 对齐。
+2. `execute_by_id` 已审计：主菜单绑定全部可达；未分发的 rc 占位函数会显示
+   “Function not implemented”而不是静默吞键。真正缺口是写文件提示里的
+   DosFormat/BackItUp/Append/Prepend/Discard 循环，尚未移植。
 3. 操作目录限制（`outside_of_confinement`）、linter、do_credits 等仍缺失。
 4. i18n 只有两种语言，且复数未处理。
 
@@ -257,3 +266,5 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   读取/插入/stdin 共用同一套分行逻辑；新增 `tests/file_format.rs`。
 - 本轮：`-q`（draw_scrollbar）与 `-%`（标题栏 I/M/L/R/S）已接线；
   无 libmagic 时 `-!` / `--magic` / rc `set magic` 改为按未知选项拒绝。
+- 审计：`execute_by_id` 的 125 个 FunctionId 中 83 个有分发；主菜单可达绑定
+  全部覆盖，rc 占位名改为显示未实现提示（不再 `_ => {}` 静默）。
