@@ -245,6 +245,8 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   置位、绘制后被消费；`tallywidth` 参与状态字符的空间判断；`buffer_number`
   从第一个缓冲区计数（`tests/minibar_tally.rs`）。
 - ⚠️ minibar 的十六进制码（`CONSTANT_SHOW` 下 `U+XXXX` 与零宽后继码）尚未绘制。
+- ⚠️ 标题栏左上角的多缓冲区 `[x/n]`（C 版在有多个缓冲区时用它替代版本号）
+  与退出提示里的 "Close" 标签尚未显示；`more_than_one` 字段目前未置位。
 - ⚠️ 输入解析（`parse_kbinput` / `convert_CSI_sequence` 等）由 crossterm 事件替代，不是逐字节解析；原版对异常转义序列的容错行为不保证一致
 - ✅ `waiting_keycodes` 只统计按下/重复事件，并缓存预读事件供 `wgetch` 消费（修复 Windows 上按键释放事件导致提示栏输入迟迟不注入的问题）
 - ✅ `warn_and_briefly_pause`（`-t` 无文件名时的提示）与 `blank_it_when_expired`
