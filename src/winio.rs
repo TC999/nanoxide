@@ -1057,6 +1057,12 @@ fn write_statusbar_impl(msg: &str, centered: bool) {
     }
     let _ = write!(stdout, "{}", clipped);
     let _ = stdout.flush();
+
+    /* --quickblank：消息只承受 1 次按键；否则 20 次
+     * （对应 C 版 statusline 末尾的 countdown 赋值）。 */
+    with_global_mut(|g| {
+        g.statusbar_countdown = if ISSET(QUICK_BLANK) { 1 } else { 20 };
+    });
 }
 
 /// 在状态栏显示消息（左对齐）。
@@ -1118,6 +1124,7 @@ pub fn wipe_statusbar() {
         g.lastmessage = MessageType::Vacuum;
         g.statusbar_msg.clear();
         g.statusbar_centered = false;
+        g.statusbar_countdown = 0;
     });
     let mut stdout = io::stdout();
     let lines = with_global(|g| g.LINES);
@@ -1126,6 +1133,21 @@ pub fn wipe_statusbar() {
     let _ = execute!(stdout, cursor::MoveTo(0, status_row));
     let _ = write!(stdout, "{:width$}", "", width = cols);
     let _ = stdout.flush();
+}
+
+/// 按 C 版的 countdown 规则递减；归零时清除状态栏
+/// （对应 winio.c 的 `blank_it_when_expired`）。
+pub fn blank_it_when_expired() {
+    let expired = with_global_mut(|g| {
+        if g.statusbar_countdown <= 0 {
+            return false;
+        }
+        g.statusbar_countdown -= 1;
+        g.statusbar_countdown == 0
+    });
+    if expired {
+        wipe_statusbar();
+    }
 }
 
 /// 显示底部栏快捷键。

@@ -331,6 +331,10 @@ pub fn main_loop() {
         // 获取按键
         let key = winio::wgetch();
 
+        // 状态栏消息倒计时（对应 C 版 get_kbinput 中 midwin 后的
+        // blank_it_when_expired；--quickblank 时 1 次按键即清除）。
+        winio::blank_it_when_expired();
+
         // 处理特殊键码
         if key == THE_WINDOW_RESIZED {
             winio::update_screen_size();

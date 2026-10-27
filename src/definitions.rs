@@ -661,6 +661,9 @@ pub struct GlobalState {
     pub statusbar_msg: String,
     /// 状态栏消息是否居中显示（welcome-message、Unbound key 等使用）。
     pub statusbar_centered: bool,
+    /// 状态栏消息还能承受几次按键（对应 C 的 countdown；
+    /// --quickblank 时为 1，否则为 20，0 表示不倒数）。
+    pub statusbar_countdown: i32,
     pub pletion_line: Option<LineRef>,
     pub pletion_x: usize,
     pub completion_list: Option<CompletionRef>,
@@ -783,7 +786,7 @@ impl GlobalState {
             inhelp: false, title: None, refresh_needed: false,
             focusing: true, control_C_was_pressed: false,
             lastmessage: MessageType::Vacuum, statusbar_msg: String::new(),
-            statusbar_centered: false,
+            statusbar_centered: false, statusbar_countdown: 0,
             pletion_line: None,
             pletion_x: 0,
             completion_list: None,
