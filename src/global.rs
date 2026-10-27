@@ -591,6 +591,11 @@ pub fn shortcut_init_rest() {
     add_to_sclist(MINSERTFILE | MEXECUTE, "M-F", 0x266, FunctionId::FlipNewBuffer, 0);
     add_to_sclist(MEXECUTE, "M-\\", 0x25C, FunctionId::FlipPipe, 0);
 
+    /* Linter：执行菜单里的 ^Y 调用，linter 模式里 ^X 退出
+     * （对应 global.c:1312、1579）。 */
+    add_to_sclist(MEXECUTE, "^Y", 25, FunctionId::DoLinter, 0);
+    add_to_sclist(MLINTER, "^X", 24, FunctionId::DoCancel, 0);
+
     // 浏览器菜单
     add_to_sclist(MBROWSER, "^F", 6, FunctionId::DoSearchForward, 0);
     add_to_sclist(MBROWSER, "^B", 2, FunctionId::DoSearchBackward, 0);

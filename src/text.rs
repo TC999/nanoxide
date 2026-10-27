@@ -3126,8 +3126,68 @@ pub fn count_lines_words_and_characters() {
     );
 }
 
-/// 运行当前语法的 linter 并报告结果（对应 `do_linter` 的基础版：
-/// 写临时文件、执行命令、解析输出、跳转到第一个错误）。
+/// 一条 linter 消息（对应 text.c 的 `lintstruct`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LintMessage {
+    pub filename: String,
+    pub line: isize,
+    pub column: isize,
+    pub message: String,
+}
+
+/// 解析 linter 输出中的一行，格式为 `文件名:行[:列]: 消息`
+/// （列也可以写成 `,列`）。无法解析时返回 None（对应 do_linter 的 strtok 逻辑）。
+fn parse_lint_line(line: &str) -> Option<LintMessage> {
+    let separator = line.find(": ")?;
+    let head = &line[..separator];
+    let message = line[separator + 2..].trim().to_string();
+
+    let last_colon = head.rfind(':')?;
+    let tail = &head[last_colon + 1..];
+
+    let (filename, line_no, col_no) = if let Some((line_part, col_part)) = tail.split_once(',') {
+        let line_no: isize = line_part.trim().parse().ok()?;
+        let col_no: isize = col_part.trim().parse().ok()?;
+        (&head[..last_colon], line_no, col_no)
+    } else {
+        let line_no: isize = tail.trim().parse().ok()?;
+        let prefix = &head[..last_colon];
+        match prefix.rfind(':') {
+            Some(previous) => {
+                let middle = &prefix[previous + 1..];
+                match middle.trim().parse::<isize>() {
+                    Ok(prev_no) => (&head[..previous], prev_no, line_no),
+                    Err(_) => (&head[..last_colon], line_no, 1),
+                }
+            }
+            None => (&head[..last_colon], line_no, 1),
+        }
+    };
+
+    if line_no <= 0 {
+        return None;
+    }
+
+    Some(LintMessage {
+        filename: filename.to_string(),
+        line: line_no,
+        column: if col_no <= 0 { 1 } else { col_no },
+        message,
+    })
+}
+
+/// 解析 linter 的全部输出（对应 do_linter 的解析循环）。
+pub fn parse_linter_output(text: &str) -> Vec<LintMessage> {
+    text.lines().filter_map(parse_lint_line).collect()
+}
+
+/// 运行当前语法的 linter，并进入 linter 模式浏览消息
+/// （对应 text.c 的 `do_linter`）。
+///
+/// 与 C 版相同的部分：按 `文件名:行[:列]: 消息` 解析、跳转到每条消息的
+/// 位置、`^Y`/`^V` 切换上一条/下一条、`^X`/Enter 退出。
+/// 简化：linter 在临时副本上运行（不先询问保存），且不处理“消息属于
+/// 未打开文件”的多缓冲区分支。
 pub fn do_linter() {
     if files::in_restricted_mode() {
         return;
@@ -3156,66 +3216,109 @@ pub fn do_linter() {
 
     /* 把 %s 替换为临时文件名，其余交给 shell 执行。 */
     let command = linter.replace("%s", &temp_name);
-    let output = std::process::Command::new("sh").arg("-c").arg(&command).output();
+    #[cfg(windows)]
+    let output = std::process::Command::new("cmd")
+        .args(["/C", &command])
+        .output();
+    #[cfg(not(windows))]
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&command)
+        .output();
 
     let _ = std::fs::remove_file(&temp_name);
 
-    let text = match output {
-        Ok(o) => {
-            let mut t = String::from_utf8_lossy(&o.stdout).to_string();
-            t.push_str(&String::from_utf8_lossy(&o.stderr));
-            t
-        }
+    let output = match output {
+        Ok(output) => output,
         Err(_) => {
             winio::statusline(MessageType::Alert, &crate::t!("linter-failed"));
             return;
         }
     };
 
+    /* C 版认为退出码 >2 是“无法调用 linter”；1/2 通常表示发现了问题。 */
+    if output.status.code().unwrap_or(127) > 2 {
+        winio::statusline(MessageType::Alert, &crate::t!("linter-failed"));
+        return;
+    }
+
+    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+
     if text.trim().is_empty() {
         winio::statusline(MessageType::Info, &crate::t!("linter-ok"));
         return;
     }
 
-    /* 解析输出：统计错误数，尝试提取第一个 "line:col:" 或 "file:line:col:" 并跳转。 */
-    let mut count = 0usize;
-    let mut first_msg = String::new();
-    let mut jump_line: Option<isize> = None;
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.is_empty() {
+    let messages = parse_linter_output(&text);
+    if messages.is_empty() {
+        winio::statusline(
+            MessageType::Remark,
+            &crate::t!("linter-zero_parsable", cmd = linter),
+        );
+        return;
+    }
+
+    /* 进入 linter 模式：逐条显示消息并跳转到对应位置。 */
+    with_global_mut(|g| g.currmenu = MLINTER);
+    winio::bottombars(MLINTER);
+
+    let mut current = 0usize;
+    let mut last_wait = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(10))
+        .unwrap_or_else(std::time::Instant::now);
+
+    loop {
+        let message = &messages[current];
+        crate::search::goto_line_and_column(message.line, message.column, true);
+        winio::edit_refresh();
+        winio::statusline(MessageType::Notice, &message.message);
+        winio::bottombars(MLINTER);
+
+        let key = winio::wgetch();
+        if key == THE_WINDOW_RESIZED {
             continue;
         }
-        count += 1;
-        if first_msg.is_empty() {
-            first_msg = line.to_string();
-        }
-        if jump_line.is_none() {
-            if let Some(idx) = line.find(':') {
-                let before = &line[..idx];
-                if let Some(colon2) = before.rfind(':') {
-                    if let Ok(n) = before[colon2 + 1..].parse::<isize>() {
-                        jump_line = Some(n);
-                    }
-                } else if let Ok(n) = before.parse::<isize>() {
-                    jump_line = Some(n);
+
+        let function = crate::global::find_shortcut(key, MLINTER)
+            .map(|shortcut| shortcut.borrow().func);
+
+        match function {
+            Some(FunctionId::DoCancel) | Some(FunctionId::DoEnter) => {
+                winio::wipe_statusbar();
+                break;
+            }
+            Some(FunctionId::DoPageUp) | Some(FunctionId::DoPrevBlock) => {
+                if current > 0 {
+                    current -= 1;
+                } else if last_wait.elapsed() >= std::time::Duration::from_millis(600) {
+                    winio::statusbar(&crate::t!("linter-at_first"));
+                    winio::beep();
+                    winio::napms(600);
+                    last_wait = std::time::Instant::now();
                 }
             }
+            Some(FunctionId::DoPageDown) | Some(FunctionId::DoNextBlock) => {
+                if current + 1 < messages.len() {
+                    current += 1;
+                } else if last_wait.elapsed() >= std::time::Duration::from_millis(600) {
+                    winio::statusbar(&crate::t!("linter-at_last"));
+                    winio::beep();
+                    winio::napms(600);
+                    last_wait = std::time::Instant::now();
+                }
+            }
+            Some(FunctionId::DoHelp) => {
+                crate::help::do_help();
+                winio::bottombars(MLINTER);
+            }
+            _ => winio::beep(),
         }
     }
 
-    if let Some(n) = jump_line {
-        crate::search::goto_line_and_column(n, 0, true);
-    }
-
-    winio::statusline(
-        MessageType::Info,
-        &crate::t!(
-            "linter-report",
-            count = count.to_string(),
-            first = first_msg
-        ),
-    );
+    with_global_mut(|g| g.currmenu = MMOST);
+    winio::titlebar(None);
+    winio::edit_refresh();
 }
 
 /// 清除所有剪贴板内容（对应 C 版在剪切操作前 `free_lines(cutbuffer);
