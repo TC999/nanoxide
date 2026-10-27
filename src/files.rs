@@ -2418,6 +2418,34 @@ pub fn renumber_from(line: &LineRef) {
 
 // ======================== 缓冲区管理（对应 nano.c） ========================
 
+/// 切换底部栏 ^X 的标签（对应 C 版 install_buffer / close_buffer 对
+/// `exitfunc->tag` 的修改）。C 版的 exitfunc 同时覆盖主菜单与文件浏览器，
+/// 因此这里改这两个菜单里的 DoExit 项；帮助查看器固定为 "Close"（C 的
+/// MHELP 项用的是 close_tag，不参与切换）。
+fn set_exit_label(close: bool) {
+    let tag = if close {
+        crate::t!("key-close")
+    } else {
+        crate::t!("key-exit")
+    };
+    with_global_mut(|g| {
+        let mut func = g.allfuncs.clone();
+        while let Some(f) = func {
+            let (menus, next) = {
+                let r = f.borrow();
+                (r.menus, r.next.clone())
+            };
+            if menus & (MMAIN | MBROWSER) != 0 {
+                let is_exit = { f.borrow().func == FunctionId::DoExit };
+                if is_exit {
+                    f.borrow_mut().tag = tag.clone();
+                }
+            }
+            func = next;
+        }
+    });
+}
+
 /// 创建新缓冲区并把它设为当前（对应 `make_new_buffer`）。
 pub fn make_new_buffer() {
     let new_of = Rc::new(RefCell::new(OpenFileStruct::new()));
@@ -2431,10 +2459,13 @@ pub fn make_new_buffer() {
         of.totsize = 1;
     }
 
-    with_global_mut(|g| {
+    let became_multiple = with_global_mut(|g| {
         let old = g.openfile.clone();
         match old {
-            None => g.openfile = Some(new_of),
+            None => {
+                g.openfile = Some(new_of);
+                false
+            }
             Some(o) => {
                 let next = { let r = o.borrow(); r.next.clone() };
                 let prev = { let r = o.borrow(); r.prev.clone() };
@@ -2449,9 +2480,17 @@ pub fn make_new_buffer() {
                 /* 已有多个缓冲区：标题栏改为显示 [x/n]（对应 C 版
                  * install_buffer 中的 `more_than_one = !inhelp || more_than_one`）。 */
                 g.more_than_one = !g.inhelp || g.more_than_one;
+                true
             }
         }
     });
+
+    /* 多缓冲区时底部栏的 ^X 改为 "Close"（对应 C 版 install_buffer 中的
+     * `exitfunc->tag = close_tag`）。set_exit_label 内部要借用全局状态，
+     * 必须放在上面的可变借用结束之后。 */
+    if became_multiple {
+        set_exit_label(true);
+    }
 }
 
 /// 删除当前缓冲区的锁文件并清空其记录
@@ -2523,6 +2562,21 @@ pub fn close_buffer() {
             g.openfile = prev.or(next);
         }
     });
+
+    /* 只剩一个缓冲区时把底部栏 ^X 的标签改回 "Exit"
+     * （对应 C 版 close_buffer 末尾的 `if (openfile && openfile == openfile->next)`）。 */
+    let single_left = with_global(|g| {
+        g.openfile
+            .as_ref()
+            .map(|of| {
+                let r = of.borrow();
+                r.next.is_none() && r.prev.is_none()
+            })
+            .unwrap_or(false)
+    });
+    if single_left {
+        set_exit_label(false);
+    }
 }
 
 /// 在状态栏显示当前缓冲区的名字与行数（对应 `mention_name_and_linecount`）。
