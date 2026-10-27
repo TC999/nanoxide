@@ -104,9 +104,8 @@ README 写的是 fluent，但项目并未依赖 fluent crate，格式只是类 f
   `-U`（状态栏消息 1 次按键后清除）、`-P`（记录并恢复光标位置）、
   `-u`/`-N`（DOS 行尾的读取/保存转换，见 `tests/file_format.rs`）、
   `-q`（右侧滚动条，见 `tests/indicator_stateflags.rs`）、
-  `-%`（标题栏状态字符 I/M/L/R/S）。
-- ⚠️ `-q` 在软换行下按行数近似滚动块位置（C 按 chunk 精确计算）；
-  `-%` 目前只作用于标题栏，minibar 里的状态字符未接。
+  `-%`（标题栏与 minibar 的状态字符 I/M/L/R/S）。
+- ⚠️ `-q` 在软换行下按行数近似滚动块位置（C 按 chunk 精确计算）。
 - `-!/--magic`：本项目没有 libmagic，因此与**未启用 libmagic 的 nano 9.2**
   一致——命令行 `-!` / `--magic` 与 rc 的 `set magic` 都按未知选项拒绝，
   不再“接受但静默置位”。
@@ -232,7 +231,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ 超长行横向滚动的 `<` / `>` 截断标记
 - ✅ 软换行分块绘制 `update_softwrapped_line`
 - ✅ `draw_scrollbar`（`-q`；软换行下按行数近似）、`show_states_at`
-  （`states_string`，`-%` 的标题栏状态字符）
+  （`states_string`，`-%` 的标题栏与 minibar 状态字符，位置按 C 的
+  `COLS - 11 - padding` / `COLS - 5 - padding` / `COLS - 4 - padding`，
+  `tests/indicator_stateflags.rs`）
 - ✅ `do_credits`（`^X` → "Y" → 无名缓冲区输入 `zzy` 的彩蛋；
   `tests/credits.rs` 校验 52 行文本表与翻译键）：全屏向上滚动字幕，
   任一按键中止；期间临时置位 ZERO/NO_HELP，结束后恢复并重绘。
@@ -240,7 +241,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   虚拟窗口重绘模拟 `wscrl`；`window_init` 的 ncurses 窗口重建省略。
   ⚠️ 动画本身依赖真实终端，仅静态核对与数据表测试
 - ❌ `get_mouseinput`（编辑器点击路径见 `handle_mouse_click`）
-- ⚠️ `-%` 的状态字符尚未显示在 minibar 状态栏（C 版在二者都显示）
+- ⚠️ minibar 尚未显示“刚读/写过文件的行数”与多缓冲区 `[x/n]` 计数
+  （C 版在文件名后显示），`show_states_at` 的条件里相应按 `tallywidth = 0` 计算；
+  行/列位置已按 C 版只在 `CONSTANT_SHOW` 时显示，十六进制码仍未绘制。
 - ⚠️ 输入解析（`parse_kbinput` / `convert_CSI_sequence` 等）由 crossterm 事件替代，不是逐字节解析；原版对异常转义序列的容错行为不保证一致
 - ✅ `waiting_keycodes` 只统计按下/重复事件，并缓存预读事件供 `wgetch` 消费（修复 Windows 上按键释放事件导致提示栏输入迟迟不注入的问题）
 - ✅ `warn_and_briefly_pause`（`-t` 无文件名时的提示）与 `blank_it_when_expired`
@@ -271,8 +274,8 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 2. `execute_by_id` 已审计：主菜单绑定全部可达；未分发的 rc 占位函数会显示
    “Function not implemented”而不是静默吞键。写文件提示的
    DosFormat/BackItUp/Append/Prepend/Discard 循环已移植。
-3. 显示层仍有简化：`do_credits` 的滚动/版本行、`-%` 的 minibar 状态字符、
-   软换行滚动条、多候选补全的编辑区列表（见第三、六节）。
+3. 显示层仍有简化：`do_credits` 的滚动/版本行、minibar 的行数/多缓冲区计数
+   与十六进制码、软换行滚动条、多候选补全的编辑区列表（见第三、六节）。
 4. i18n 只有两种语言，且复数未处理。
 
 ## 七、与上一版文档的主要更正
@@ -311,3 +314,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：`do_credits` 彩蛋已实现（退出时文件名输入 `zzy` 触发，临时置位
   ZERO/NO_HELP、全屏滚动、任一键中止）；`do_writeout` 增加 `exiting`
   参数，退出时忽略标记；新增 `tests/credits.rs`。
+- 本轮：`-%` 的状态字符已显示在 minibar（`COLS - 11 - padding`，位置与
+  C 一致）；minibar 的行/列位置改为只在 `CONSTANT_SHOW` 时显示；新增
+  `minibar_right_positions` 与 `tests/indicator_stateflags.rs` 的位置断言。
