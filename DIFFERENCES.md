@@ -250,8 +250,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ 标题栏左上角的多缓冲区 `[x/n]`：`more_than_one` 在创建第二个缓冲区时
   置位，关闭缓冲区时不重置（与 C 版一致），序号按 `buffer_number` 计算
   （`tests/titlebar_ranking.rs`）。
-- ⚠️ 多缓冲区时底部栏 `^X` 的标签仍是 "Exit"（C 版在 install_buffer 中
-  改为 "Close"，关闭到只剩一个时改回）。
+- ✅ 多缓冲区时底部栏 `^X` 的标签改为 "Close"，关闭到只剩一个缓冲区时
+  改回 "Exit"（对应 C 版 install_buffer / close_buffer 对
+  `exitfunc->tag` 的修改；同时作用于主菜单与文件浏览器，`tests/exit_label.rs`）。
 - ⚠️ 输入解析（`parse_kbinput` / `convert_CSI_sequence` 等）由 crossterm 事件替代，不是逐字节解析；原版对异常转义序列的容错行为不保证一致
 - ✅ `waiting_keycodes` 只统计按下/重复事件，并缓存预读事件供 `wgetch` 消费（修复 Windows 上按键释放事件导致提示栏输入迟迟不注入的问题）
 - ✅ `warn_and_briefly_pause`（`-t` 无文件名时的提示）与 `blank_it_when_expired`
@@ -333,3 +334,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   新增 `tests/minibar_hex.rs`。
 - 本轮：标题栏左上角的多缓冲区 `[x/n]` 已实现（`more_than_one` 置位、
   `buffer_number` 计数、关闭后保持）；新增 `tests/titlebar_ranking.rs`。
+- 本轮：多缓冲区时底部栏 ^X 的标签在 "Exit"/"Close" 间切换
+  （`set_exit_label` 修改主菜单与浏览器的 DoExit 项，关闭到只剩一个时
+  改回）；新增 `tests/exit_label.rs`。
