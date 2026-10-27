@@ -95,19 +95,26 @@ README 写的是 fluent，但项目并未依赖 fluent crate，格式只是类 f
 `-I` 不再是 `insecurebackup`（9.2 没有该命令行选项），而是 `ignorercfiles`；
 `allow_insecure_backup` 只作为 rc 选项保留。
 
-### 已接受但行为仍不完整的选项
+### 已接线与不支持的选项
 
-解析层已接受下列选项，但对应功能尚未接线，按 ⚠️ 看待：
+9.2 的短/长选项现已全部处理：
 
-- `-q/--indicator`（侧边指示条未绘制）、`-%/--stateflags`
-- `-!/--magic`（无 libmagic；rc 的 `set magic` 同样只置位）
+- 已接线并有测试/静态证据：`-D`（粗体）、`-d`（Backspace/Delete 互换）、
+  `-H`（历史记录，含 `have_statedir` 检查）、`-t`（有文件名时退出直接保存）、
+  `-U`（状态栏消息 1 次按键后清除）、`-P`（记录并恢复光标位置）、
+  `-u`/`-N`（DOS 行尾的读取/保存转换，见 `tests/file_format.rs`）、
+  `-q`（右侧滚动条，见 `tests/indicator_stateflags.rs`）、
+  `-%`（标题栏状态字符 I/M/L/R/S）。
+- ⚠️ `-q` 在软换行下按行数近似滚动块位置（C 按 chunk 精确计算）；
+  `-%` 目前只作用于标题栏，minibar 里的状态字符未接。
+- `-!/--magic`：本项目没有 libmagic，因此与**未启用 libmagic 的 nano 9.2**
+  一致——命令行 `-!` / `--magic` 与 rc 的 `set magic` 都按未知选项拒绝，
+  不再“接受但静默置位”。
 
-已接线并有测试/静态证据：`-D`（粗体）、`-d`（Backspace/Delete 互换）、
-`-H`（历史记录，含 `have_statedir` 检查）、`-t`（有文件名时退出直接保存）、
-`-U`（状态栏消息 1 次按键后清除）、`-P`（记录并恢复光标位置）、
-`-u`/`-N`（DOS 行尾的读取/保存转换，见 `tests/file_format.rs`）。
-
-rc 文件方面：9.2 的 69 个 `set` 选项名全部出现在 `rcfile.rs` 里，rc 指令（`set unset bind unbind color icolor syntax header magic comment formatter linter tabgives include extendsyntax`）也都有处理。❓ 但只做了字符串比对，**每个选项是否真正生效未逐一验证**。
+rc 文件方面：9.2 在未启用 libmagic 时的 68 个 `set` 选项名全部出现在
+`rcfile.rs` 里，rc 指令（`set unset bind unbind color icolor syntax header
+magic comment formatter linter tabgives include extendsyntax`）也都有处理。
+❓ 但只做了字符串比对，**每个选项是否真正生效未逐一验证**。
 
 ---
 
@@ -196,8 +203,11 @@ rc 文件方面：9.2 的 69 个 `set` 选项名全部出现在 `rcfile.rs` 里�
 - ✅ `minibar`、`confirm_margin`、`print_view_warning`
 - ✅ 超长行横向滚动的 `<` / `>` 截断标记
 - ✅ 软换行分块绘制 `update_softwrapped_line`
-- ❌ `draw_scrollbar`、`do_credits`、`show_states_at`
+- ✅ `draw_scrollbar`（`-q`；软换行下按行数近似）、`show_states_at`
+  （`states_string`，`-%` 的标题栏状态字符）
+- ❌ `do_credits`
 - ❌ `get_mouseinput`（编辑器点击路径见 `handle_mouse_click`）
+- ⚠️ `-%` 的状态字符尚未显示在 minibar 状态栏（C 版在二者都显示）
 - ⚠️ 输入解析（`parse_kbinput` / `convert_CSI_sequence` 等）由 crossterm 事件替代，不是逐字节解析；原版对异常转义序列的容错行为不保证一致
 - ✅ `waiting_keycodes` 只统计按下/重复事件，并缓存预读事件供 `wgetch` 消费（修复 Windows 上按键释放事件导致提示栏输入迟迟不注入的问题）
 - ✅ `warn_and_briefly_pause`（`-t` 无文件名时的提示）与 `blank_it_when_expired`
@@ -223,10 +233,11 @@ rc 文件方面：9.2 的 69 个 `set` 选项名全部出现在 `rcfile.rs` 里�
 
 nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当前最需要处理的是：
 
-1. 部分已接受的选项仍只是置位（`-q` `-%` `-!`），见第三节。
+1. 命令行选项已全部处理：`-q`/`-%` 已接线（软换行滚动块与 minibar 状态字符
+   为简化/未接，见第三节），`-!` 因无 libmagic 被明确拒绝。
 2. `execute_by_id` 的 `_ => {}` 兜底仍在，尚未逐个审计全部 `FunctionId`；F1–F12
    已按 9.2 的 `shortcut_init` 对齐。
-3. 操作目录限制（`outside_of_confinement`）、linter、目录/滚动条等显示功能仍缺失。
+3. 操作目录限制（`outside_of_confinement`）、linter、do_credits 等仍缺失。
 4. i18n 只有两种语言，且复数未处理。
 
 ## 七、与上一版文档的主要更正
@@ -244,3 +255,5 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   `-P` 的位置寄存器解析兼容 Windows 路径。
 - 再后续：`-u`/`-N` 已接线（CRLF 检测、保存回写、NO_CONVERT 保留 `\r`），
   读取/插入/stdin 共用同一套分行逻辑；新增 `tests/file_format.rs`。
+- 本轮：`-q`（draw_scrollbar）与 `-%`（标题栏 I/M/L/R/S）已接线；
+  无 libmagic 时 `-!` / `--magic` / rc `set magic` 改为按未知选项拒绝。
