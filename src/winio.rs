@@ -2669,7 +2669,9 @@ fn execute_by_id(func: FunctionId) -> bool {
         FunctionId::DoFindPrevious => search::do_findprevious(),
         FunctionId::DoReplace => search::do_replace(),
         FunctionId::DoGoToLine => search::do_gotolinecolumn(),
-        FunctionId::DoWriteOut => files::do_writeout(),
+        FunctionId::DoWriteOut => {
+            files::do_writeout();
+        }
         FunctionId::DoInsertFile => files::do_insertfile(),
         FunctionId::DoExecute => files::do_execute(),
         FunctionId::DoSpell => text::do_spell(),

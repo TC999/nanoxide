@@ -705,13 +705,19 @@ fn lines_of(openfile: &OpenFileRef) -> Vec<String> {
 /// 将缓冲区写入给定文件（对应 files.c 的 `write_file` 核心）。
 /// 成功返回写入字节数；失败返回 -1。
 fn save_to(answer: &str) -> i32 {
+    save_to_with_method(answer, WritingType::Overwrite)
+}
+
+/// 按 C 的 WritingType 写入缓冲区：Overwrite / Append / Prepend
+/// （对应 write_file 的 method 参数）。公开供保存流程与测试使用。
+pub fn save_to_with_method(answer: &str, method: WritingType) -> i32 {
     let lines = with_global(|g| {
         g.openfile
             .as_ref()
             .map(lines_of)
             .unwrap_or_default()
     });
-    finish_save(answer, &lines, true)
+    finish_save(answer, &lines, true, method)
 }
 
 /// 将给定行集写出到文件（对应 files.c `write_file` 的行写出部分）：
@@ -719,7 +725,14 @@ fn save_to(answer: &str) -> i32 {
 /// 修改标记与标题栏 → 状态消息。成功返回写入字节数；失败返回 -1（状态栏已提示）。
 /// `annotate` 对应 C 版 `write_file` 的 annotate 参数：整缓冲区常规保存为 TRUE
 /// （收尾管理 buffer 元数据），区域写入 / 紧急保存为 FALSE（不触碰 buffer）。
-fn finish_save(answer: &str, lines: &[String], annotate: bool) -> i32 {
+/// `method` 对应 Overwrite / Append / Prepend：后两者在写入前读取原内容，
+/// 分别拼成「原内容+缓冲区」或「缓冲区+原内容」（C 版用 O_APPEND / 临时文件）。
+fn finish_save(
+    answer: &str,
+    lines: &[String],
+    annotate: bool,
+    method: WritingType,
+) -> i32 {
     if lines.is_empty() {
         return -1;
     }
@@ -762,7 +775,21 @@ fn finish_save(answer: &str, lines: &[String], annotate: bool) -> i32 {
         }
     }
 
-    match fs::write(answer, &content) {
+    /* 按 method 组合最终内容：Append = 原内容 + 缓冲区，
+     * Prepend = 缓冲区 + 原内容（C 版分别用 O_APPEND 与临时文件实现）。 */
+    let mut output = content.into_bytes();
+    if method != WritingType::Overwrite {
+        let existing = fs::read(answer).unwrap_or_default();
+        if method == WritingType::Append {
+            let mut merged = existing;
+            merged.extend_from_slice(&output);
+            output = merged;
+        } else {
+            output.extend_from_slice(&existing);
+        }
+    }
+
+    match fs::write(answer, &output) {
         Ok(_) => {
             /* 保存成功。对应 C 版 write_file 的收尾：仅当 annotate（常规整
              * 缓冲区保存）时更新文件名/锁/修改标记并刷新标题栏；区域写入与
@@ -807,7 +834,7 @@ fn finish_save(answer: &str, lines: &[String], annotate: bool) -> i32 {
                 &format!("[ {} ]", crate::t!("files-wrote_lines", count = linecount.to_string()))
             };
             winio::statusline_centered(MessageType::Remark, &msg);
-            content.len() as i32
+            output.len() as i32
         }
         Err(e) => {
             winio::statusline(MessageType::Ahem, &crate::t!("files-error_writing", filename = answer, err = e.to_string()));
@@ -820,6 +847,11 @@ fn finish_save(answer: &str, lines: &[String], annotate: bool) -> i32 {
 /// 提示与写入方法与整文件保存共用 `finish_save`（覆盖写）。区域为空
 /// （无标记或零字符）时不写文件并返回 -1。
 pub fn write_region_to_file(answer: &str) -> i32 {
+    write_region_to_file_with_method(answer, WritingType::Overwrite)
+}
+
+/// 按指定写入方式（覆盖/追加/前置）写当前标记区域。
+pub fn write_region_to_file_with_method(answer: &str, method: WritingType) -> i32 {
     let region = with_global(|g| {
         let of = g.openfile.as_ref()?.borrow();
         let mark = of.mark.clone()?;
@@ -871,7 +903,7 @@ pub fn write_region_to_file(answer: &str) -> i32 {
         }
     }
 
-    finish_save(answer, &lines, false)
+    finish_save(answer, &lines, false, method)
 }
 
 /// 将缓冲区写入文件（无提示直接保存；对应 files.c `write_file`，供紧急保存）。
@@ -893,7 +925,11 @@ pub fn write_it_out(_finalize: bool, _mark_only: bool) -> i32 {
 /// 运行时不带文件名参数则提示处为空，直接输入新文件名即可。
 /// 当标记开启且非受限模式时，改为写入选中的区域（"Write Selection to File"，
 /// 对应 C 版 write_it_out 的 mark 分支）。
-pub fn do_writeout() {
+///
+/// 提示期间支持 M-D（DOS 格式）、M-B（备份）、M-A/M-P（追加/前置）、
+/// ^Q（放弃写入）与 ^T（浏览文件），对应 C 版 write_it_out 的循环。
+/// 返回写入字节数；-1 失败；2 表示用户放弃。
+pub fn do_writeout() -> i32 {
     let (filename, mark_on) = with_global(|g| {
         let filename = g
             .openfile
@@ -911,36 +947,129 @@ pub fn do_writeout() {
     /* 受限模式下不提供区域写入（会允许把选区内内容写往命令行未指定的文件，
      * 对应 C 版 !ISSET(RESTRICTED) 条件）。 */
     let selection = mark_on && !in_restricted_mode();
-    let msg = if selection {
-        crate::t!("files-write_selection_to_file")
+    let mut given = if selection {
+        String::new()
     } else {
-        crate::t!("files-write_to_file")
+        filename.clone()
     };
+    let mut method = WritingType::Overwrite;
 
-    /* 对应 C：do_prompt(MWRITEFILE, given, NULL, edit_refresh, msg)。
-     * prompt 栏显示 "<msg>: <回答>"，可编辑；Enter 保存，Esc 取消。 */
-    let response = crate::prompt::do_prompt(
-        MWRITEFILE,
-        &filename,
-        None,
-        Some(winio::edit_refresh),
-        &msg,
-    );
+    loop {
+        /* 提示文本按 method 与格式/备份状态组合（对应 C 的 msg + formatstr +
+         * backupstr）。 */
+        let mut msg = if selection {
+            match method {
+                WritingType::Append => crate::t!("files-append_selection"),
+                WritingType::Prepend => crate::t!("files-prepend_selection"),
+                _ => crate::t!("files-write_selection_to_file"),
+            }
+        } else {
+            match method {
+                WritingType::Append => crate::t!("files-append_to_file"),
+                WritingType::Prepend => crate::t!("files-prepend_to_file"),
+                _ => crate::t!("files-write_to_file"),
+            }
+        };
+        if with_global(|g| {
+            g.openfile
+                .as_ref()
+                .map(|of| of.borrow().fmt == FormatType::DosFile)
+                .unwrap_or(false)
+        }) {
+            msg.push_str(&crate::t!("files-dos_format_marker"));
+        }
+        if ISSET(MAKE_BACKUP) {
+            msg.push_str(&crate::t!("files-backup_marker"));
+        }
 
-    if response < 0 {
-        winio::statusbar(&crate::t!("files-cancelled"));
-        return;
-    }
+        let response = crate::prompt::do_prompt(
+            MWRITEFILE,
+            &given,
+            None,
+            Some(winio::edit_refresh),
+            &msg,
+        );
 
-    let answer = crate::prompt::get_answer();
-    if answer.is_empty() {
-        return;
-    }
+        if response < 0 {
+            winio::statusbar(&crate::t!("files-cancelled"));
+            return 0;
+        }
 
-    if selection {
-        write_region_to_file(&answer);
-    } else {
-        save_to(&answer);
+        /* 非 Enter/取消的退出按键：C 版用 func_from_key(response) 取函数。 */
+        let function = if response > 0 {
+            crate::global::find_shortcut(response, MWRITEFILE)
+                .map(|shortcut| shortcut.borrow().func)
+        } else {
+            None
+        };
+        given = crate::prompt::get_answer();
+
+        match function {
+            Some(FunctionId::DosFormat) if !in_restricted_mode() => {
+                with_global_mut(|g| {
+                    if let Some(of) = &g.openfile {
+                        let mut of_ref = of.borrow_mut();
+                        of_ref.fmt = if of_ref.fmt == FormatType::DosFile {
+                            FormatType::NixFile
+                        } else {
+                            FormatType::DosFile
+                        };
+                    }
+                });
+                continue;
+            }
+            Some(FunctionId::BackItUp) if !in_restricted_mode() => {
+                TOGGLE(MAKE_BACKUP);
+                continue;
+            }
+            Some(FunctionId::AppendIt) if !in_restricted_mode() => {
+                method = if method == WritingType::Append {
+                    WritingType::Overwrite
+                } else {
+                    WritingType::Append
+                };
+                if given == filename {
+                    given.clear();
+                    crate::prompt::set_answer("");
+                }
+                continue;
+            }
+            Some(FunctionId::PrependIt) if !in_restricted_mode() => {
+                method = if method == WritingType::Prepend {
+                    WritingType::Overwrite
+                } else {
+                    WritingType::Prepend
+                };
+                if given == filename {
+                    given.clear();
+                    crate::prompt::set_answer("");
+                }
+                continue;
+            }
+            Some(FunctionId::ToFiles) if !in_restricted_mode() => {
+                if let Some(chosen) = crate::browser::browse_in(&given) {
+                    given = chosen.clone();
+                    crate::prompt::set_answer(&chosen);
+                }
+                continue;
+            }
+            Some(FunctionId::DiscardBuffer) => {
+                with_global_mut(|g| g.final_status = 2);
+                return 2;
+            }
+            Some(FunctionId::DoHelp) => continue,
+            _ => {}
+        }
+
+        if given.is_empty() {
+            return 0;
+        }
+
+        return if selection {
+            write_region_to_file_with_method(&given, method)
+        } else {
+            save_to_with_method(&given, method)
+        };
     }
 }
 
@@ -2039,7 +2168,7 @@ fn emergency_save(openfile: &OpenFileRef) {
         /* annotate=FALSE：紧急保存不改写缓冲区文件名、不清除修改标记
          * （对应 C 版 write_file(targetname, NULL, SPECIAL, NONOTES)）。 */
         let lines = lines_of(openfile);
-        if finish_save(&targetname, &lines, false) >= 0 {
+        if finish_save(&targetname, &lines, false, WritingType::Overwrite) >= 0 {
             eprintln!("\n{}", crate::t!("files-buffer_written_to", name = targetname));
         }
     }

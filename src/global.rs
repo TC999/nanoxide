@@ -578,6 +578,14 @@ pub fn shortcut_init_rest() {
     add_to_sclist(mmi, "Del", KEY_DC, FunctionId::DoDelete, 0);
     add_to_sclist(mmi, "^I", 9, FunctionId::DoTab, 0);
 
+    /* 写文件提示（对应 global.c:1542-1550）：格式/备份/追加/前置/放弃。 */
+    add_to_sclist(MWRITEFILE, "^Q", 17, FunctionId::DiscardBuffer, 0);
+    add_to_sclist(MWRITEFILE, "M-D", 0x264, FunctionId::DosFormat, 0);
+    add_to_sclist(MWRITEFILE, "M-B", 0x262, FunctionId::BackItUp, 0);
+    add_to_sclist(MWRITEFILE, "M-A", 0x261, FunctionId::AppendIt, 0);
+    add_to_sclist(MWRITEFILE, "M-P", 0x270, FunctionId::PrependIt, 0);
+    add_to_sclist(MWRITEFILE, "^T", 20, FunctionId::ToFiles, 0);
+
     // 浏览器菜单
     add_to_sclist(MBROWSER, "^F", 6, FunctionId::DoSearchForward, 0);
     add_to_sclist(MBROWSER, "^B", 2, FunctionId::DoSearchBackward, 0);

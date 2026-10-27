@@ -97,8 +97,8 @@ pub fn do_exit() {
             let close = if has_filename {
                 files::write_it_out(true, true) > 0
             } else {
-                files::do_writeout();
-                !files::is_modified()
+                /* do_writeout 返回写入字节数；2 表示用户放弃写入（不关闭）。 */
+                files::do_writeout() > 0
             };
             if close {
                 if ISSET(POSITIONLOG) {
