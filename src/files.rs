@@ -1756,6 +1756,11 @@ pub fn delete_all_lockfiles() {
 
 /// 关闭当前缓冲区并回到前一个（对应 `close_buffer`）。
 pub fn close_buffer() {
+    /* -P/--positionlog：关闭前记录当前缓冲区的位置（对应 C 版
+     * close_and_go 中的 update_positions_register）。须在摘除缓冲区之前。 */
+    if ISSET(POSITIONLOG) {
+        crate::history::update_positions_register();
+    }
     with_global_mut(|g| {
         let of = g.openfile.clone();
         if let Some(cur) = of {

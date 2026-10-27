@@ -157,14 +157,20 @@ fn main() {
     //      （对应 C 版 main 中 do_rcfiles 之后的 mouse_init()）。
     winio::mouse_init();
 
-    // 8. 加载历史记录（对应 C 版 main：只有 HISTORYLOG 置位才加载；
-    //    状态目录不可用时取消历史记录，同 C 的 have_statedir 分支）。
+    // 8. 加载历史记录（对应 C 版 main：HISTORYLOG / POSITIONLOG 分别控制；
+    //    状态目录不可用时两者都取消，同 C 的 have_statedir 分支）。
     history::history_init();
-    if ISSET(HISTORYLOG) {
+    if ISSET(HISTORYLOG) || ISSET(POSITIONLOG) {
         if history::have_statedir() {
-            history::load_history();
+            if ISSET(HISTORYLOG) {
+                history::load_history();
+            }
+            if ISSET(POSITIONLOG) {
+                history::load_positions_register();
+            }
         } else {
             UNSET(HISTORYLOG);
+            UNSET(POSITIONLOG);
         }
     }
 
@@ -212,6 +218,13 @@ fn main() {
                 // open_buffer 返回 FALSE 后 main 的 continue）。
                 continue;
             }
+        }
+
+        /* -P/--positionlog：恢复上次的光标位置；命令行给出的 +LINE 随后
+         * 覆盖它（对应 C 版 main 在 open_buffer 之后、givenline 之前调用
+         * restore_cursor_position_if_any）。 */
+        if ISSET(POSITIONLOG) {
+            history::restore_cursor_position_if_any();
         }
 
         /* 命令行给出的位置：跳到对应行/列（对应 C 的 goto_line_and_column）；

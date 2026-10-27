@@ -633,12 +633,21 @@ pub fn load_positions_register() {
             break;
         }
 
-        /* stanza 是 '/' 的位置（绝对路径起始）。 */
-        let Some(sp) = phrase.iter().position(|&b| b == b'/') else {
+        /* 锚点串是行号与空格的序列；其后的字节是绝对路径。
+         * C 版用首个 '/' 定位路径起点，但 Windows 的绝对路径是
+         * `C:\...` / `\\server\...`，没有前导 '/'，因此改为按
+         * “数字与空格”扫描锚点，跨平台一致。 */
+        let mut anchor_end = 0;
+        while anchor_end < phrase.len()
+            && (phrase[anchor_end].is_ascii_digit() || phrase[anchor_end] == b' ')
+        {
+            anchor_end += 1;
+        }
+        if anchor_end >= phrase.len() {
             continue;
-        };
-        let mut stanza = phrase[sp..].to_vec();
-        let length = length - sp;
+        }
+        let mut stanza = phrase[anchor_end..].to_vec();
+        let length = length - anchor_end;
 
         /* 将 NUL 解码为内嵌换行。 */
         crate::utils::recode_NUL_to_LF(&mut stanza, length);
@@ -660,11 +669,11 @@ pub fn load_positions_register() {
         let linenumber: isize = line_str.trim().parse().unwrap_or(0);
         let columnnumber: isize = col_str.trim().parse().unwrap_or(0);
 
-        /* '/' 之前的部分（若有）是锚点行号串。 */
-        let anchors = if sp == 0 {
+        /* 锚点部分（若有）是锚点行号串。 */
+        let anchors = if anchor_end == 0 {
             None
         } else {
-            Some(String::from_utf8_lossy(&phrase[..sp]).into_owned())
+            Some(String::from_utf8_lossy(&phrase[..anchor_end]).into_owned())
         };
 
         /* 创建新的位置记录并加入列表。 */
