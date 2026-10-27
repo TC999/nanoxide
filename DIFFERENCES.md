@@ -202,7 +202,10 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ `do_mark` / `do_tab` / `do_indent` / `do_unindent` / `do_comment` / `do_undo` / `do_redo` / `do_enter` / `do_wrap` / `do_exit` / `inject`
 - ✅ `do_justify`（`^J`）、`do_verbatim_input`（`M-V`）、`do_word_completion`（`^]`）、`do_spell`、`do_formatter`、`zap_all_cutbuffer`
 - ✅ `do_full_justify`（`M-J`，见第四节）
-- ❌ `do_linter`：键位在，函数为空
+- ✅ `do_linter`：执行菜单 `^Y` 调用；解析 `文件名:行[:列]: 消息`，
+  `^Y`/`^V` 切换消息、`^X`/Enter 退出（`tests/linter.rs`）。
+  简化：linter 在临时副本上运行（不先询问保存），未处理“消息属于
+  未打开文件”的多缓冲区分支。⚠️
 - ❓ `suck_up_input_and_paste_it`、`copy_character`、`replace_buffer` 在 Rust 中找不到同名函数，可能已改名或合并，未核对语义
 
 ### 4. 搜索（`search.rs`）
@@ -255,7 +258,7 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 2. `execute_by_id` 已审计：主菜单绑定全部可达；未分发的 rc 占位函数会显示
    “Function not implemented”而不是静默吞键。写文件提示的
    DosFormat/BackItUp/Append/Prepend/Discard 循环已移植。
-3. linter、do_credits 等仍缺失。
+3. do_credits 等仍缺失。
 4. i18n 只有两种语言，且复数未处理。
 
 ## 七、与上一版文档的主要更正
@@ -284,3 +287,5 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   恢复、管道符号），新增 `tests/insert_flip.rs`。
 - 再后续：`--operatingdir` 已接线（chdir、打开/保存/插入/浏览器越界检查，
   Windows 路径归一化），新增 `tests/operating_dir.rs`。
+- 本轮：`do_linter` 已接线（执行菜单 ^Y；解析 file:line[:col]: msg，
+  ^Y/^V 切换、^X/Enter 退出；临时副本运行），新增 `tests/linter.rs`。
