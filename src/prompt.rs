@@ -16,6 +16,7 @@
 
 use crate::definitions::*;
 use crate::chars;
+use crate::files;
 use crate::history;
 use crate::utils;
 use crate::winio;
@@ -465,7 +466,11 @@ pub fn acquire_an_answer(
                 /* 允许文件名补全，但受限模式除外。 */
                 let currmenu = with_global(|g| g.currmenu);
                 if (currmenu & (MINSERTFILE | MWRITEFILE | MGOTODIR)) != 0 && !ISSET(RESTRICTED) {
-                    input_tab(refresh_func, listed);
+                    let mut answer = get_answer();
+                    let mut place = get_typing_x();
+                    files::input_tab(&mut answer, &mut place, refresh_func, listed);
+                    set_answer(&answer);
+                    set_typing_x(place);
                 }
             }
         } else if function == Some(FunctionId::GetOlderItem) && history_list.is_some() {
@@ -743,10 +748,6 @@ pub fn do_prompt(
 // ======================== 文件补全（对应 files.c 的 input_tab） ========================
 
 /// 文件名补全（对应 `input_tab`；当前为简化实现，browser 完善后扩展）。
-fn input_tab(_refresh_func: Option<fn()>, _listed: &mut bool) {
-    // 简化：不执行文件补全
-}
-
 // ======================== Yes/No 询问（对应 ask_user） ========================
 
 const UNDECIDED: i32 = -2;

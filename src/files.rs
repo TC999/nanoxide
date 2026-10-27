@@ -1862,6 +1862,222 @@ pub fn diralphasort(a: &str, b: &str) -> std::cmp::Ordering {
     }
 }
 
+/// 补全时使用的基准目录：浏览器当前目录，否则进程工作目录。
+/// 保证以路径分隔符结尾（对应 C 的 `present_path`，默认 "./"）。
+fn completion_base_dir() -> String {
+    let base = with_global(|g| g.present_path.clone())
+        .filter(|path| !path.is_empty())
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| ".".to_string())
+        });
+    if base.ends_with('/') || base.ends_with('\\') {
+        base
+    } else {
+        format!("{}/", base)
+    }
+}
+
+/// 尝试按 `~用户名` 补全（对应 files.c 的 `username_completion`）。
+/// 非 Unix 平台没有 passwd 数据库，返回 None。
+#[cfg(unix)]
+pub fn username_completion(morsel: &str, length: usize) -> Option<Vec<String>> {
+    use std::ffi::CStr;
+
+    let end = length.min(morsel.len());
+    if end <= 1 {
+        return None;
+    }
+    let fragment = &morsel[1..end];
+    let mut matches = Vec::new();
+
+    // 安全性：setpwent/getpwent/endpwent 是 libc 的 passwd 遍历接口；
+    // 返回的指针在 endpwent 前有效，这里立即复制字符串。
+    unsafe {
+        libc::setpwent();
+        loop {
+            let entry = libc::getpwent();
+            if entry.is_null() {
+                break;
+            }
+            let name = CStr::from_ptr((*entry).pw_name)
+                .to_string_lossy()
+                .into_owned();
+            if !name.starts_with(fragment) {
+                continue;
+            }
+            let home_ptr = (*entry).pw_dir;
+            if home_ptr.is_null() {
+                continue;
+            }
+            let home = CStr::from_ptr(home_ptr).to_string_lossy().into_owned();
+            /* 操作目录之外的用户主目录不参与补全（C 的 tabbing 语义）。 */
+            if outside_of_confinement(&home, true) {
+                continue;
+            }
+            matches.push(format!("~{}", name));
+        }
+        libc::endpwent();
+    }
+
+    if matches.is_empty() {
+        None
+    } else {
+        Some(matches)
+    }
+}
+
+#[cfg(not(unix))]
+pub fn username_completion(_morsel: &str, _length: usize) -> Option<Vec<String>> {
+    None
+}
+
+/// 尝试把片段补全为目录中的文件名（对应 files.c 的 `filename_completion`）。
+/// 返回的是文件名（不含目录部分）；无法读取目录时返回 None。
+pub fn filename_completion(morsel: &str) -> Option<Vec<String>> {
+    let separator = morsel.rfind(['/', '\\']);
+    let (dirname, filename) = match separator {
+        Some(index) => {
+            let dirpart = &morsel[..=index];
+            let dirname = if Path::new(dirpart).is_absolute() {
+                dirpart.to_string()
+            } else {
+                format!("{}{}", completion_base_dir(), dirpart)
+            };
+            (dirname, &morsel[index + 1..])
+        }
+        None => (completion_base_dir(), morsel),
+    };
+
+    let dirname = expand_leading_tilde(&dirname);
+    let entries = fs::read_dir(&dirname).ok()?;
+
+    let mut matches = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == "." || name == ".." || !name.starts_with(filename) {
+            continue;
+        }
+
+        let fullname = format!("{}{}", dirname, name);
+        /* 操作目录限制（tabbing 模式：不完整路径可长成操作目录）。 */
+        if outside_of_confinement(&fullname, true) {
+            continue;
+        }
+        /* 在“转到目录”提示里只补全目录。 */
+        if with_global(|g| g.currmenu) == MGOTODIR && !is_dir(&fullname) {
+            continue;
+        }
+        matches.push(name);
+    }
+
+    if matches.is_empty() {
+        None
+    } else {
+        Some(matches)
+    }
+}
+
+/// 求一组补全候选的最长公共前缀（按字符边界）。
+fn common_prefix(matches: &[String]) -> String {
+    let first: Vec<char> = matches[0].chars().collect();
+    let mut length = first.len();
+
+    for item in &matches[1..] {
+        let other: Vec<char> = item.chars().collect();
+        length = length.min(other.len());
+        let mut index = 0;
+        while index < length && first[index] == other[index] {
+            index += 1;
+        }
+        length = index;
+        if length == 0 {
+            break;
+        }
+    }
+
+    first[..length].iter().collect()
+}
+
+/// 在状态栏提示里执行文件名补全（对应 files.c 的 `input_tab`）。
+/// `morsel` 是当前回答，`place` 是光标位置；命中多个候选时在状态栏列出。
+pub fn input_tab(
+    morsel: &mut String,
+    place: &mut usize,
+    refresh_func: Option<fn()>,
+    listed: &mut bool,
+) {
+    /* 光标不在片段末尾时不补全。 */
+    if *place != morsel.len() {
+        winio::beep();
+        return;
+    }
+
+    /* 以 ~ 开头且不含斜杠时先尝试用户名补全。 */
+    let mut matches = if morsel.starts_with('~') && !morsel.contains(['/', '\\']) {
+        username_completion(morsel, *place)
+    } else {
+        None
+    };
+
+    if matches.is_none() {
+        matches = filename_completion(morsel);
+    }
+
+    let Some(mut matches) = matches else {
+        winio::beep();
+        return;
+    };
+
+    /* 之前列出过候选，但这次只剩一个：恢复编辑窗口。 */
+    if *listed && matches.len() < 2 {
+        if let Some(refresh) = refresh_func {
+            refresh();
+        }
+        *listed = false;
+    }
+
+    let common = common_prefix(&matches);
+    let path_length = morsel
+        .rfind(['/', '\\'])
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    let mut shared = format!("{}{}", &morsel[..path_length], common);
+
+    /* 唯一候选且是目录时补上斜杠。 */
+    let glued = format!("{}{}", completion_base_dir(), shared);
+    if matches.len() == 1
+        && (is_dir(&shared) || is_dir(&glued))
+        && !shared.ends_with('/')
+        && !shared.ends_with('\\')
+    {
+        shared.push(std::path::MAIN_SEPARATOR);
+    }
+
+    if shared.len() != *place {
+        *morsel = shared;
+        *place = morsel.len();
+    } else if matches.len() == 1 {
+        winio::beep();
+    }
+
+    /* 多个候选：排序并在状态栏列出（C 在编辑窗口分栏显示；
+     * 这里用状态栏简化，避免覆盖编辑区）。 */
+    if matches.len() > 1 {
+        matches.sort_by(|a, b| {
+            let folded_a = a.to_lowercase();
+            let folded_b = b.to_lowercase();
+            folded_a.cmp(&folded_b).then_with(|| a.cmp(b))
+        });
+        if !*listed {
+            winio::beep();
+        }
+        winio::statusline(MessageType::Info, &matches.join("  "));
+        *listed = true;
+    }
+}
+
 /// 将指定备份目录转换为绝对路径，并校验其可用（对应 `init_backup_dir`）。
 /// 若取不到绝对路径（目录不存在或不可访问），或不是目录，则致命退出
 /// （对应 C 版 die(_("Invalid backup directory: %s\n"), backup_dir)）。
