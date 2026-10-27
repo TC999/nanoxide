@@ -336,6 +336,39 @@ pub fn shortcut_init() {
     add_to_sclist(MMAIN, "M-J", 0x26A, FunctionId::DoFullJustify, 0);
     add_to_sclist(MMAIN, "M-<", ALT_LESS, FunctionId::DoScrollLeft, 0);
     add_to_sclist(MMAIN, "M->", ALT_GREATER, FunctionId::DoScrollRight, 0);
+    /* 功能键（对应 global.c:1574-1595）。MHELP 的 F1 先注册，
+     * 保证帮助查看器里 F1 是“退出”而不是“帮助”。 */
+    add_to_sclist(MHELP, "F1", KEY_F0 + 1, FunctionId::DoExit, 0);
+    add_to_sclist(MMOST & !MFINDINHELP, "F1", KEY_F0 + 1, FunctionId::DoHelp, 0);
+    add_to_sclist(MMAIN | MBROWSER | MHELP, "F2", KEY_F0 + 2, FunctionId::DoExit, 0);
+    add_to_sclist(MMAIN, "F3", KEY_F0 + 3, FunctionId::DoWriteOut, 0);
+    add_to_sclist(MMAIN, "F4", KEY_F0 + 4, FunctionId::DoJustify, 0);
+    add_to_sclist(MMAIN, "F5", KEY_F0 + 5, FunctionId::DoInsertFile, 0);
+    add_to_sclist(
+        MMAIN | MBROWSER | MHELP,
+        "F6",
+        KEY_F0 + 6,
+        FunctionId::DoSearchForward,
+        0,
+    );
+    add_to_sclist(
+        MMAIN | MBROWSER | MHELP | MLINTER,
+        "F7",
+        KEY_F0 + 7,
+        FunctionId::DoPageUp,
+        0,
+    );
+    add_to_sclist(
+        MMAIN | MBROWSER | MHELP | MLINTER,
+        "F8",
+        KEY_F0 + 8,
+        FunctionId::DoPageDown,
+        0,
+    );
+    add_to_sclist(MMOST, "F9", KEY_F0 + 9, FunctionId::DoCut, 0);
+    add_to_sclist(MMOST, "F10", KEY_F0 + 10, FunctionId::DoPaste, 0);
+    add_to_sclist(MMAIN, "F11", KEY_F0 + 11, FunctionId::DoReportLocation, 0);
+    add_to_sclist(MMAIN, "F12", KEY_F0 + 12, FunctionId::DoSpell, 0);
     // 方向键（仅用于输入匹配，不显示在底部栏）
     add_to_sclist(MMAIN, "Left", KEY_LEFT, FunctionId::DoLeft, 0);
     add_to_sclist(MMAIN, "Right", KEY_RIGHT, FunctionId::DoRight, 0);

@@ -2749,20 +2749,6 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     if key == 25 { movement::do_page_up(); edit_refresh(); return true; }       // Ctrl+Y
     if key == 26 { text::do_undo(); edit_refresh(); return true; }              // Ctrl+Z (Undo)
 
-    // 功能键
-    if key == KEY_F0 + 1 { help::do_help(); return true; }                      // F1
-    if key == KEY_F0 + 2 { text::do_exit(); return true; }                      // F2
-    if key == KEY_F0 + 3 { files::do_writeout(); return true; }                 // F3
-    if key == KEY_F0 + 4 { search::do_search_forward(); return true; }          // F4
-    if key == KEY_F0 + 5 { text::do_refresh(); return true; }                   // F5
-    if key == KEY_F0 + 6 { text::do_spell(); return true; }                     // F6
-    if key == KEY_F0 + 7 { return true; }                                       // F7
-    if key == KEY_F0 + 8 { return true; }                                       // F8
-    if key == KEY_F0 + 9 { cut::cut_text(); edit_refresh(); return true; }      // F9
-    if key == KEY_F0 + 10 { cut::paste_text(); edit_refresh(); return true; }   // F10
-    if key == KEY_F0 + 11 { return true; }                                      // F11
-    if key == KEY_F0 + 12 { return true; }                                      // F12
-
     // 方向键
     if key == KEY_LEFT { movement::do_left(); edit_refresh(); return true; }
     if key == KEY_RIGHT { movement::do_right(); edit_refresh(); return true; }

@@ -149,3 +149,69 @@ fn set_current_line(text: &str) {
         of.placewewant = 0;
     });
 }
+
+/// F1–F12 的绑定应与 global.c:1574-1595 一致。
+#[test]
+fn function_keys_follow_nano_92() {
+    setup();
+    let f = |n: i32| KEY_F0 + n;
+
+    assert_eq!(shortcut_func(f(1)), Some(FunctionId::DoHelp), "F1 = help");
+    assert_eq!(shortcut_func(f(2)), Some(FunctionId::DoExit), "F2 = exit");
+    assert_eq!(
+        shortcut_func(f(3)),
+        Some(FunctionId::DoWriteOut),
+        "F3 = write out"
+    );
+    assert_eq!(
+        shortcut_func(f(4)),
+        Some(FunctionId::DoJustify),
+        "F4 = justify（不是搜索）"
+    );
+    assert_eq!(
+        shortcut_func(f(5)),
+        Some(FunctionId::DoInsertFile),
+        "F5 = read file"
+    );
+    assert_eq!(
+        shortcut_func(f(6)),
+        Some(FunctionId::DoSearchForward),
+        "F6 = where is"
+    );
+    assert_eq!(
+        shortcut_func(f(7)),
+        Some(FunctionId::DoPageUp),
+        "F7 = page up"
+    );
+    assert_eq!(
+        shortcut_func(f(8)),
+        Some(FunctionId::DoPageDown),
+        "F8 = page down"
+    );
+    assert_eq!(shortcut_func(f(9)), Some(FunctionId::DoCut), "F9 = cut");
+    assert_eq!(shortcut_func(f(10)), Some(FunctionId::DoPaste), "F10 = paste");
+    assert_eq!(
+        shortcut_func(f(11)),
+        Some(FunctionId::DoReportLocation),
+        "F11 = report location"
+    );
+    assert_eq!(shortcut_func(f(12)), Some(FunctionId::DoSpell), "F12 = spell");
+
+    /* 帮助查看器里 F1 是“退出”（global.c:1574），而不是再次打开帮助。 */
+    let help_f1 = nanoxide::global::find_shortcut(f(1), MHELP)
+        .map(|sc| sc.borrow().func);
+    assert_eq!(help_f1, Some(FunctionId::DoExit), "帮助页 F1 = 退出");
+}
+
+/// F9/F10 不但在表里，还能真正执行剪切与粘贴。
+#[test]
+fn f9_and_f10_reach_cut_and_paste() {
+    setup();
+    set_current_line("abc");
+
+    assert!(nanoxide::winio::handle_input_key(KEY_F0 + 9));
+    assert_eq!(current_line(), "", "F9 应剪切当前行");
+
+    assert!(nanoxide::winio::handle_input_key(KEY_F0 + 10));
+    assert_eq!(current_line(), "abc", "F10 应把刚剪切的文本粘回来");
+}
