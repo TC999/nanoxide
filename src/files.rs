@@ -1804,12 +1804,12 @@ pub fn get_full_path(origpath: &str) -> Option<String> {
         }
     }
 
-    /* 确保非根目录的目录路径以斜杠结尾。 */
+    /* 确保非根目录的目录路径以分隔符结尾（Windows 用 `\`）。 */
     if let Some(t) = &target {
         if t.len() > 1 {
             if let Ok(meta) = std::fs::metadata(t) {
-                if meta.is_dir() && !t.ends_with('/') {
-                    target = Some(format!("{}/", t));
+                if meta.is_dir() && !t.ends_with('/') && !t.ends_with('\\') {
+                    target = Some(format!("{}{}", t, std::path::MAIN_SEPARATOR));
                 }
             }
         }
@@ -2078,6 +2078,101 @@ pub fn input_tab(
     }
 }
 
+/// 检查给定路径是否为可写目录，成功时返回绝对路径（对应
+/// files.c 的 `check_writable_directory`）。C 用 access(W_OK)；这里用
+/// 创建探测文件的方式，跨平台且能反映真实 ACL。
+pub fn check_writable_directory(path: &str) -> Option<String> {
+    let full = get_full_path(path)?;
+    if !Path::new(&full).is_dir() {
+        return None;
+    }
+
+    /* 统一目录结尾分隔符：Windows 的 verbatim 路径（\\?\C:\...）不能
+     * 混用 '/'，因此去掉已有分隔符后按平台追加。 */
+    let mut base = full.clone();
+    let stem = base.trim_end_matches(['/', '\\']);
+    if !stem.is_empty() && !stem.ends_with(':') {
+        base = stem.to_string();
+    }
+    let dir = if base.ends_with('/') || base.ends_with('\\') {
+        base
+    } else {
+        format!("{}{}", base, std::path::MAIN_SEPARATOR)
+    };
+
+    for attempt in 0..100u32 {
+        let probe = format!(
+            "{}nano_write_test.{}.{}",
+            dir,
+            std::process::id(),
+            attempt
+        );
+        match fs::OpenOptions::new().write(true).create_new(true).open(&probe) {
+            Ok(_) => {
+                let _ = fs::remove_file(&probe);
+                return Some(dir);
+            }
+            Err(_) => continue,
+        }
+    }
+
+    None
+}
+
+/// 创建一个唯一的临时文件并返回其路径（对应 C 版 `safe_tempfile`）。
+/// 目录依次尝试 `$TMPDIR`、系统临时目录、当前目录；文件名保留当前
+/// 缓冲区的扩展名（与 C 的 `nano.XXXXXX<ext>` 一致，便于 linter 识别）。
+pub fn safe_tempfile_name() -> Option<String> {
+    let mut candidates = Vec::new();
+    if let Ok(tmpdir) = std::env::var("TMPDIR") {
+        if !tmpdir.is_empty() {
+            candidates.push(tmpdir);
+        }
+    }
+    candidates.push(std::env::temp_dir().to_string_lossy().into_owned());
+    candidates.push(".".to_string());
+
+    let dir = candidates
+        .iter()
+        .find_map(|candidate| check_writable_directory(candidate))?;
+
+    let extension = with_global(|g| {
+        g.openfile.as_ref().and_then(|of| {
+            let filename = of.borrow().filename.clone()?;
+            if filename.is_empty() {
+                return None;
+            }
+            let name = std::path::Path::new(&filename)
+                .file_name()?
+                .to_string_lossy()
+                .into_owned();
+            let dot = name.rfind('.')?;
+            Some(name[dot..].to_string())
+        })
+    })
+    .unwrap_or_default();
+
+    for attempt in 0..100u32 {
+        let path = format!(
+            "{}nano.{}.{}{}",
+            dir,
+            std::process::id(),
+            attempt,
+            extension
+        );
+        match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(_) => return Some(path),
+            Err(_) => continue,
+        }
+    }
+
+    winio::statusline(
+        MessageType::Alert,
+        &crate::t!("files-no_temp_file", err = "cannot create unique file"),
+    );
+    None
+}
+
 /// 将指定备份目录转换为绝对路径，并校验其可用（对应 `init_backup_dir`）。
 /// 若取不到绝对路径（目录不存在或不可访问），或不是目录，则致命退出
 /// （对应 C 版 die(_("Invalid backup directory: %s\n"), backup_dir)）。
@@ -2085,9 +2180,9 @@ pub fn init_backup_dir() {
     let target = with_global(|g| g.backup_dir.clone())
         .and_then(|d| get_full_path(&d));
 
-    /* 可用的目录路径会被 get_full_path 补上结尾的 '/'。 */
+    /* 可用的目录路径会被 get_full_path 补上结尾的分隔符。 */
     let usable = match &target {
-        Some(t) => t.ends_with('/'),
+        Some(t) => t.ends_with('/') || t.ends_with('\\'),
         None => false,
     };
 

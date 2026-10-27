@@ -3204,7 +3204,7 @@ pub fn do_linter() {
     };
 
     with_global_mut(|g| g.ran_a_tool = true);
-    let Some(temp_name) = safe_tempfile_name() else {
+    let Some(temp_name) = files::safe_tempfile_name() else {
         return;
     };
     if !write_buffer_to_file(&temp_name) {
@@ -3346,7 +3346,7 @@ pub fn do_spell() {
         .or_else(|| std::env::var("SPELL").ok())
         .unwrap_or_else(|| "spell".to_string());
 
-    let temp_name = safe_tempfile_name();
+    let temp_name = files::safe_tempfile_name();
     let Some(temp_name) = temp_name else {
         return;
     };
@@ -3393,7 +3393,7 @@ pub fn do_formatter() {
         }
     });
 
-    let temp_name = safe_tempfile_name();
+    let temp_name = files::safe_tempfile_name();
     let Some(temp_name) = temp_name else {
         return;
     };
@@ -3446,27 +3446,6 @@ pub fn do_verbatim_input() {
 }
 
 // ======================== 内部辅助 ========================
-
-/// 创建唯一的临时文件名（对应 C 版的 `safe_tempfile`，但只返回文件名；
-/// 文件由调用者用 `write_buffer_to_file` 写入）。
-fn safe_tempfile_name() -> Option<String> {
-    let dir = std::env::temp_dir();
-    let pid = std::process::id();
-    for attempt in 0..100u32 {
-        let name = dir.join(format!("nano.{}.{}.tmp", pid, attempt));
-        let path = name.to_string_lossy().into_owned();
-        /* 用 create_new 确保唯一性。 */
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(_) => return Some(path),
-            Err(_) => continue,
-        }
-    }
-    winio::statusline(
-        MessageType::Alert,
-        &crate::t!("files-no_temp_file", err = "cannot create unique file"),
-    );
-    None
-}
 
 /// 把当前缓冲区内容写入给定文件（对应 C 版 `write_file(..., SPECIAL, NONOTES)`，
 /// 不显示状态栏消息）。
