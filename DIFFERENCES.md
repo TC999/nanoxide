@@ -247,8 +247,11 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ minibar 的十六进制码：`CONSTANT_SHOW` 下按 UTF-8 显示 `U+XXXX`、
   非 UTF-8 显示 `  0xXX`，行尾显示 `U+000A`（有下一行）或 `  ----`，
   并附加最多两个零宽后继码；显示后继码时状态字符让位（`tests/minibar_hex.rs`）。
-- ⚠️ 标题栏左上角的多缓冲区 `[x/n]`（C 版在有多个缓冲区时用它替代版本号）
-  与退出提示里的 "Close" 标签尚未显示；`more_than_one` 字段目前未置位。
+- ✅ 标题栏左上角的多缓冲区 `[x/n]`：`more_than_one` 在创建第二个缓冲区时
+  置位，关闭缓冲区时不重置（与 C 版一致），序号按 `buffer_number` 计算
+  （`tests/titlebar_ranking.rs`）。
+- ⚠️ 多缓冲区时底部栏 `^X` 的标签仍是 "Exit"（C 版在 install_buffer 中
+  改为 "Close"，关闭到只剩一个时改回）。
 - ⚠️ 输入解析（`parse_kbinput` / `convert_CSI_sequence` 等）由 crossterm 事件替代，不是逐字节解析；原版对异常转义序列的容错行为不保证一致
 - ✅ `waiting_keycodes` 只统计按下/重复事件，并缓存预读事件供 `wgetch` 消费（修复 Windows 上按键释放事件导致提示栏输入迟迟不注入的问题）
 - ✅ `warn_and_briefly_pause`（`-t` 无文件名时的提示）与 `blank_it_when_expired`
@@ -279,8 +282,8 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 2. `execute_by_id` 已审计：主菜单绑定全部可达；未分发的 rc 占位函数会显示
    “Function not implemented”而不是静默吞键。写文件提示的
    DosFormat/BackItUp/Append/Prepend/Discard 循环已移植。
-3. 显示层仍有简化：`do_credits` 的滚动/版本行、标题栏的多缓冲区 `[x/n]`、
-   软换行滚动条、多候选补全的编辑区列表（见第三、六节）。
+3. 显示层仍有简化：`do_credits` 的滚动/版本行、软换行滚动条、
+   多候选补全的编辑区列表（见第三、六节）。
 4. i18n 只有两种语言，且复数未处理。
 
 ## 七、与上一版文档的主要更正
@@ -328,3 +331,5 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：minibar 的十六进制码已实现（`CONSTANT_SHOW`；UTF-8 码点/非 UTF-8
   字节、行尾 `U+000A`/`----`、最多两个零宽后继、后继码让位状态字符）；
   新增 `tests/minibar_hex.rs`。
+- 本轮：标题栏左上角的多缓冲区 `[x/n]` 已实现（`more_than_one` 置位、
+  `buffer_number` 计数、关闭后保持）；新增 `tests/titlebar_ranking.rs`。
