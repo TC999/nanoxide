@@ -144,12 +144,18 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
    - 主菜单（MMAIN）的可达绑定都能命中硬编码分支或 `execute_by_id`；
    - 未分发的其余名字（`AppendIt`、`PrependIt`、`DosFormat`、`BackItUp`、
      `DiscardBuffer`、`Flip*`、`*Void` 等）多来自 rc 的 `bind` 占位名。
-     C 版里这些函数本身是空函数（global.c 的 `{;}`），真正行为在写文件
-     提示循环中；该循环已在 `do_writeout` 中移植（M-A/M-P/M-D/M-B/^Q/^T）。
+     C 版里这些函数本身是空函数（global.c 的 `{;}`），真正行为在写文件/
+     插入/执行提示循环中；这两个循环已分别移植到 `do_writeout` 与
+     `insert_a_file_or`。
    - 从主菜单直接 bind 这些占位名时，兜底分支会显示
      `Function not implemented: <名字>`（`tests/function_dispatch.rs`）。
      这是对 C 的偏离（C 中空函数无提示），用于避免“按键被吞”的错觉。⚠️
-7. ✅ **`-t` / `-U` / `-P` 已接线**：
+7. ✅ **插入/执行提示的翻转键**：`insert_a_file_or` 改为循环，
+   支持 `^X`（插入/执行互换）、`M-F`（新缓冲区）、`M-N`（不转换）、
+   `M-\`（命令前加/去管道）与 `^T`（浏览）；`NEW_BUFFER` 在提示结束后
+   恢复原值（C 的 `was_multibuffer`），提示文本随 `NO_CONVERT` 与
+   `NEW_BUFFER` 切换。测试见 `tests/insert_flip.rs`。
+8. ✅ **`-t` / `-U` / `-P` 已接线**：
    - `-t`：`do_exit` 在有文件名时直接 `write_it_out`，无文件名时先提示
      "No file name" 再询问（`tests/save_onexit.rs`）。
    - `-U`：状态栏消息倒计时为 1，否则 20（`blank_it_when_expired`，
@@ -177,6 +183,7 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 
 - ✅ `open_buffer` / `save_to` / `do_writeout` / `make_new_buffer` / `close_buffer` / `emergency_save_all`
 - ✅ `execute_command` / `insert_a_file_or` / `do_insertfile` / `do_execute`（用 `std::process::Command` 替代 fork/pipe，支持 `|cmd` 与 `||cmd`）
+  插入/执行提示支持 `^X`/`M-F`/`M-N`/`M-\`/`^T` 翻转键（`tests/insert_flip.rs`）
 - ✅ 锁文件（`write_lockfile` / `delete_lockfile` / `lock_filename_for`，1024 字节 vim/nano 兼容格式）
 - ✅ 多缓冲区切换（`M-,` / `M-.`）
 - ⚠️ `make_backup_of`：只做 `文件名~`，没有 `backupdir`、`insecure_backup` 的完整逻辑
@@ -272,3 +279,5 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：写文件提示循环已移植（M-A/M-P 追加/前置、M-D DOS、M-B 备份、
   ^Q 放弃、^T 浏览）；`save_to` 支持 `WritingType`，新增
   `tests/write_methods.rs`。
+- 后续：插入/执行提示循环已移植（^X/M-F/M-N/M-\ 翻转键、NEW_BUFFER
+  恢复、管道符号），新增 `tests/insert_flip.rs`。
