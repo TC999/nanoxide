@@ -76,8 +76,16 @@ pub fn scoop_stdin() -> bool {
         return false;
     }
 
-    /* 架构按 UTF-8 处理文本（字节保真度差异见 DIFFERENCES §六）。 */
-    let content = String::from_utf8_lossy(&bytes).into_owned();
+    /* 与 read_file 一致：按 -N/-u 处理 stdin 的行尾并检测 DOS 格式。 */
+    let (stdin_lines, dos_format) = split_file_lines(&bytes);
+    let format = if ISSET(MAKE_IT_UNIX) {
+        FormatType::NixFile
+    } else if dos_format {
+        FormatType::DosFile
+    } else {
+        FormatType::NixFile
+    };
+    let total_size: usize = stdin_lines.iter().map(|line| line.len()).sum();
 
     /* 创建一个新缓冲区并把 stdin 内容读入其中（与 open_buffer_impl 的
      * 读取分支同构，但缓冲区无文件名）。 */
@@ -85,9 +93,9 @@ pub fn scoop_stdin() -> bool {
     with_global_mut(|g| {
         let mut lines: Vec<LineRef> = Vec::new();
         let mut lineno = 1;
-        for line_str in content.lines() {
+        for line_str in &stdin_lines {
             let line = Rc::new(RefCell::new(LineStruct {
-                data: line_str.to_string(),
+                data: line_str.clone(),
                 lineno,
                 next: None, prev: None,
                 multidata: None, has_anchor: false,
@@ -117,12 +125,12 @@ pub fn scoop_stdin() -> bool {
             filebot: filebot.clone(),
             edittop: filetop.clone(),
             current: filetop.clone(),
-            totsize: content.len(),
+            totsize: total_size,
             firstcolumn: 0, current_x: 0, placewewant: 0,
             brink: 0, cursor_row: 0,
             statinfo: None, spillage_line: None,
             mark: None, mark_x: 0, softmark: false,
-            fmt: FormatType::NixFile, lock_filename: None,
+            fmt: format, lock_filename: None,
             undotop: None, current_undo: None, last_saved: None,
             last_action: UndoType::Other, modified: false,
             syntax: None, errormessage: None,
@@ -132,7 +140,7 @@ pub fn scoop_stdin() -> bool {
     });
     crate::color::find_and_prime_applicable_syntax();
 
-    if !ISSET(VIEW_MODE) && !content.is_empty() {
+    if !ISSET(VIEW_MODE) && total_size > 0 {
         set_modified();
     }
     true
@@ -174,7 +182,7 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
                 current_x: 0, placewewant: 0, brink: 0, cursor_row: 0,
                 statinfo: None, spillage_line: None,
                 mark: None, mark_x: 0, softmark: false,
-                fmt: FormatType::NixFile, lock_filename: None,
+                fmt: FormatType::Unspecified, lock_filename: None,
                 undotop: None, current_undo: None, last_saved: None,
                 last_action: UndoType::Other, modified: false,
                 syntax: None, errormessage: None,
@@ -236,7 +244,7 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
                 current_x: 0, placewewant: 0, brink: 0, cursor_row: 0,
                 statinfo: None, spillage_line: None,
                 mark: None, mark_x: 0, softmark: false,
-                fmt: FormatType::NixFile, lock_filename: lock_filename.clone(),
+                fmt: FormatType::Unspecified, lock_filename: lock_filename.clone(),
                 undotop: None, current_undo: None, last_saved: None,
                 last_action: UndoType::Other, modified: false,
                 syntax: None, errormessage: None,
@@ -267,7 +275,7 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
                 current_x: 0, placewewant: 0, brink: 0, cursor_row: 0,
                 statinfo: None, spillage_line: None,
                 mark: None, mark_x: 0, softmark: false,
-                fmt: FormatType::NixFile, lock_filename: lock_filename.clone(),
+                fmt: FormatType::Unspecified, lock_filename: lock_filename.clone(),
                 undotop: None, current_undo: None, last_saved: None,
                 last_action: UndoType::Other, modified: false,
                 syntax: None, errormessage: None,
@@ -288,15 +296,23 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
         return OpenBufferResult::NewFile;
     }
 
-    // 文件存在：读取内容。
-    match fs::read_to_string(path) {
-        Ok(content) => {
+    // 文件存在：读取内容（保留/检测 DOS 行尾，受 -N 与 -u 影响）。
+    match read_file_lines(path) {
+        Ok((lines_data, detected_fmt)) => {
+            /* -u/--unix 强制按 Unix 格式保存；否则采用检测到的格式
+             * （对应 C 版 read_file 末尾的 MAKE_IT_UNIX / UNSPECIFIED 判断）。 */
+            let format = if ISSET(MAKE_IT_UNIX) {
+                FormatType::NixFile
+            } else {
+                detected_fmt
+            };
+            let total_size: usize = lines_data.iter().map(|line| line.len()).sum();
             with_global_mut(|g| {
                 let mut lines: Vec<LineRef> = Vec::new();
                 let mut lineno = 1;
-                for line_str in content.lines() {
+                for line_str in &lines_data {
                     let line = Rc::new(RefCell::new(LineStruct {
-                        data: line_str.to_string(),
+                        data: line_str.clone(),
                         lineno,
                         next: None, prev: None,
                         multidata: None, has_anchor: false,
@@ -309,15 +325,6 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
                     lineno += 1;
                 }
 
-                if lines.is_empty() {
-                    let line = Rc::new(RefCell::new(LineStruct {
-                        data: String::new(), lineno: 1,
-                        next: None, prev: None,
-                        multidata: None, has_anchor: false,
-                    }));
-                    lines.push(line);
-                }
-
                 let filetop = lines.first().cloned();
                 let filebot = lines.last().cloned();
 
@@ -327,13 +334,13 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
                     filebot: filebot.clone(),
                     edittop: filetop.clone(),
                     current: filetop.clone(),
-                    totsize: content.len(),
+                    totsize: total_size,
                     firstcolumn: 0, current_x: 0, placewewant: 0,
                     brink: 0, cursor_row: 0,
                     statinfo: fs::metadata(path).ok().map(|m| Box::new(m)),
                     spillage_line: None,
                     mark: None, mark_x: 0, softmark: false,
-                    fmt: FormatType::NixFile, lock_filename: lock_filename.clone(),
+                    fmt: format, lock_filename: lock_filename.clone(),
                     undotop: None, current_undo: None, last_saved: None,
                     last_action: UndoType::Other, modified: false,
                     syntax: None, errormessage: None,
@@ -633,6 +640,54 @@ fn make_backup_of(realname: &str) -> bool {
     }
 }
 
+/// 按 C 版 `read_file` 的规则把文件字节切成行，并检测 DOS 行尾。
+///
+/// - 每个 `\n` 结束一行；`!NO_CONVERT` 时剥掉行尾的 `\r`，并在第一行
+///   遇到 CRLF 时报告 DOS 格式（与 C 的 `num_lines == 0` 判断一致）。
+/// - 文件末尾没有换行时保留最后一段；空文件返回一个空行。
+/// - `NO_CONVERT` 时保留 `\r`，这样保存回去仍是原始 CRLF。
+fn split_file_lines(bytes: &[u8]) -> (Vec<String>, bool) {
+    let keep_cr = ISSET(NO_CONVERT);
+    let mut lines: Vec<String> = Vec::new();
+    let mut start = 0;
+    let mut dos_format = false;
+
+    for index in 0..bytes.len() {
+        if bytes[index] == b'\n' {
+            let mut end = index;
+            if end > start && bytes[end - 1] == b'\r' && !keep_cr {
+                end -= 1;
+                /* 只有第一处行尾才决定格式（对应 C 版的 num_lines == 0）。 */
+                if lines.is_empty() {
+                    dos_format = true;
+                }
+            }
+            lines.push(String::from_utf8_lossy(&bytes[start..end]).into_owned());
+            start = index + 1;
+        }
+    }
+
+    if start < bytes.len() {
+        lines.push(String::from_utf8_lossy(&bytes[start..]).into_owned());
+    } else if lines.is_empty() {
+        lines.push(String::new());
+    }
+
+    (lines, dos_format)
+}
+
+/// 读取文件的全部行并返回检测到的格式（供 open_buffer / insert_a_file 共用）。
+fn read_file_lines(path: &Path) -> std::io::Result<(Vec<String>, FormatType)> {
+    let bytes = fs::read(path)?;
+    let (lines, dos_format) = split_file_lines(&bytes);
+    let format = if dos_format {
+        FormatType::DosFile
+    } else {
+        FormatType::NixFile
+    };
+    Ok((lines, format))
+}
+
 /// 收集给定缓冲区的全部行数据。
 fn lines_of(openfile: &OpenFileRef) -> Vec<String> {
     let of_ref = openfile.borrow();
@@ -675,13 +730,24 @@ fn finish_save(answer: &str, lines: &[String], annotate: bool) -> i32 {
         lines.pop();
     }
 
+    /* 行尾按缓冲区格式写出：DOS 为 CRLF，其余为 LF
+     * （对应 write_file 中的 `openfile->fmt == DOS_FILE` 分支）。
+     * -N 读取时保留的 '\r' 已在行数据里，format 为 NIX，写回仍是 CRLF。 */
+    let dos_format = with_global(|g| {
+        g.openfile
+            .as_ref()
+            .map(|of| of.borrow().fmt == FormatType::DosFile)
+            .unwrap_or(false)
+    });
+    let newline = if dos_format { "\r\n" } else { "\n" };
+
     let mut content = String::new();
     let last = lines.len().saturating_sub(1);
     for (i, l) in lines.iter().enumerate() {
         content.push_str(l);
         /* 每行以换行结尾；NO_NEWLINES 时末行不加。 */
         if i < last || !ISSET(NO_NEWLINES) {
-            content.push('\n');
+            content.push_str(newline);
         }
     }
 
@@ -1293,10 +1359,23 @@ fn insert_a_file_or(execute: bool) {
             let was_x = with_global(|g| {
                 g.openfile.as_ref().map(|of| of.borrow().current_x).unwrap_or(0)
             });
-            match fs::read_to_string(&answer) {
-                Ok(text) => {
+            match read_file_lines(Path::new(&answer)) {
+                Ok((read_lines, detected_fmt)) => {
+                    /* 与 C 版 read_file 一致：插入时也按 -N/-u 处理行尾，
+                     * 且仅当缓冲区格式仍是 UNSPECIFIED 时采用检测到的格式。 */
+                    let text = read_lines.join("\n");
                     insert_text_into_buffer(&text);
-                    with_global_mut(|g| g.refresh_needed = true);
+                    with_global_mut(|g| {
+                        g.refresh_needed = true;
+                        if let Some(of) = &g.openfile {
+                            let mut of_ref = of.borrow_mut();
+                            if ISSET(MAKE_IT_UNIX) {
+                                of_ref.fmt = FormatType::NixFile;
+                            } else if of_ref.fmt == FormatType::Unspecified {
+                                of_ref.fmt = detected_fmt;
+                            }
+                        }
+                    });
                     /* 缓冲区变化时标记为已修改。 */
                     let now_lineno = with_global(|g| {
                         g.openfile.as_ref().and_then(|of| {
