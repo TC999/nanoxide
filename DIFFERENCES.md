@@ -99,14 +99,13 @@ README 写的是 fluent，但项目并未依赖 fluent crate，格式只是类 f
 
 解析层已接受下列选项，但对应功能尚未接线，按 ⚠️ 看待：
 
-- `-t/--saveonexit`、`-U/--quickblank`（消息不会自动消失）
 - `-u/--unix`、`-N/--noconvert`（当前读写固定按 Unix 文本处理）
 - `-q/--indicator`（侧边指示条未绘制）、`-%/--stateflags`
-- `-P/--positionlog`（`load_positions_register` 存在，但未在打开文件后恢复）
 - `-!/--magic`（无 libmagic；rc 的 `set magic` 同样只置位）
 
 已接线并有测试/静态证据：`-D`（粗体）、`-d`（Backspace/Delete 互换）、
-`-H`（历史记录，含 `have_statedir` 检查）。
+`-H`（历史记录，含 `have_statedir` 检查）、`-t`（有文件名时退出直接保存）、
+`-U`（状态栏消息 1 次按键后清除）、`-P`（记录并恢复光标位置）。
 
 rc 文件方面：9.2 的 69 个 `set` 选项名全部出现在 `rcfile.rs` 里，rc 指令（`set unset bind unbind color icolor syntax header magic comment formatter linter tabgives include extendsyntax`）也都有处理。❓ 但只做了字符串比对，**每个选项是否真正生效未逐一验证**。
 
@@ -128,12 +127,22 @@ rc 文件方面：9.2 的 69 个 `set` 选项名全部出现在 `rcfile.rs` 里�
 4. ✅ **缺失的主菜单绑定已补齐**：`M-{`（反缩进）、`M-}`（缩进）、`Sh-Tab`
    （反缩进）、`M-W`（查找下一个）、`M-Q`（查找上一个）。注意 C 版里
    `M-}` 是缩进、`M-{` 是反缩进。证据：`tests/keymap_reachability.rs`。
-   F1–F12 仍由 `execute_function` 的硬编码分支处理，尚未逐键与 C 版对齐
-   （例如 C 版 F4 = justify）。❓
+   F1–F12 也已按 `global.c:1574-1595` 写入绑定表并删除旧的硬编码分支
+   （F4=justify、F5=read file、F6=where is、F7/F8=翻页、F9/F10=剪切/粘贴、
+   F11=报告位置、F12=拼写；帮助页 F1=退出）。证据：同一测试文件。
 5. **输入批处理**：C 版 `process_a_keystroke` 把连续输入攒成 puddle 再一次注入，
    Rust 版逐键处理。大段粘贴的性能与撤销粒度可能不同。❓
 6. **`execute_by_id` 的兜底分支 `_ => {}`** 仍在：未被显式分发的 `FunctionId`
    会静默消费按键。第四节前三条已接上，但尚未逐个审计全部 `FunctionId`。⚠️
+7. ✅ **`-t` / `-U` / `-P` 已接线**：
+   - `-t`：`do_exit` 在有文件名时直接 `write_it_out`，无文件名时先提示
+     "No file name" 再询问（`tests/save_onexit.rs`）。
+   - `-U`：状态栏消息倒计时为 1，否则 20（`blank_it_when_expired`，
+     `tests/quickblank.rs`）。
+   - `-P`：`load_positions_register` / `restore_cursor_position_if_any` /
+     `update_positions_register` 已接入启动、打开与关闭流程；位置寄存器
+     解析改为按“数字+空格”扫描锚点，兼容 Windows 的 `C:\...` 路径
+     （`tests/positionlog.rs`）。
 
 ---
 
@@ -190,6 +199,8 @@ rc 文件方面：9.2 的 69 个 `set` 选项名全部出现在 `rcfile.rs` 里�
 - ❌ `get_mouseinput`（编辑器点击路径见 `handle_mouse_click`）
 - ⚠️ 输入解析（`parse_kbinput` / `convert_CSI_sequence` 等）由 crossterm 事件替代，不是逐字节解析；原版对异常转义序列的容错行为不保证一致
 - ✅ `waiting_keycodes` 只统计按下/重复事件，并缓存预读事件供 `wgetch` 消费（修复 Windows 上按键释放事件导致提示栏输入迟迟不注入的问题）
+- ✅ `warn_and_briefly_pause`（`-t` 无文件名时的提示）与 `blank_it_when_expired`
+  （`--quickblank` 的 1/20 次按键倒计时）
 
 ### 7. 主循环与启动（`main.rs`）
 
@@ -203,7 +214,7 @@ rc 文件方面：9.2 的 69 个 `set` 选项名全部出现在 `rcfile.rs` 里�
 
 ### 8. 覆盖较完整的模块
 
-`cut.rs`、`chars.rs`、`movement.rs`、`history.rs`、`help.rs`、`color.rs`、`utils.rs`、`rcfile.rs` 的函数基本对等。`rcfile.rs` 当前 1585 行（旧版文档写 718 行，已过时）。`chars.rs` 比原版多 `mbstrcasestr` / `revstrstr`，`movement.rs` 多 `do_first_line` / `do_last_line`。
+`cut.rs`、`chars.rs`、`movement.rs`、`history.rs`、`help.rs`、`color.rs`、`utils.rs`、`rcfile.rs` 的函数基本对等。`history.rs` 的位置寄存器（`-P`）已接入打开/关闭流程，并修正了 Windows 绝对路径的解析。`rcfile.rs` 当前 1585 行（旧版文档写 718 行，已过时）。`chars.rs` 比原版多 `mbstrcasestr` / `revstrstr`，`movement.rs` 多 `do_first_line` / `do_last_line`。
 
 ---
 
@@ -211,9 +222,9 @@ rc 文件方面：9.2 的 69 个 `set` 选项名全部出现在 `rcfile.rs` 里�
 
 nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当前最需要处理的是：
 
-1. 部分已接受的选项仍只是置位（`-t` `-U` `-u` `-N` `-q` `-%` `-P` `-!`），见第三节。
-2. F1–F12 等硬编码按键分支尚未逐键与 9.2 的 `shortcut_init` 对齐；`execute_by_id`
-   的 `_ => {}` 兜底仍在。
+1. 部分已接受的选项仍只是置位（`-u` `-N` `-q` `-%` `-!`），见第三节。
+2. `execute_by_id` 的 `_ => {}` 兜底仍在，尚未逐个审计全部 `FunctionId`；F1–F12
+   已按 9.2 的 `shortcut_init` 对齐。
 3. 操作目录限制（`outside_of_confinement`）、linter、目录/滚动条等显示功能仍缺失。
 4. i18n 只有两种语言，且复数未处理。
 
@@ -228,3 +239,5 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   Sh-Tab/M-W/M-Q 已接线；上一版标记为缺失的 mouse / write_region / stdin /
   diralphasort / init_backup_dir 经测试确认已存在；修正 `waiting_keycodes` 的
   按键释放事件问题。
+- 后续更新：`-t`、`-U`、`-P` 已接线；F1–F12 绑定已按 `global.c` 对齐；
+  `-P` 的位置寄存器解析兼容 Windows 路径。
