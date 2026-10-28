@@ -85,3 +85,52 @@ fn linter_arguments_follow_construct_argument_list() {
     assert_eq!(program, "lint");
     assert_eq!(args, vec!["--file=%s", "a.py"]);
 }
+
+/// 消息文件名与缓冲区文件名的匹配按规范化路径比较（对应 C 的 inode 比较，
+/// 至少能处理相对/重复分隔符的写法）。
+#[test]
+fn buffer_matches_file_compares_canonical_paths() {
+    let dir = std::env::temp_dir().join(format!(
+        "nanoxide_lintmatch_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("a.py");
+    std::fs::write(&path, "x\n").unwrap();
+
+    let plain = path.to_str().unwrap().to_string();
+    let dotted = dir.join(".").join("a.py").to_str().unwrap().to_string();
+
+    assert!(nanoxide::text::buffer_matches_file(&plain, &dotted));
+    assert!(!nanoxide::text::buffer_matches_file(&plain, "other.py"));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 跨文件消息：能按文件名找到已打开的缓冲区。
+#[test]
+fn finds_open_buffer_by_filename() {
+    nanoxide::global::global_init();
+    with_global_mut(|g| g.openfile = None);
+    nanoxide::files::make_new_buffer();
+
+    let dir = std::env::temp_dir().join(format!(
+        "nanoxide_lintfind_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("b.py");
+    std::fs::write(&path, "y\n").unwrap();
+    let name = path.to_str().unwrap().to_string();
+
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            of.borrow_mut().filename = Some(name.clone());
+        }
+    });
+
+    assert!(nanoxide::text::find_buffer_by_filename(&name).is_some());
+    assert!(nanoxide::text::find_buffer_by_filename("missing.py").is_none());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

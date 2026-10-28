@@ -3328,6 +3328,56 @@ pub fn build_linter_arguments(linter: &str, filename: &str) -> (String, Vec<Stri
     (program, args)
 }
 
+/// 判断 linter 消息里的文件名是否指给定缓冲区（C 版用 inode 比较；
+/// 这里用规范化后的路径，规范化失败时退回字符串比较）。
+pub fn buffer_matches_file(name: &str, buffer_name: &str) -> bool {
+    if name.is_empty() || buffer_name.is_empty() {
+        return name == buffer_name;
+    }
+    if name == buffer_name {
+        return true;
+    }
+    match (
+        std::fs::canonicalize(name),
+        std::fs::canonicalize(buffer_name),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// 在缓冲区链表中按文件名查找（对应 C 版 do_linter 按 inode 搜索已打开缓冲区）。
+pub fn find_buffer_by_filename(name: &str) -> Option<OpenFileRef> {
+    let mut first = with_global(|g| g.openfile.clone())?;
+    loop {
+        let prev = { first.borrow().prev.clone() };
+        match prev {
+            Some(p) => first = p,
+            None => break,
+        }
+    }
+
+    let mut current = Some(first);
+    while let Some(buffer) = current {
+        let filename = { buffer.borrow().filename.clone().unwrap_or_default() };
+        if !filename.is_empty() && buffer_matches_file(name, &filename) {
+            return Some(buffer);
+        }
+        current = { buffer.borrow().next.clone() };
+    }
+    None
+}
+
+/// 当前缓冲区的文件名（无名缓冲返回空串）。
+fn current_buffer_filename() -> String {
+    with_global(|g| {
+        g.openfile
+            .as_ref()
+            .and_then(|of| of.borrow().filename.clone())
+            .unwrap_or_default()
+    })
+}
+
 /// 运行当前语法的 linter，并进入 linter 模式浏览消息
 /// （对应 text.c 的 `do_linter`）。
 ///
@@ -3421,7 +3471,7 @@ pub fn do_linter() {
         return;
     }
 
-    let messages = parse_linter_output(&text);
+    let mut messages = parse_linter_output(&text);
     if messages.is_empty() {
         winio::statusline(
             MessageType::Remark,
@@ -3440,6 +3490,47 @@ pub fn do_linter() {
         .unwrap_or_else(std::time::Instant::now);
 
     loop {
+        /* 跨文件消息：先切换到对应的已打开缓冲区，或询问是否打开
+         * （对应 C 版 do_linter 的 inode 匹配与 unopened-file 分支）。 */
+        let file_name = messages[current].filename.clone();
+        if !buffer_matches_file(&file_name, &current_buffer_filename())
+            && std::path::Path::new(&file_name).exists()
+        {
+            if let Some(target) = find_buffer_by_filename(&file_name) {
+                with_global_mut(|g| g.openfile = Some(target));
+                winio::titlebar(None);
+            } else {
+                let question =
+                    crate::t!("linter-unopened_file", filename = file_name.clone());
+                let choice = crate::prompt::ask_user(false, &question);
+                with_global_mut(|g| g.currmenu = MLINTER);
+                match choice {
+                    CANCEL => {
+                        winio::statusbar(&crate::t!("files-cancelled"));
+                        break;
+                    }
+                    YES => {
+                        /* 在新缓冲区打开（C 的 open_buffer(name, TRUE)）。 */
+                        let _ = files::open_another_buffer(&file_name);
+                        winio::titlebar(None);
+                    }
+                    _ => {
+                        /* NO：丢弃该文件的所有消息；没有剩余消息就退出。 */
+                        messages.retain(|item| item.filename != file_name);
+                        if messages.is_empty() {
+                            winio::statusline(
+                                MessageType::Remark,
+                                &crate::t!("linter-no_messages"),
+                            );
+                            break;
+                        }
+                        current = 0;
+                        continue;
+                    }
+                }
+            }
+        }
+
         let message = &messages[current];
         crate::search::goto_line_and_column(message.line, message.column, true);
         winio::edit_refresh();
