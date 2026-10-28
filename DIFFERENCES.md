@@ -197,8 +197,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ `filename_completion` / `input_tab` / `username_completion`：
   文件名补全支持公共前缀、唯一目录补分隔符、`~user`、操作目录过滤
   与 `MGOTODIR` 只补目录（`tests/filename_completion.rs`）。
-  简化：多候选在状态栏列出（C 在编辑区分栏绘制）；`username_completion`
-  仅在 Unix 生效（Windows 无 passwd）。
+  多候选按 C 的网格在编辑区分栏列出（`completion_list_layout` /
+  `draw_completion_list`，行数不足时显示 "(more)"，`tests/completion_list.rs`）。
+  `username_completion` 仅在 Unix 生效（Windows 无 passwd）。
 - ✅ `check_writable_directory` / `safe_tempfile`：`$TMPDIR` → 系统临时目录 →
   当前目录依次尝试，保留缓冲区扩展名；临时文件用 create_new 保证唯一。
   证据：`tests/tempfile.rs`
@@ -283,8 +284,7 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 2. `execute_by_id` 已审计：主菜单绑定全部可达；未分发的 rc 占位函数会显示
    “Function not implemented”而不是静默吞键。写文件提示的
    DosFormat/BackItUp/Append/Prepend/Discard 循环已移植。
-3. 显示层仍有简化：`do_credits` 的滚动/版本行、多候选补全的编辑区列表
-   （见第三、六节）。
+3. 显示层主要剩 `do_credits` 的滚动/版本行这类小幅差异（见第三、六节）。
 4. i18n 只有两种语言，且复数未处理。
 
 ## 七、与上一版文档的主要更正
@@ -339,3 +339,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   改回）；新增 `tests/exit_label.rs`。
 - 本轮：软换行下的滚动条改为按 C 的 `coveredlines` 循环精确计算
   （`scrollbar_covered_lines`），不再按行数近似；新增 `tests/scrollbar.rs`。
+- 本轮：多候选文件名补全改为在编辑区按 C 的网格分栏列出
+  （`completion_list_layout` / `draw_completion_list`，行数不足显示
+  "(more)"），不再写状态栏；新增 `tests/completion_list.rs`。
