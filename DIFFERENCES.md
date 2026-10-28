@@ -256,6 +256,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 ### 4. 搜索（`search.rs`）
 
 - ✅ 前后向搜索、`do_research`、`do_findnext` / `do_findprevious`、`do_replace`、`goto_line_and_column`、`do_gotolinecolumn`（`^/`，含 `++` / `--` 相对跳转）、`do_find_bracket`（`M-]`）、`not_found_msg`
+- ✅ 搜索/替换选项键：`M-C` / `M-R` / `M-B` 分别切换大小写/正则/反向；
+  whereis 提示里 `^R` 切换到替换（`FlipReplace`，对应 `search.c:150-155`），
+  不再误绑成正则（`tests/keymap_reachability.rs`）。
 - ⚠️ `replace_regexp` / `replace_line` 是简化版：匹配长度直接取 needle 长度
 - ✅ 锚点：`text.rs` 的 `do_anchor` / `to_prev_anchor` / `to_next_anchor`
   由 `execute_by_id` 分发；`M-Ins` / `M-PgUp` / `M-PgDn` / `M-"` / `M-'`
@@ -430,3 +433,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：执行菜单（MEXECUTE）补齐 `^S`/`^T` 拼写、`^O` 格式化、`^V`
   剪切到末尾、`^J` 全文对齐等快捷键，与 `global.c` 对齐；
   `tests/keymap_reachability.rs` 增加对应断言。
+- 本轮：搜索/替换菜单选项键修正——`M-C`/`M-R`/`M-B` 可达（此前缺失），
+  whereis 的 `^R` 改为 `FlipReplace`（此前误绑正则），`search_init` 处理
+  `FlipReplace` 切换提示；`tests/keymap_reachability.rs` 增加断言。
