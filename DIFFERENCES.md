@@ -103,9 +103,8 @@ README 写的是 fluent，但项目并未依赖 fluent crate，格式只是类 f
   `-H`（历史记录，含 `have_statedir` 检查）、`-t`（有文件名时退出直接保存）、
   `-U`（状态栏消息 1 次按键后清除）、`-P`（记录并恢复光标位置）、
   `-u`/`-N`（DOS 行尾的读取/保存转换，见 `tests/file_format.rs`）、
-  `-q`（右侧滚动条，见 `tests/indicator_stateflags.rs`）、
+  `-q`（右侧滚动条，软换行下按块精确计算，见 `tests/scrollbar.rs`）、
   `-%`（标题栏与 minibar 的状态字符 I/M/L/R/S）。
-- ⚠️ `-q` 在软换行下按行数近似滚动块位置（C 按 chunk 精确计算）。
 - `-!/--magic`：本项目没有 libmagic，因此与**未启用 libmagic 的 nano 9.2**
   一致——命令行 `-!` / `--magic` 与 rc 的 `set magic` 都按未知选项拒绝，
   不再“接受但静默置位”。
@@ -230,7 +229,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ `minibar`、`confirm_margin`、`print_view_warning`
 - ✅ 超长行横向滚动的 `<` / `>` 截断标记
 - ✅ 软换行分块绘制 `update_softwrapped_line`
-- ✅ `draw_scrollbar`（`-q`；软换行下按行数近似）、`show_states_at`
+- ✅ `draw_scrollbar`（`-q`；软换行下用 `scrollbar_covered_lines` 按块
+  累计覆盖行数，与 C 的 `coveredlines` 循环一致，`tests/scrollbar.rs`）、
+  `show_states_at`
   （`states_string`，`-%` 的标题栏与 minibar 状态字符，位置按 C 的
   `COLS - 11 - padding` / `COLS - 5 - padding` / `COLS - 4 - padding`，
   `tests/indicator_stateflags.rs`）
@@ -278,13 +279,12 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 
 nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当前最需要处理的是：
 
-1. 命令行选项已全部处理：`-q`/`-%` 已接线（滚动条在软换行下按行数近似，
-   见第三节），`-!` 因无 libmagic 被明确拒绝。
+1. 命令行选项已全部处理：`-q`/`-%` 已接线，`-!` 因无 libmagic 被明确拒绝。
 2. `execute_by_id` 已审计：主菜单绑定全部可达；未分发的 rc 占位函数会显示
    “Function not implemented”而不是静默吞键。写文件提示的
    DosFormat/BackItUp/Append/Prepend/Discard 循环已移植。
-3. 显示层仍有简化：`do_credits` 的滚动/版本行、软换行滚动条、
-   多候选补全的编辑区列表（见第三、六节）。
+3. 显示层仍有简化：`do_credits` 的滚动/版本行、多候选补全的编辑区列表
+   （见第三、六节）。
 4. i18n 只有两种语言，且复数未处理。
 
 ## 七、与上一版文档的主要更正
@@ -337,3 +337,5 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：多缓冲区时底部栏 ^X 的标签在 "Exit"/"Close" 间切换
   （`set_exit_label` 修改主菜单与浏览器的 DoExit 项，关闭到只剩一个时
   改回）；新增 `tests/exit_label.rs`。
+- 本轮：软换行下的滚动条改为按 C 的 `coveredlines` 循环精确计算
+  （`scrollbar_covered_lines`），不再按行数近似；新增 `tests/scrollbar.rs`。
