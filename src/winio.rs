@@ -3188,6 +3188,25 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     if let Some(b) = bound {
         return execute_bound(&b);
     }
+    /* --modernbindings 的键位与 legacy 硬编码不同：先查 shortcut 表，
+     * 命中即执行，避免下面的 legacy 分支覆盖现代绑定。 */
+    if ISSET(MODERN_BINDINGS) {
+        if let Some(shortcut) = global::find_shortcut(key, currmenu) {
+            let (func, toggle) = {
+                let borrowed = shortcut.borrow();
+                (borrowed.func, borrowed.toggle)
+            };
+            if func == FunctionId::DoToggle {
+                TOGGLE(toggle as usize);
+                if toggle == USE_MOUSE as i32 {
+                    mouse_init();
+                }
+                edit_refresh();
+                return true;
+            }
+            return execute_by_id(func);
+        }
+    }
     // 使用 if/else 链替代 match，避免表达式模式的问题
     if key == 1 { movement::do_home(); edit_refresh(); return true; }           // Ctrl+A
     if key == 2 {

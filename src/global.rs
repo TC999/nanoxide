@@ -284,36 +284,17 @@ pub fn is_on_a_vt() -> bool {
 /// 分配并设置快捷键列表（所有菜单）。
 pub fn shortcut_init() {
     // 主菜单快捷键（与 C 版 global.c 对应）
-    add_to_sclist((MMOST | MBROWSER) & !MFINDINHELP, r"^G", 7, FunctionId::DoHelp, 0);
-    add_to_sclist(MMAIN, r"^O", 15, FunctionId::DoWriteOut, 0);
+    /* 两套键位共用：搜索、剪切/复制/粘贴、替换、插入文件、换行/制表、
+     * 居中与全屏刷新（对应 global.c:1240-1242、1283-1289、1463-1467）。 */
+    add_to_sclist(MMAIN | MBROWSER | MHELP, r"^B", 2, FunctionId::DoSearchBackward, 0);
     add_to_sclist(MMAIN | MBROWSER | MHELP, r"^F", 6, FunctionId::DoSearchForward, 0);
-    add_to_sclist(MMAIN, r"^\", 28, FunctionId::DoReplace, 0);
     add_to_sclist(MMAIN, r"^K", 11, FunctionId::DoCut, 0);
     add_to_sclist(MMAIN, r"^U", 21, FunctionId::DoPaste, 0);
     add_to_sclist(MMAIN, r"^J", 10, FunctionId::DoJustify, 0);
-    add_to_sclist(MMAIN, r"^T", 20, FunctionId::DoExecute, 0);
-    add_to_sclist(MMAIN, r"^C", 3, FunctionId::DoReportLocation, 0);
-    add_to_sclist(MMAIN | MBROWSER | MHELP, r"^X", 24, FunctionId::DoExit, 0);
-    add_to_sclist(MMAIN, r"^R", 18, FunctionId::DoInsertFile, 0);
+    add_to_sclist(MMAIN, r"^\", 28, FunctionId::DoReplace, 0);
     add_to_sclist(MMAIN, r"^/", 31, FunctionId::DoGoToLine, 0);
-    add_to_sclist(MMAIN | MBROWSER | MHELP, r"^B", 2, FunctionId::DoSearchBackward, 0);
-    // 方向键（保留但不在底部栏显示）
-    add_to_sclist(MMAIN | MBROWSER | MHELP, r"^P", 16, FunctionId::DoUp, 0);
-    add_to_sclist(MMAIN | MBROWSER | MHELP, r"^N", 14, FunctionId::DoDown, 0);
-    add_to_sclist(MMAIN, r"^A", 1, FunctionId::DoHome, 0);
-    add_to_sclist(MMAIN, r"^E", 5, FunctionId::DoEnd, 0);
-    add_to_sclist(MMAIN | MBROWSER | MHELP | MLINTER, r"^V", 22, FunctionId::DoPageDown, 0);
-    add_to_sclist(MMAIN | MBROWSER | MHELP | MLINTER, r"^Y", 25, FunctionId::DoPageUp, 0);
-    add_to_sclist(MMAIN, r"^D", 4, FunctionId::DoDelete, 0);
-    add_to_sclist(MMAIN, r"^H", 8, FunctionId::DoBackspace, 0);
-    add_to_sclist(MMAIN, r"^I", 9, FunctionId::DoTab, 0);
     add_to_sclist(MMAIN, r"^M", 13, FunctionId::DoEnter, 0);
-    /* 保存/反向搜索在未设置 --preserve 时可用（对应 global.c:1266-1271）。 */
-    if !ISSET(PRESERVE) {
-        add_to_sclist(MMAIN, r"^S", 19, FunctionId::DoSaveFile, 0);
-        add_to_sclist(MMAIN | MBROWSER | MHELP, r"^Q", 17, FunctionId::DoSearchBackward, 0);
-    }
-    add_to_sclist(MMAIN | MBROWSER | MHELP, r"^W", 23, FunctionId::DoSearchForward, 0);
+    add_to_sclist(MMAIN, r"^I", 9, FunctionId::DoTab, 0);
     add_to_sclist(MMAIN, "M-R", 0x272, FunctionId::DoReplace, 0);
     add_to_sclist(MMAIN, "Ins", KEY_IC, FunctionId::DoInsertFile, 0);
     // 居中/全屏刷新（对应 global.c:1463-1467：MMAIN 是 do_center，其余是 full_refresh）
@@ -325,6 +306,50 @@ pub fn shortcut_init() {
         FunctionId::DoFullRefresh,
         0,
     );
+
+    if ISSET(MODERN_BINDINGS) {
+        /* modern 键位（对应 global.c:1243-1262 与 1301 行的 ^E）。 */
+        add_to_sclist((MMOST | MBROWSER) & !MFINDINHELP, r"^H", 8, FunctionId::DoHelp, 0);
+        add_to_sclist(MHELP, r"^H", 8, FunctionId::DoExit, 0);
+        add_to_sclist(MMAIN | MBROWSER | MHELP, r"^Q", 17, FunctionId::DoExit, 0);
+        add_to_sclist(MMAIN, r"^S", 19, FunctionId::DoSaveFile, 0);
+        add_to_sclist(MMAIN, r"^W", 23, FunctionId::DoWriteOut, 0);
+        add_to_sclist(MMAIN, r"^O", 15, FunctionId::DoInsertFile, 0);
+        add_to_sclist(MMAIN | MBROWSER | MHELP, r"^D", 4, FunctionId::DoFindPrevious, 0);
+        add_to_sclist(MMAIN | MBROWSER | MHELP, r"^G", 7, FunctionId::DoFindNext, 0);
+        add_to_sclist(MMAIN, r"^R", 18, FunctionId::DoReplace, 0);
+        add_to_sclist(MMAIN, r"^T", 20, FunctionId::DoGoToLine, 0);
+        add_to_sclist(MMAIN, r"^P", 16, FunctionId::DoReportLocation, 0);
+        add_to_sclist(MMAIN, r"^Z", 26, FunctionId::DoUndo, 0);
+        add_to_sclist(MMAIN, r"^Y", 25, FunctionId::DoRedo, 0);
+        add_to_sclist(MMAIN, r"^A", 1, FunctionId::DoMark, 0);
+        add_to_sclist(MMAIN, r"^X", 24, FunctionId::DoCut, 0);
+        add_to_sclist(MMAIN, r"^C", 3, FunctionId::DoCopy, 0);
+        add_to_sclist(MMAIN, r"^V", 22, FunctionId::DoPaste, 0);
+        add_to_sclist(MMAIN, r"^E", 5, FunctionId::DoExecute, 0);
+    } else {
+        /* legacy 键位（对应 global.c:1264-1282 与 1301 行的 ^T）。 */
+        add_to_sclist((MMOST | MBROWSER) & !MFINDINHELP, r"^G", 7, FunctionId::DoHelp, 0);
+        add_to_sclist(MMAIN | MBROWSER | MHELP, r"^X", 24, FunctionId::DoExit, 0);
+        /* 保存/反向搜索在未设置 --preserve 时可用（对应 global.c:1266-1271）。 */
+        if !ISSET(PRESERVE) {
+            add_to_sclist(MMAIN, r"^S", 19, FunctionId::DoSaveFile, 0);
+            add_to_sclist(MMAIN | MBROWSER | MHELP, r"^Q", 17, FunctionId::DoSearchBackward, 0);
+        }
+        add_to_sclist(MMAIN, r"^O", 15, FunctionId::DoWriteOut, 0);
+        add_to_sclist(MMAIN, r"^R", 18, FunctionId::DoInsertFile, 0);
+        add_to_sclist(MMAIN | MBROWSER | MHELP, r"^W", 23, FunctionId::DoSearchForward, 0);
+        add_to_sclist(MMAIN, r"^A", 1, FunctionId::DoHome, 0);
+        add_to_sclist(MMAIN, r"^E", 5, FunctionId::DoEnd, 0);
+        add_to_sclist(MMAIN | MBROWSER | MHELP, r"^P", 16, FunctionId::DoUp, 0);
+        add_to_sclist(MMAIN | MBROWSER | MHELP, r"^N", 14, FunctionId::DoDown, 0);
+        add_to_sclist(MMAIN | MBROWSER | MHELP | MLINTER, r"^Y", 25, FunctionId::DoPageUp, 0);
+        add_to_sclist(MMAIN | MBROWSER | MHELP | MLINTER, r"^V", 22, FunctionId::DoPageDown, 0);
+        add_to_sclist(MMAIN, r"^C", 3, FunctionId::DoReportLocation, 0);
+        add_to_sclist(MMAIN, r"^H", 8, FunctionId::DoBackspace, 0);
+        add_to_sclist(MMAIN, r"^D", 4, FunctionId::DoDelete, 0);
+        add_to_sclist(MMAIN, r"^T", 20, FunctionId::DoExecute, 0);
+    }
     // Alt 组合
     add_to_sclist(MMAIN, "M-U", 0, FunctionId::DoUndo, 0);
     add_to_sclist(MMAIN, "M-E", 0, FunctionId::DoRedo, 0);

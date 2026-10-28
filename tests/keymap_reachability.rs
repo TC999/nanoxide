@@ -335,3 +335,58 @@ fn preserve_disables_save_and_backward_search_keys() {
 
     UNSET(PRESERVE);
 }
+
+/// `--modernbindings` 的主菜单键位（对应 global.c:1243-1262、1301）。
+#[test]
+fn modern_bindings_follow_global_c() {
+    nanoxide::global::global_init();
+    SET(MODERN_BINDINGS);
+    nanoxide::global::shortcut_init();
+    with_global_mut(|g| g.openfile = None);
+    nanoxide::files::make_new_buffer();
+
+    let f = |key: i32| nanoxide::global::find_shortcut(key, MMAIN).map(|sc| sc.borrow().func);
+
+    assert_eq!(f(8), Some(FunctionId::DoHelp), "^H 帮助");
+    assert_eq!(f(17), Some(FunctionId::DoExit), "^Q 退出");
+    assert_eq!(f(19), Some(FunctionId::DoSaveFile), "^S 保存");
+    assert_eq!(f(23), Some(FunctionId::DoWriteOut), "^W 写文件");
+    assert_eq!(f(15), Some(FunctionId::DoInsertFile), "^O 读文件");
+    assert_eq!(f(4), Some(FunctionId::DoFindPrevious), "^D 上一个匹配");
+    assert_eq!(f(7), Some(FunctionId::DoFindNext), "^G 下一个匹配");
+    assert_eq!(f(18), Some(FunctionId::DoReplace), "^R 替换");
+    assert_eq!(f(20), Some(FunctionId::DoGoToLine), "^T 跳行");
+    assert_eq!(f(16), Some(FunctionId::DoReportLocation), "^P 报告位置");
+    assert_eq!(f(26), Some(FunctionId::DoUndo), "^Z 撤销");
+    assert_eq!(f(25), Some(FunctionId::DoRedo), "^Y 重做");
+    assert_eq!(f(1), Some(FunctionId::DoMark), "^A 标记");
+    assert_eq!(f(24), Some(FunctionId::DoCut), "^X 剪切");
+    assert_eq!(f(3), Some(FunctionId::DoCopy), "^C 复制");
+    assert_eq!(f(22), Some(FunctionId::DoPaste), "^V 粘贴");
+    assert_eq!(f(5), Some(FunctionId::DoExecute), "^E 执行命令");
+
+    UNSET(MODERN_BINDINGS);
+}
+
+/// modern 下 ^X 是剪切（不是退出），且会先于 legacy 硬编码链生效。
+#[test]
+fn modern_x_cuts_instead_of_exiting() {
+    nanoxide::global::global_init();
+    SET(MODERN_BINDINGS);
+    nanoxide::global::shortcut_init();
+    with_global_mut(|g| {
+        g.openfile = None;
+        g.currmenu = MMAIN;
+        g.COLS = 80;
+        g.LINES = 24;
+        g.editwinrows = 20;
+        g.editwincols = 80;
+    });
+    nanoxide::files::make_new_buffer();
+    set_current_line("abc");
+
+    assert!(nanoxide::winio::handle_input_key(24));
+    assert_eq!(current_line(), "", "modern ^X 应剪切当前行");
+
+    UNSET(MODERN_BINDINGS);
+}
