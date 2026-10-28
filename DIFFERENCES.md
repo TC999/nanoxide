@@ -212,9 +212,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   `File '<name>' is unwritable`（Unix 用 `access(W_OK)`，Windows 用追加
   打开探测；查看模式不检查；`tests/read_message.rs`）。
 - ✅ 打开文件时的类型检查：目录、字符/块设备（Unix）、以分隔符结尾却
-  不存在的无效文件名都会被拒绝并提示（对应 C 的 `open_buffer` 检查；
-  `tests/open_buffer.rs`）。根用户打开只读文件时的
-  `"'%s' is meant to be read-only"` 提示未实现。
+  不存在的无效文件名都会被拒绝并提示；根用户以新缓冲区打开无写位的文件
+  时提示 `'<name>' is meant to be read-only`（对应 C 的 `open_buffer`
+  检查；`tests/open_buffer.rs`）。
 - ✅ `execute_command` / `insert_a_file_or` / `do_insertfile` / `do_execute`（用 `std::process::Command` 替代 fork/pipe，支持 `|cmd` 与 `||cmd`）
   插入/执行提示支持 `^X`/`M-F`/`M-N`/`M-\`/`^T` 翻转键（`tests/insert_flip.rs`）
 - ✅ 锁文件（`write_lockfile` / `delete_lockfile` / `lock_filename_for`，1024 字节 vim/nano 兼容格式）
