@@ -209,10 +209,11 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ `do_mark` / `do_tab` / `do_indent` / `do_unindent` / `do_comment` / `do_undo` / `do_redo` / `do_enter` / `do_wrap` / `do_exit` / `inject`
 - ✅ `do_justify`（`^J`）、`do_verbatim_input`（`M-V`）、`do_word_completion`（`^]`）、`do_spell`、`do_formatter`、`zap_all_cutbuffer`
 - ✅ `do_full_justify`（`M-J`，见第四节）
-- ✅ `do_linter`：执行菜单 `^Y` 调用；解析 `文件名:行[:列]: 消息`，
-  `^Y`/`^V` 切换消息、`^X`/Enter 退出（`tests/linter.rs`）。
-  简化：linter 在临时副本上运行（不先询问保存），未处理“消息属于
-  未打开文件”的多缓冲区分支。⚠️
+- ✅ `do_linter`：执行菜单 `^Y` 调用；已修改时先询问是否保存
+  （`linter-save_before`，有文件名直接保存、无名则进入提示），清除标记，
+  按 `construct_argument_list` 的方式拆分命令并直接在真实文件上运行
+  （不经 shell、不替换 `%s`）；`^Y`/`^V` 切换消息、`^X`/Enter 退出
+  （`tests/linter.rs`）。简化：未处理“消息属于未打开文件”的多缓冲区分支。⚠️
 - ❓ `suck_up_input_and_paste_it`、`copy_character`、`replace_buffer` 在 Rust 中找不到同名函数，可能已改名或合并，未核对语义
 
 ### 4. 搜索（`search.rs`）
@@ -315,6 +316,9 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   Windows 路径归一化），新增 `tests/operating_dir.rs`。
 - 本轮：`do_linter` 已接线（执行菜单 ^Y；解析 file:line[:col]: msg，
   ^Y/^V 切换、^X/Enter 退出；临时副本运行），新增 `tests/linter.rs`。
+- 后续：`do_linter` 对齐 C——已修改时询问保存、清除标记、按空格拆分
+  命令并直接在真实文件上运行（不经 shell、不替换 %s）；
+  `build_linter_arguments` 加入 `tests/linter.rs`。
 - 再本轮：文件名补全已实现（`input_tab` / `filename_completion` /
   `username_completion`），新增 `tests/filename_completion.rs`。
 - 本轮：`check_writable_directory` 与 `safe_tempfile` 已实现（临时目录
