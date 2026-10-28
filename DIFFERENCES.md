@@ -259,6 +259,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ 搜索/替换选项键：`M-C` / `M-R` / `M-B` 分别切换大小写/正则/反向；
   whereis 提示里 `^R` 切换到替换（`FlipReplace`，对应 `search.c:150-155`），
   不再误绑成正则（`tests/keymap_reachability.rs`）。
+- ✅ 提示历史与首/末文件键：六个提示菜单的 `^P`/`^N`/`Up`/`Down` 切换历史；
+  查找文件提示的 `^Y`/`^V` 与浏览器的 `M-\`/`M-/` 跳到首/末文件
+  （`global.c:884-895、1529-1533`；`tests/keymap_reachability.rs`）。
 - ⚠️ `replace_regexp` / `replace_line` 是简化版：匹配长度直接取 needle 长度
 - ✅ 锚点：`text.rs` 的 `do_anchor` / `to_prev_anchor` / `to_next_anchor`
   由 `execute_by_id` 分发；`M-Ins` / `M-PgUp` / `M-PgDn` / `M-"` / `M-'`
@@ -436,3 +439,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：搜索/替换菜单选项键修正——`M-C`/`M-R`/`M-B` 可达（此前缺失），
   whereis 的 `^R` 改为 `FlipReplace`（此前误绑正则），`search_init` 处理
   `FlipReplace` 切换提示；`tests/keymap_reachability.rs` 增加断言。
+- 本轮：提示历史与首/末文件键补齐——六菜单的 `^P`/`^N`/`Up`/`Down`
+  历史翻页、`MWHEREISFILE` 的 `^Y`/`^V`、浏览器的 `M-\`/`M-/`；
+  `tests/keymap_reachability.rs` 增加逐菜单断言。
