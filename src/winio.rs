@@ -3277,11 +3277,9 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     if key == ALT_RIGHT { movement::do_next_word(false); edit_refresh(); return true; }
     if key == ALT_UP { movement::to_para_begin(); edit_refresh(); return true; }
     if key == ALT_DOWN { movement::to_para_end(); edit_refresh(); return true; }
-    if key == ALT_HOME { movement::do_first_line(); edit_refresh(); return true; }
-    if key == ALT_END { movement::do_last_line(); edit_refresh(); return true; }
-    if key == ALT_PAGEUP { movement::to_prev_block(); edit_refresh(); return true; }
-    if key == ALT_PAGEDOWN { movement::to_next_block(); edit_refresh(); return true; }
-    if key == ALT_INSERT { text::do_mark(); edit_refresh(); return true; }
+    /* ALT_HOME / ALT_END / ALT_INSERT / ALT_PAGEUP / ALT_PAGEDOWN 交给
+     * shortcut 表（M-Home→ToTopRow、M-End→ToBottomRow、M-Ins→锚点、
+     * M-PgUp/M-PgDn→锚点跳转，对应 global.c:1356-1362）。 */
 
     // 其他
     if key == KEY_IC { text::do_mark(); edit_refresh(); return true; }

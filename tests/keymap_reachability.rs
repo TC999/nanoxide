@@ -215,3 +215,72 @@ fn f9_and_f10_reach_cut_and_paste() {
     assert!(nanoxide::winio::handle_input_key(KEY_F0 + 10));
     assert_eq!(current_line(), "abc", "F10 应把刚剪切的文本粘回来");
 }
+
+/// 锚点与视口行移动的键位（对应 global.c:1356-1362）。
+#[test]
+fn anchor_and_viewport_keys_follow_global_c() {
+    setup();
+
+    assert_eq!(
+        shortcut_func(ALT_INSERT),
+        Some(FunctionId::PutOrLiftAnchor),
+        "M-Ins 放置/取消锚点"
+    );
+    assert_eq!(
+        shortcut_func(ALT_HOME),
+        Some(FunctionId::ToTopRow),
+        "M-Home 移到视口顶行"
+    );
+    assert_eq!(
+        shortcut_func(ALT_END),
+        Some(FunctionId::ToBottomRow),
+        "M-End 移到视口底行"
+    );
+    assert_eq!(
+        shortcut_func(ALT_PAGEUP),
+        Some(FunctionId::ToPrevAnchor),
+        "M-PgUp 跳到上一个锚点"
+    );
+    assert_eq!(
+        shortcut_func(ALT_PAGEDOWN),
+        Some(FunctionId::ToNextAnchor),
+        "M-PgDn 跳到下一个锚点"
+    );
+    assert_eq!(
+        shortcut_func(0x222),
+        Some(FunctionId::PutOrLiftAnchor),
+        "M-\" 同样放置/取消锚点"
+    );
+    assert_eq!(
+        shortcut_func(0x227),
+        Some(FunctionId::ToNextAnchor),
+        "M-' 跳到下一个锚点"
+    );
+}
+
+/// M-Ins 真正切换当前行的锚点（而不是旧实现里的“标记”）。
+#[test]
+fn meta_insert_toggles_anchor() {
+    setup();
+    set_current_line("abc");
+
+    let anchor_state = || {
+        with_global(|g| {
+            g.openfile
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .current
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .has_anchor
+        })
+    };
+
+    assert!(nanoxide::winio::handle_input_key(ALT_INSERT));
+    assert!(anchor_state(), "第一次 M-Ins 放置锚点");
+
+    assert!(nanoxide::winio::handle_input_key(ALT_INSERT));
+    assert!(!anchor_state(), "第二次 M-Ins 取消锚点");
+}

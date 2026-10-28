@@ -338,6 +338,14 @@ pub fn shortcut_init() {
     add_to_sclist(MMAIN, "M->", ALT_GREATER, FunctionId::DoScrollRight, 0);
     /* 字数统计（对应 global.c:1452 的 M-D）。 */
     add_to_sclist(MMAIN, "M-D", 0x264, FunctionId::CountWords, 0);
+    /* 锚点与视口行移动（对应 global.c:1356-1362）。 */
+    add_to_sclist(MMAIN, "M-Ins", ALT_INSERT, FunctionId::PutOrLiftAnchor, 0);
+    add_to_sclist(MMAIN, "M-Home", ALT_HOME, FunctionId::ToTopRow, 0);
+    add_to_sclist(MMAIN, "M-End", ALT_END, FunctionId::ToBottomRow, 0);
+    add_to_sclist(MMAIN, "M-PgUp", ALT_PAGEUP, FunctionId::ToPrevAnchor, 0);
+    add_to_sclist(MMAIN, "M-PgDn", ALT_PAGEDOWN, FunctionId::ToNextAnchor, 0);
+    add_to_sclist(MMAIN, "M-\"", 0x222, FunctionId::PutOrLiftAnchor, 0);
+    add_to_sclist(MMAIN, "M-'", 0x227, FunctionId::ToNextAnchor, 0);
     /* 功能键（对应 global.c:1574-1595）。MHELP 的 F1 先注册，
      * 保证帮助查看器里 F1 是“退出”而不是“帮助”。 */
     add_to_sclist(MHELP, "F1", KEY_F0 + 1, FunctionId::DoExit, 0);
