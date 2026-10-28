@@ -183,3 +183,35 @@ fn has_valid_path_checks_parent_directory() {
 
     let _ = std::fs::remove_file(&file);
 }
+
+/// 不可进入的目录（Unix）应被拒绝（对应 C 的 `access(X_OK)` 检查）。
+#[cfg(unix)]
+#[test]
+fn has_valid_path_rejects_inaccessible_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    /* root 忽略权限位，跳过。 */
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    }
+
+    setup();
+    let dir = std::env::temp_dir().join(format!("nanoxide_noexec_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut perms = std::fs::metadata(&dir).unwrap().permissions();
+    perms.set_mode(0o600);
+    std::fs::set_permissions(&dir, perms).unwrap();
+
+    let child = format!("{}/x", dir.to_str().unwrap());
+    assert!(!nanoxide::files::has_valid_path(&child));
+    let expected = nanoxide::t!(
+        "files-path_not_accessible",
+        path = dir.to_str().unwrap()
+    );
+    assert_eq!(statusbar_msg(), expected);
+
+    let mut perms = std::fs::metadata(&dir).unwrap().permissions();
+    perms.set_mode(0o700);
+    std::fs::set_permissions(&dir, perms).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}

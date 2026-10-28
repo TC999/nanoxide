@@ -801,6 +801,23 @@ fn is_writable_file(path: &str) -> bool {
     std::fs::OpenOptions::new().append(true).open(path).is_ok()
 }
 
+/// 目录是否可进入（对应 C 的 `access(parentdir, X_OK)`）。
+#[cfg(unix)]
+fn is_accessible_dir(path: &str) -> bool {
+    use std::ffi::CString;
+    let Ok(c_path) = CString::new(path) else {
+        return false;
+    };
+    /* 安全性：access 只读取路径字符串，不修改任何进程或文件状态。 */
+    unsafe { libc::access(c_path.as_ptr(), libc::X_OK) == 0 }
+}
+
+/// Windows 没有 X_OK 权限位，视为可进入。
+#[cfg(not(unix))]
+fn is_accessible_dir(_path: &str) -> bool {
+    true
+}
+
 /// 是否"磁盘已满"错误（对应 C 版 write_file 里的 `errno == ENOSPC`）。
 #[cfg(unix)]
 pub fn is_disk_full(err: &std::io::Error) -> bool {
@@ -857,12 +874,35 @@ pub fn has_valid_path(filename: &str) -> bool {
         None => ".",
     };
 
+    /* 当前工作目录已消失（对应 C 只在父目录为 "." 时用 realpath 检查）。 */
+    #[cfg(unix)]
+    if parent == "." {
+        let gone = fs::canonicalize(".")
+            .err()
+            .map(|err| err.kind() == std::io::ErrorKind::NotFound)
+            .unwrap_or(false);
+        if gone {
+            winio::statusline(
+                MessageType::Alert,
+                &crate::t!("files-working_dir_gone"),
+            );
+            return false;
+        }
+    }
+
     match fs::metadata(parent) {
         Ok(meta) => {
             if !meta.is_dir() {
                 winio::statusline(
                     MessageType::Alert,
                     &crate::t!("files-path_not_a_directory", path = parent),
+                );
+                return false;
+            }
+            if !is_accessible_dir(parent) {
+                winio::statusline(
+                    MessageType::Alert,
+                    &crate::t!("files-path_not_accessible", path = parent),
                 );
                 return false;
             }
