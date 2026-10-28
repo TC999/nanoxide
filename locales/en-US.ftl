@@ -58,6 +58,7 @@ files-cant_go_outside = Can't go outside of {dir}
 files-is_a_directory = '{filename}' is a directory
 files-is_device = '{filename}' is a device file
 files-invalid_filename = '{filename}' is an invalid filename
+files-read_only_file = '{filename}' is meant to be read-only
 files-new_file = New File
 files-insert_file = File to insert
 files-insert_unconverted = File to insert unconverted

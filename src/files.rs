@@ -266,6 +266,24 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
         return OpenBufferResult::Unsupported;
     }
 
+    /* 根用户打开一个没有任何写位的文件时提醒（对应 C 的
+     * `new_one && !(st_mode & 0222) && geteuid() == ROOT_UID`，仅提示）。 */
+    #[cfg(unix)]
+    if path.exists() {
+        if let Ok(meta) = fs::metadata(path) {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = meta.permissions().mode();
+            /* 安全性：geteuid 只读取进程的生效用户 ID。 */
+            let is_root = unsafe { libc::geteuid() } == 0;
+            if should_warn_read_only(fresh, mode, is_root as u32) {
+                winio::statusline(
+                    MessageType::Alert,
+                    &crate::t!("files-read_only_file", filename = filename),
+                );
+            }
+        }
+    }
+
     /* 打开文件前先处理锁文件（对应 C 版 open_buffer 中 do_lockfile 的调用：
      * 在 open_file 之前、LOCKING 且非 VIEW_MODE 且文件名非空时创建锁；
      * 对不存在的文件同样创建（原版如此）。用户选择不打开时返回 Skipped，
@@ -804,6 +822,13 @@ pub fn is_fifo_file(path: &str) -> bool {
 #[cfg(not(unix))]
 pub fn is_fifo_file(_path: &str) -> bool {
     false
+}
+
+/// 是否应提示“文件应当是只读的”（对应 C 的
+/// `new_one && !(st_mode & 0222) && geteuid() == ROOT_UID`）。
+/// `euid_is_root` 用 0/1 传入，便于跨平台测试。
+pub fn should_warn_read_only(fresh: bool, mode: u32, euid_is_root: u32) -> bool {
+    fresh && (mode & 0o222) == 0 && euid_is_root == 1
 }
 
 /// 显示 "Read N lines" 消息（对应 `read_file` 末尾的状态栏提示）。

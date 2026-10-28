@@ -63,6 +63,7 @@ files-cant_go_outside = 无法访问 {dir} 外部
 files-is_a_directory = '{filename}' 是一个目录
 files-is_device = '{filename}' 是一个设备文件
 files-invalid_filename = '{filename}' 是无效的文件名
+files-read_only_file = '{filename}' 应当为只读
 files-new_file = 新文件
 files-insert_file = 插入文件
 files-insert_unconverted = 不经转换插入文件

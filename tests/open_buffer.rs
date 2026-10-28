@@ -144,3 +144,12 @@ fn open_device_file_is_rejected() {
     );
     assert_eq!(statusbar_msg(), expected);
 }
+
+/// root 只读提示的判定（对应 C 的 `new_one && !(mode & 0222) && euid==0`）。
+#[test]
+fn read_only_warning_condition_follows_c() {
+    assert!(nanoxide::files::should_warn_read_only(true, 0o444, 1));
+    assert!(!nanoxide::files::should_warn_read_only(false, 0o444, 1));
+    assert!(!nanoxide::files::should_warn_read_only(true, 0o644, 1));
+    assert!(!nanoxide::files::should_warn_read_only(true, 0o444, 0));
+}
