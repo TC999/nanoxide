@@ -187,8 +187,7 @@ fn has_valid_path_checks_parent_directory() {
 /// 不可进入的目录（Unix）应被拒绝（对应 C 的 `access(X_OK)` 检查）。
 #[cfg(unix)]
 #[test]
-fn has_valid_path_rejects_inaccessible_directory() {
-    use std::os::unix::fs::PermissionsExt;
+fn has_valid_path_rejects_inaccessible_directory() {    use std::os::unix::fs::PermissionsExt;
 
     /* root 忽略权限位，跳过。 */
     if unsafe { libc::geteuid() } == 0 {
@@ -214,4 +213,19 @@ fn has_valid_path_rejects_inaccessible_directory() {
     perms.set_mode(0o700);
     std::fs::set_permissions(&dir, perms).unwrap();
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 新缓冲区打开失败（父目录不存在）时不应留下空缓冲区。
+#[test]
+fn open_another_buffer_rejects_missing_parent() {
+    setup();
+    let result = nanoxide::files::open_another_buffer("no_such_dir_xyz/file.txt");
+    assert!(matches!(
+        result,
+        nanoxide::files::OpenBufferResult::Unsupported
+    ));
+    assert!(
+        with_global(|g| g.openfile.is_none()),
+        "失败后应关闭刚建的空缓冲区"
+    );
 }

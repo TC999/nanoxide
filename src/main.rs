@@ -192,7 +192,7 @@ fn main() {
     //     对应 C 版 main 的循环）
     let files = options.files;
     let has_filename = !files.is_empty();
-    for (idx, item) in files.iter().enumerate() {
+    for item in files.iter() {
         let name = &item.name;
         let result = if name == "-" {
             /* 文件名为 "-"：从标准输入读入（对应 C 版 argv == "-" 时
@@ -202,9 +202,9 @@ fn main() {
             } else {
                 files::OpenBufferResult::ErrorRead
             }
-        } else if idx == 0 {
-            files::open_buffer(name)
         } else {
+            /* C 版对每个命令行文件都用 open_buffer(filename, TRUE)：
+             * 新缓冲区 + has_valid_path 检查。 */
             files::open_another_buffer(name)
         };
         match result {
