@@ -1,8 +1,8 @@
 //! 字数统计的行/词/字符计数与单复数标签
 //! （对应 text.c 的 `count_lines_words_and_characters`）。
 //!
-//! 行数按 C 的公式：文件末尾魔法行内容为空时不计入；词数目前按
-//! `split_whitespace` 计（C 用 `do_next_word`，标点算词的一部分）。
+//! 行数按 C 的公式：文件末尾魔法行内容为空时不计入；词数用
+//! `do_next_word` 从起点逐步前进到终点（与 C 一致）。
 
 use nanoxide::definitions::*;
 
@@ -18,6 +18,33 @@ fn setup() {
         g.margin = 0;
     });
     nanoxide::files::make_new_buffer();
+}
+
+/// 把标记放在第一行的 `top_x`、光标放在第二行的 `bot_x`。
+fn set_region_across_lines(top_x: usize, bot_x: usize) {
+    with_global_mut(|g| {
+        let of = g.openfile.clone().unwrap();
+        let first = of.borrow().filetop.clone().unwrap();
+        let second = first.borrow().next.clone().unwrap();
+        let mut r = of.borrow_mut();
+        r.mark = Some(first);
+        r.mark_x = top_x;
+        r.current = Some(second);
+        r.current_x = bot_x;
+    });
+}
+
+/// 把标记与光标放在同一行的 `top_x` / `bot_x`。
+fn set_region_in_line(top_x: usize, bot_x: usize) {
+    with_global_mut(|g| {
+        let of = g.openfile.clone().unwrap();
+        let line = of.borrow().filetop.clone().unwrap();
+        let mut r = of.borrow_mut();
+        r.mark = Some(line.clone());
+        r.mark_x = top_x;
+        r.current = Some(line);
+        r.current_x = bot_x;
+    });
 }
 
 fn totsize() -> usize {
@@ -88,4 +115,48 @@ fn word_count_is_bound_to_meta_d() {
 
     let m_del = nanoxide::global::find_shortcut(ALT_DELETE, MMAIN).map(|sc| sc.borrow().func);
     assert_eq!(m_del, Some(FunctionId::DoCut), "M-Del 才是剪切整行");
+}
+
+/// 选区跨两行时只统计选区（行/词/字符与 C 的公式一致）。
+#[test]
+fn marked_region_across_lines_counts_only_selection() {
+    setup();
+    nanoxide::text::inject(b"one two", 7);
+    nanoxide::text::do_enter();
+    nanoxide::text::inject(b"three four", 10);
+
+    set_region_across_lines(0, 5);
+    assert_eq!(
+        nanoxide::text::count_buffer(),
+        (2, 3, 13),
+        "两行、三个词、13 个字符（\"one two\\nthree\"）"
+    );
+}
+
+/// 同一行内的选区与零长度选区。
+#[test]
+fn marked_region_in_one_line() {
+    setup();
+    nanoxide::text::inject(b"one two", 7);
+
+    set_region_in_line(0, 3);
+    assert_eq!(nanoxide::text::count_buffer(), (1, 1, 3), "\"one\"");
+
+    set_region_in_line(2, 2);
+    assert_eq!(nanoxide::text::count_buffer(), (0, 0, 0));
+}
+
+/// 有选区时消息带 "In Selection:" 前缀（C 的 `_("In Selection:  ")`）。
+#[test]
+fn report_mentions_selection() {
+    setup();
+    nanoxide::text::inject(b"one two", 7);
+    set_region_in_line(0, 3);
+    nanoxide::text::count_lines_words_and_characters();
+
+    let msg = with_global(|g| g.statusbar_msg.clone());
+    assert!(
+        msg.starts_with(&nanoxide::t!("count-in_selection")),
+        "{msg}"
+    );
 }

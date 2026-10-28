@@ -3089,51 +3089,147 @@ pub fn to_next_anchor() {
     }
 }
 
-/// 统计整个缓冲区的行数、词数、字符数（对应 `count_lines_words_and_characters`
-/// 的计数部分）。
+/// 统计（标记区域或整个缓冲区的）行数、词数、字符数
+/// （对应 `count_lines_words_and_characters` 的计数部分）。
 ///
-/// 行数按 C 的公式：`filebot->lineno - filetop->lineno`，文件末尾的魔法行
-/// 内容为空时不计入，否则加一。词数用 `split_whitespace` 计（C 用
-/// `do_next_word` 逐步前进，标点算词的一部分，这里未逐字复刻）。
+/// 行数按 C 的公式：`bot->lineno - top->lineno`，区域终点不在行首
+/// （或起点与终点重合）时再加一。词数用 `do_next_word` 从起点逐步前进到
+/// 终点（与 C 相同，标点算词的一部分由 `WORD_BOUNDS` 决定）。字符数在
+/// 整缓冲区时取 `totsize`，选区时按 C 的 `number_of_characters_in` 公式。
 pub fn count_buffer() -> (usize, usize, usize) {
-    with_global(|g| {
-        let of = g.openfile.as_ref().unwrap().borrow();
-        let filetop = of.filetop.clone();
-        let filebot = of.filebot.clone();
-        let totsize = of.totsize;
-        let ft = filetop.as_ref().map(|l| l.borrow().lineno).unwrap_or(1);
-        let (fb, bot_empty) = filebot
+    let marked = with_global(|g| {
+        g.openfile
             .as_ref()
-            .map(|l| {
-                let r = l.borrow();
-                (r.lineno, r.data.is_empty())
-            })
-            .unwrap_or((1, true));
+            .map(|of| of.borrow().mark.is_some())
+            .unwrap_or(false)
+    });
 
-        let mut lines = (fb - ft).max(0) as usize;
-        if !bot_empty {
-            lines += 1;
+    let (top, top_x, bot, bot_x) = if marked {
+        utils::get_region()
+    } else {
+        with_global(|g| {
+            let of = g.openfile.as_ref().unwrap().borrow();
+            let top = of.filetop.clone().unwrap();
+            let bot = of.filebot.clone().unwrap();
+            let bot_x = bot.borrow().data.len();
+            (top, 0, bot, bot_x)
+        })
+    };
+
+    let mut lines = bot.borrow().lineno - top.borrow().lineno;
+    let same_position = Rc::ptr_eq(&top, &bot) && top_x == bot_x;
+    if !(bot_x == 0 || same_position) {
+        lines += 1;
+    }
+
+    let chars = if marked {
+        /* 对应 C 的：
+         *   chars = number_of_characters_in(top->next, bot) + 1;
+         *   chars += mbstrlen(top->data + top_x) - mbstrlen(bot->data + bot_x);
+         * 减法的两项保证 bot 行剩余部分不超过累计值。 */
+        let mut count = if !Rc::ptr_eq(&top, &bot) {
+            match top.borrow().next.clone() {
+                Some(next) => utils::number_of_characters_in(&next, &bot) + 1,
+                None => 0,
+            }
+        } else {
+            0
+        };
+        let rest_of = |line: &LineRef, x: usize| {
+            let data = line.borrow().data.clone();
+            let start = x.min(data.len());
+            chars::mbstrlen(&data.as_bytes()[start..])
+        };
+        count = (count + rest_of(&top, top_x)).saturating_sub(rest_of(&bot, bot_x));
+        count
+    } else {
+        with_global(|g| g.openfile.as_ref().unwrap().borrow().totsize)
+    };
+
+    let words = count_words_between(&top, top_x, &bot, bot_x);
+
+    (lines.max(0) as usize, words, chars)
+}
+
+/// 从 `top/top_x` 逐步用 `do_next_word` 前进到 `bot/bot_x`，统计词数
+/// （对应 C 版 `count_lines_words_and_characters` 的词数循环）。
+/// 光标位置在结束时恢复。
+fn count_words_between(top: &LineRef, top_x: usize, bot: &LineRef, bot_x: usize) -> usize {
+    let (saved_line, saved_x) = with_global(|g| {
+        let of = g.openfile.as_ref().unwrap().borrow();
+        (of.current.clone(), of.current_x)
+    });
+
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            let mut r = of.borrow_mut();
+            r.current = Some(top.clone());
+            r.current_x = top_x;
+        }
+    });
+
+    let mut words = 0usize;
+    loop {
+        let (cur_lineno, cur_x, bot_lineno, at_bot) = with_global(|g| {
+            let of = g.openfile.as_ref().unwrap().borrow();
+            let cur = of.current.clone().unwrap();
+            let cur_lineno = cur.borrow().lineno;
+            let cur_x = of.current_x;
+            let bot_lineno = bot.borrow().lineno;
+            let at_bot = Rc::ptr_eq(&cur, bot);
+            (cur_lineno, cur_x, bot_lineno, at_bot)
+        });
+        if !(cur_lineno < bot_lineno || (at_bot && cur_x < bot_x)) {
+            break;
         }
 
-        let mut words = 0usize;
-        let mut line = filetop;
-        while let Some(l) = line {
-            let data = l.borrow().data.clone();
-            words += data.split_whitespace().count();
-            let next = { let r = l.borrow(); r.next.clone() };
-            line = next;
+        let before = (cur_lineno, cur_x);
+        if crate::movement::do_next_word(false) {
+            words += 1;
         }
 
-        (lines, words, totsize)
-    })
+        /* 防御：do_next_word 在文件末尾可能原地返回，避免死循环。 */
+        let after = with_global(|g| {
+            let of = g.openfile.as_ref().unwrap().borrow();
+            (
+                of.current.as_ref().map(|c| c.borrow().lineno).unwrap_or(0),
+                of.current_x,
+            )
+        });
+        if after == before {
+            break;
+        }
+    }
+
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            let mut r = of.borrow_mut();
+            r.current = saved_line;
+            r.current_x = saved_x;
+        }
+    });
+
+    words
 }
 
 /// 统计（标记区域或整个）缓冲区的行数、词数与字符数并显示
 /// （对应 `count_lines_words_and_characters`）。
-/// 简化：暂不区分标记区域，始终统计整个缓冲区；词数算法见
-/// [`count_buffer`]。
+/// 有标记时前缀显示 "In Selection:"（C 的消息带两格尾随空格，ftl 会
+/// 去掉，这里在代码里补上）。
 pub fn count_lines_words_and_characters() {
     let (lines, words, chars) = count_buffer();
+
+    let marked = with_global(|g| {
+        g.openfile
+            .as_ref()
+            .map(|of| of.borrow().mark.is_some())
+            .unwrap_or(false)
+    });
+    let prefix = if marked {
+        format!("{}  ", crate::t!("count-in_selection"))
+    } else {
+        String::new()
+    };
 
     let line_label = if lines == 1 {
         crate::t!("count-line_one")
@@ -3155,7 +3251,7 @@ pub fn count_lines_words_and_characters() {
         MessageType::Info,
         &crate::t!(
             "count-report",
-            prefix = "",
+            prefix = prefix,
             lines = lines.to_string(),
             lines_label = line_label,
             words = words.to_string(),
