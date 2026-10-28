@@ -1978,9 +1978,15 @@ fn insert_a_file_or(execute: bool) {
     } else {
         /* 插入文件内容。 */
         if ISSET(NEW_BUFFER) {
-            let result = open_buffer(&answer);
-            /* 用户拒绝覆盖已有锁时（Skipped）：不修改当前缓冲区的状态。 */
-            if !matches!(result, OpenBufferResult::Skipped) {
+            /* 插入到新缓冲区（对应 C 的 open_buffer(answer, TRUE)）：
+             * 新建缓冲区而不是替换当前缓冲区。 */
+            let result = open_another_buffer(&answer);
+            /* 只有成功载入/新建才更新标记与显示；失败时 open_another_buffer
+             * 已关闭刚建的空缓冲区，不能误清原缓冲区的修改标记。 */
+            if matches!(
+                result,
+                OpenBufferResult::FileLoaded | OpenBufferResult::NewFile
+            ) {
                 if let Some(of) = with_global(|g| g.openfile.clone()) {
                     of.borrow_mut().modified = false;
                 }

@@ -229,3 +229,36 @@ fn open_another_buffer_rejects_missing_parent() {
         "失败后应关闭刚建的空缓冲区"
     );
 }
+
+/// open_another_buffer 应保留已有缓冲区（插入到新缓冲区时不能替换当前）。
+#[test]
+fn open_another_buffer_keeps_previous_buffer() {
+    setup();
+    nanoxide::files::make_new_buffer();
+    let first = with_global(|g| g.openfile.clone()).unwrap();
+
+    let path = std::env::temp_dir().join(format!("nanoxide_another_{}", std::process::id()));
+    std::fs::write(&path, b"x\n").unwrap();
+    let result = nanoxide::files::open_another_buffer(path.to_str().unwrap());
+    assert!(matches!(
+        result,
+        nanoxide::files::OpenBufferResult::FileLoaded
+    ));
+
+    let second = with_global(|g| g.openfile.clone()).unwrap();
+    assert!(
+        !std::rc::Rc::ptr_eq(&first, &second),
+        "应切换到新的缓冲区"
+    );
+    assert!(
+        second
+            .borrow()
+            .prev
+            .as_ref()
+            .map(|p| std::rc::Rc::ptr_eq(p, &first))
+            .unwrap_or(false),
+        "旧缓冲区应仍在链表中"
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
