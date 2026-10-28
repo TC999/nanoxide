@@ -211,6 +211,10 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ 打开文件时检查可写性：不可写则优先提示
   `File '<name>' is unwritable`（Unix 用 `access(W_OK)`，Windows 用追加
   打开探测；查看模式不检查；`tests/read_message.rs`）。
+- ✅ 打开文件时的类型检查：目录、字符/块设备（Unix）、以分隔符结尾却
+  不存在的无效文件名都会被拒绝并提示（对应 C 的 `open_buffer` 检查；
+  `tests/open_buffer.rs`）。根用户打开只读文件时的
+  `"'%s' is meant to be read-only"` 提示未实现。
 - ✅ `execute_command` / `insert_a_file_or` / `do_insertfile` / `do_execute`（用 `std::process::Command` 替代 fork/pipe，支持 `|cmd` 与 `||cmd`）
   插入/执行提示支持 `^X`/`M-F`/`M-N`/`M-\`/`^T` 翻转键（`tests/insert_flip.rs`）
 - ✅ 锁文件（`write_lockfile` / `delete_lockfile` / `lock_filename_for`，1024 字节 vim/nano 兼容格式）
@@ -466,3 +470,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：写文件补 FIFO 识别与 "Writing to FIFO..." 提示，SPECIAL（紧急
   保存）新建文件权限收紧为 0600（Unix）；`tests/write_methods.rs` 增加
   FIFO 识别与权限断言（仅 Unix 运行）。
+- 本轮：`open_buffer` 补齐类型检查——设备文件（Unix）与以分隔符结尾的
+  无效文件名会被拒绝（新增 `OpenBufferResult::Unsupported` 与翻译键）；
+  `tests/open_buffer.rs` 增加用例。
