@@ -183,6 +183,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ `read_file` 的 "Read N lines" 提示：按 C 的 `num_lines` 计行（空文件
   为 0），DOS 格式用 "(converted from DOS format)" 变体；打开文件在
   ZERO/MINIBAR 下静默、插入文件时仍显示（`tests/read_message.rs`）。
+- ✅ 打开文件时检查可写性：不可写则优先提示
+  `File '<name>' is unwritable`（Unix 用 `access(W_OK)`，Windows 用追加
+  打开探测；查看模式不检查；`tests/read_message.rs`）。
 - ✅ `execute_command` / `insert_a_file_or` / `do_insertfile` / `do_execute`（用 `std::process::Command` 替代 fork/pipe，支持 `|cmd` 与 `||cmd`）
   插入/执行提示支持 `^X`/`M-F`/`M-N`/`M-\`/`^T` 翻转键（`tests/insert_flip.rs`）
 - ✅ 锁文件（`write_lockfile` / `delete_lockfile` / `lock_filename_for`，1024 字节 vim/nano 兼容格式）
@@ -362,3 +365,5 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：读取文件后显示 `Read N lines`（含 DOS 变体与单复数；空文件 0 行），
   ZERO/MINIBAR 下打开文件静默、插入时仍显示；新增 `tests/read_message.rs`，
   并更新 `tests/open_buffer.rs` 的过时断言。
+- 本轮：打开文件时检查可写性，不可写优先提示 `File '<name>' is unwritable`
+  （Unix `access(W_OK)`、Windows 追加打开探测），补充到 `tests/read_message.rs`。
