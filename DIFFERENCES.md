@@ -180,6 +180,11 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 11. ✅ **执行菜单（MEXECUTE）快捷键已补齐**：`^S`/`^T` 拼写、`^O` 格式化、
     `^V` 剪切到末尾、`^J` 全文对齐、`^Y` linter、`^Z` 挂起、`M-\` 管道
     （`global.c:1304-1305、1315、1449、1458`；`tests/keymap_reachability.rs`）。
+12. ✅ **帮助查看器与滚动键已对齐**：帮助页 `^G` 退出、`Home`/`End`/
+    `M-\`/`M-/`/`^Home`/`^End` 首末行、`Space` 翻页；主菜单与帮助页
+    `M-Up`/`M-Down`/`M--`/`M-_`/`M-+`/`M-=` 滚动屏幕——此前
+    `handle_input_key` 把 `M-Up`/`M-Down` 当段落移动
+    （`global.c:1552-1565`；`tests/keymap_reachability.rs`）。
 
 ---
 
@@ -449,3 +454,7 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   `Home`/`End`/`^Home`/`^End` 首末文件、`^/`/`M-G` 切换目录、`Space`
   翻页、`Bsp`/`Sh-Del` 上一页），移除误绑的 `^H`/`^S`；写/插入提示的
   `^T` 统一绑到浏览。
+- 本轮：帮助查看器与滚动键对齐——`^G` 退出、首末行键、`Space` 翻页；
+  `M-Up`/`M-Down`/`M--`/`M-_`/`M-+`/`M-=` 改为滚动屏幕（原先
+  `M-Up`/`M-Down` 被硬编码成段落移动）；`tests/keymap_reachability.rs`
+  增加断言。
