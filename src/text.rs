@@ -170,12 +170,6 @@ fn suspend_nano() {
     });
 }
 
-// TODO: 翻译时单复数逻辑未翻译到位（两分支都返回 singular），暂注释占位，后续补上。
-// 原型：
-// pub fn P_<'a>(singular: &'a str, _plural: &'a str, number: usize) -> &'a str {
-//     if number == 1 { singular } else { singular }
-// }
-
 /// 向缓冲区插入单个字符（旧接口）。
 pub fn insert_char(ch: char) {
     let mut buf = [0u8; 4];
@@ -3095,16 +3089,32 @@ pub fn to_next_anchor() {
     }
 }
 
-/// 统计（标记区域或整个）缓冲区的行数、词数与字符数并显示
-/// （对应 `count_lines_words_and_characters` 的简化版）。
-pub fn count_lines_words_and_characters() {
-    let (lines, chars, words) = with_global(|g| {
+/// 统计整个缓冲区的行数、词数、字符数（对应 `count_lines_words_and_characters`
+/// 的计数部分）。
+///
+/// 行数按 C 的公式：`filebot->lineno - filetop->lineno`，文件末尾的魔法行
+/// 内容为空时不计入，否则加一。词数用 `split_whitespace` 计（C 用
+/// `do_next_word` 逐步前进，标点算词的一部分，这里未逐字复刻）。
+pub fn count_buffer() -> (usize, usize, usize) {
+    with_global(|g| {
         let of = g.openfile.as_ref().unwrap().borrow();
         let filetop = of.filetop.clone();
         let filebot = of.filebot.clone();
         let totsize = of.totsize;
         let ft = filetop.as_ref().map(|l| l.borrow().lineno).unwrap_or(1);
-        let fb = filebot.as_ref().map(|l| l.borrow().lineno).unwrap_or(1);
+        let (fb, bot_empty) = filebot
+            .as_ref()
+            .map(|l| {
+                let r = l.borrow();
+                (r.lineno, r.data.is_empty())
+            })
+            .unwrap_or((1, true));
+
+        let mut lines = (fb - ft).max(0) as usize;
+        if !bot_empty {
+            lines += 1;
+        }
+
         let mut words = 0usize;
         let mut line = filetop;
         while let Some(l) = line {
@@ -3113,15 +3123,45 @@ pub fn count_lines_words_and_characters() {
             let next = { let r = l.borrow(); r.next.clone() };
             line = next;
         }
-        ((fb - ft + 1).max(1), totsize, words)
-    });
+
+        (lines, words, totsize)
+    })
+}
+
+/// 统计（标记区域或整个）缓冲区的行数、词数与字符数并显示
+/// （对应 `count_lines_words_and_characters`）。
+/// 简化：暂不区分标记区域，始终统计整个缓冲区；词数算法见
+/// [`count_buffer`]。
+pub fn count_lines_words_and_characters() {
+    let (lines, words, chars) = count_buffer();
+
+    let line_label = if lines == 1 {
+        crate::t!("count-line_one")
+    } else {
+        crate::t!("count-line_many")
+    };
+    let word_label = if words == 1 {
+        crate::t!("count-word_one")
+    } else {
+        crate::t!("count-word_many")
+    };
+    let char_label = if chars == 1 {
+        crate::t!("count-char_one")
+    } else {
+        crate::t!("count-char_many")
+    };
+
     winio::statusline(
         MessageType::Info,
         &crate::t!(
             "count-report",
+            prefix = "",
             lines = lines.to_string(),
+            lines_label = line_label,
             words = words.to_string(),
-            chars = chars.to_string()
+            words_label = word_label,
+            chars = chars.to_string(),
+            chars_label = char_label
         ),
     );
 }

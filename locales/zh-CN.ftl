@@ -355,13 +355,19 @@ anchor-only = 这是唯一的锚点
 anchor-none = 没有锚点
 
 # ---------- 字数统计（对应 text.c count_lines_words_and_characters） ----------
-count-report = 行数: {lines},  字数: {words},  字符数: {chars}
+count-in_selection = 于选中部分：
+count-line_one = 行
+count-line_many = 行
+count-word_one = 词
+count-word_many = 词
+count-char_one = 字符
+count-char_many = 字符
+count-report = {prefix}{lines} {lines_label},  {words} {words_label},  {chars} {chars_label}
 
 # ---------- linter（对应 text.c do_linter） ----------
 linter-none = 未为此类文件定义 linter
 linter-invoking = 正在调用 linter...
 linter-ok = 未发现 lint 问题
-linter-report = {count} 个 lint 错误：{first}
 linter-failed = 无法调用 linter
 linter-zero_parsable = 从命令 {cmd} 获得了 0 行可解析的行
 linter-at_first = 在第一条消息

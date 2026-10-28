@@ -349,14 +349,19 @@ anchor-only = This is the only anchor
 anchor-none = There are no anchors
 
 # ---------- 字数统计（对应 text.c count_lines_words_and_characters） ----------
-count-lines = {lines} {lines_pl}（{lines} {lines_label}）
-count-report = {lines_label}: {lines},  {words_label}: {words},  {chars_label}: {chars}
+count-in_selection = In Selection:
+count-line_one = line
+count-line_many = lines
+count-word_one = word
+count-word_many = words
+count-char_one = character
+count-char_many = characters
+count-report = {prefix}{lines} {lines_label},  {words} {words_label},  {chars} {chars_label}
 
 # ---------- linter（对应 text.c do_linter） ----------
 linter-none = No linter is defined for this type of file
 linter-invoking = Invoking linter...
 linter-ok = No lint problems found
-linter-report = {count} lint error(s): {first}
 linter-failed = Could not invoke linter
 linter-zero_parsable = Got 0 parsable lines from command: {cmd}
 linter-at_first = At first message

@@ -336,6 +336,8 @@ pub fn shortcut_init() {
     add_to_sclist(MMAIN, "M-J", 0x26A, FunctionId::DoFullJustify, 0);
     add_to_sclist(MMAIN, "M-<", ALT_LESS, FunctionId::DoScrollLeft, 0);
     add_to_sclist(MMAIN, "M->", ALT_GREATER, FunctionId::DoScrollRight, 0);
+    /* 字数统计（对应 global.c:1452 的 M-D）。 */
+    add_to_sclist(MMAIN, "M-D", 0x264, FunctionId::CountWords, 0);
     /* 功能键（对应 global.c:1574-1595）。MHELP 的 F1 先注册，
      * 保证帮助查看器里 F1 是“退出”而不是“帮助”。 */
     add_to_sclist(MHELP, "F1", KEY_F0 + 1, FunctionId::DoExit, 0);
@@ -566,7 +568,7 @@ pub fn shortcut_init_rest() {
     add_to_sclist(mmi, "M-Left", ALT_LEFT, FunctionId::DoPrevWord, 0);
     add_to_sclist(mmi, "M-Right", ALT_RIGHT, FunctionId::DoNextWord, 0);
     add_to_sclist(mmi, "M-Backspace", ALT_BACKSPACE, FunctionId::DoBackspace, 0);
-    add_to_sclist(mmi, "M-D", ALT_DELETE, FunctionId::DoCut, 0);
+    add_to_sclist(mmi, "M-Del", ALT_DELETE, FunctionId::DoCut, 0);
     add_to_sclist(mmi, "M-V", 0x256, FunctionId::DoVerbatimInput, 0);
     add_to_sclist(mmi, "^K", 11, FunctionId::DoCut, 0);
     add_to_sclist(mmi, "^U", 21, FunctionId::DoPaste, 0);
