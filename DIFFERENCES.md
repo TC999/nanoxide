@@ -166,9 +166,10 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
      （`tests/positionlog.rs`）。
 9. ✅ **主菜单控制键按 9.2 的 legacy 绑定修正**：`^S` 保存、`^Q` 反向搜索、
    `^W` 正向搜索、`^L` 居中（其余菜单全屏刷新）、`^T` 执行命令、`Ins`
-   插入文件、`M-R` 替换；`--preserve` 时不绑定 `^S`/`^Q`
-   （`tests/keymap_reachability.rs`）。此前 `handle_input_key` 的硬编码把
-   `^S` 当挂起、`^Q`/`^L` 当刷新、`^T` 当拼写、`Ins` 当标记。
+   插入文件、`M-R` 替换、`^Z` 提示挂起方式（`suggest_ctrlT_ctrlZ`）；
+   `--preserve` 时不绑定 `^S`/`^Q`（`tests/keymap_reachability.rs`）。
+   此前 `handle_input_key` 的硬编码把 `^S` 当挂起、`^Q`/`^L` 当刷新、
+   `^T` 当拼写、`^Z` 当撤销、`Ins` 当标记。
 10. ✅ **`--modernbindings`（`-/`）的键位表已实现**：`shortcut_init` 按
     该标志选择两套主菜单绑定，modern 表对应 `global.c:1243-1262`、`1301`
     （`^S` 保存、`^W` 写文件、`^O` 读文件、`^Q` 退出、`^D`/`^G` 查找、
@@ -420,3 +421,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   记录 `--modernbindings` 键位表尚未实现。
 - 本轮：实现 `--modernbindings` 的主菜单键位表（`shortcut_init` 按标志
   分支，modern 下 `execute_function` 先查表），并补它的绑定与分发测试。
+- 本轮：legacy 的 `^Z` 改为 `suggest_ctrlT_ctrlZ`（仅当 `^T` 是 Execute
+  且执行菜单 `^Z` 是 Suspend 时提示），补执行菜单的 `^Z` → Suspend 绑定
+  与 `global-suspend_hint` 翻译；`execute_by_id` 接入 `SuggestSuspend`。
