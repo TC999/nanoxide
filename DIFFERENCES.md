@@ -169,9 +169,13 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
    插入文件、`M-R` 替换；`--preserve` 时不绑定 `^S`/`^Q`
    （`tests/keymap_reachability.rs`）。此前 `handle_input_key` 的硬编码把
    `^S` 当挂起、`^Q`/`^L` 当刷新、`^T` 当拼写、`Ins` 当标记。
-10. ⚠️ **`--modernbindings`（`-/`）尚未切换键位表**：目前只处理
-    `--preserve` 与提示的取消键；C 的 modern 表（`^S` 保存、`^W` 写文件、
-    `^O` 读文件、`^Q` 退出、`^D`/`^G` 查找等）未实现。
+10. ✅ **`--modernbindings`（`-/`）的键位表已实现**：`shortcut_init` 按
+    该标志选择两套主菜单绑定，modern 表对应 `global.c:1243-1262`、`1301`
+    （`^S` 保存、`^W` 写文件、`^O` 读文件、`^Q` 退出、`^D`/`^G` 查找、
+    `^X` 剪切、`^C` 复制、`^V` 粘贴、`^A` 标记、`^Z`/`^Y` 撤销/重做、
+    `^T` 跳行、`^E` 执行、`^H` 帮助、`^R` 替换、`^P` 报告位置）。
+    `execute_function` 在该模式下先查 shortcut 表，避免 legacy 硬编码覆盖
+    （`tests/keymap_reachability.rs`）。
 
 ---
 
@@ -414,3 +418,5 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   （`^S` 保存、`^Q` 反向搜索、`^W` 正向搜索、`^L` 居中、`^T` 执行命令、
   `Ins` 插入文件、`M-R` 替换），`--preserve` 时 `^S`/`^Q` 不绑定；
   记录 `--modernbindings` 键位表尚未实现。
+- 本轮：实现 `--modernbindings` 的主菜单键位表（`shortcut_init` 按标志
+  分支，modern 下 `execute_function` 先查表），并补它的绑定与分发测试。
