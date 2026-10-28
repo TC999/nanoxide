@@ -222,7 +222,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   （新缓冲区 + `has_valid_path`），首个文件的父目录无效时同样拒绝，
   不会残留空缓冲区（`tests/open_buffer.rs`）。
 - ✅ `execute_command` / `insert_a_file_or` / `do_insertfile` / `do_execute`（用 `std::process::Command` 替代 fork/pipe，支持 `|cmd` 与 `||cmd`）
-  插入/执行提示支持 `^X`/`M-F`/`M-N`/`M-\`/`^T` 翻转键（`tests/insert_flip.rs`）
+  插入/执行提示支持 `^X`/`M-F`/`M-N`/`M-\`/`^T` 翻转键（`tests/insert_flip.rs`）。
+  插入到新缓冲区改用 `open_another_buffer`（保留当前缓冲区，此前会替换它），
+  失败时不误清原缓冲区的修改标记（`tests/open_buffer.rs`）。
 - ✅ 锁文件（`write_lockfile` / `delete_lockfile` / `lock_filename_for`，1024 字节 vim/nano 兼容格式）
 - ✅ 多缓冲区切换（`M-,` / `M-.`）
 - ⚠️ `make_backup_of`：只做 `文件名~`，没有 `backupdir`、`insecure_backup` 的完整逻辑
@@ -488,3 +490,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：命令行首个文件改用 `open_another_buffer`（等价 C 对每个文件都传
   TRUE），使 `has_valid_path` 对首个文件也生效；补测试验证失败后不残留
   空缓冲区。
+- 本轮：`insert_a_file_or` 的“插入到新缓冲区”也改用 `open_another_buffer`
+  （此前会替换当前缓冲区），并只在成功载入/新建时清修改标记；
+  `tests/open_buffer.rs` 增加旧缓冲区保留的测试。
