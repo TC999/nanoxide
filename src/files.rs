@@ -737,6 +737,23 @@ fn is_writable_file(path: &str) -> bool {
     std::fs::OpenOptions::new().append(true).open(path).is_ok()
 }
 
+/// 是否"磁盘已满"错误（对应 C 版 write_file 里的 `errno == ENOSPC`）。
+#[cfg(unix)]
+pub fn is_disk_full(err: &std::io::Error) -> bool {
+    err.raw_os_error() == Some(libc::ENOSPC)
+}
+
+/// Windows：Win32 错误码 112 = ERROR_DISK_FULL。
+#[cfg(windows)]
+pub fn is_disk_full(err: &std::io::Error) -> bool {
+    err.raw_os_error() == Some(112)
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn is_disk_full(_err: &std::io::Error) -> bool {
+    false
+}
+
 /// 显示 "Read N lines" 消息（对应 `read_file` 末尾的状态栏提示）。
 ///
 /// 打开文件时在 ZERO/MINIBAR 下静默（行数交给 minibar 显示）；插入文件时
@@ -869,6 +886,11 @@ fn finish_save(
         output.extend_from_slice(&fs::read(answer).unwrap_or_default());
     }
 
+    /* 正常写入前提示（对应 C 版 write_file 的 `statusbar("Writing...")`）。 */
+    if method != WritingType::Special {
+        winio::statusbar(&crate::t!("files-writing"));
+    }
+
     match fs::write(answer, &output) {
         Ok(_) => {
             /* 保存成功。对应 C 版 write_file 的收尾：仅当 annotate（常规整
@@ -926,6 +948,21 @@ fn finish_save(
         }
         Err(e) => {
             winio::statusline(MessageType::Ahem, &crate::t!("files-error_writing", filename = answer, err = e.to_string()));
+            /* 磁盘满：C 版额外给出"文件可能已被截断"的警告与恢复建议，
+             * 并在离开前刷新 statinfo。 */
+            if method != WritingType::Special && is_disk_full(&e) {
+                winio::napms(3200);
+                winio::statusline(MessageType::Alert, &crate::t!("files-disk_full"));
+                winio::napms(3200);
+                winio::statusline(MessageType::Alert, &crate::t!("files-disk_full_remedy"));
+                if let Ok(meta) = fs::metadata(answer) {
+                    with_global_mut(|g| {
+                        if let Some(of) = &g.openfile {
+                            of.borrow_mut().statinfo = Some(Box::new(meta));
+                        }
+                    });
+                }
+            }
             -1
         }
     }

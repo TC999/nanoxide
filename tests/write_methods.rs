@@ -72,3 +72,25 @@ fn write_prompt_keys_are_bound() {
     assert_eq!(func(0x270), Some(FunctionId::PrependIt), "M-P 前置");
     assert_eq!(func(20), Some(FunctionId::ToFiles), "^T 浏览");
 }
+
+/// 磁盘满错误的识别（对应 C 版 `errno == ENOSPC` 的警告分支）。
+#[cfg(unix)]
+#[test]
+fn disk_full_error_is_recognized() {
+    let full = std::io::Error::from_raw_os_error(libc::ENOSPC);
+    assert!(nanoxide::files::is_disk_full(&full));
+
+    let denied = std::io::Error::from_raw_os_error(libc::EACCES);
+    assert!(!nanoxide::files::is_disk_full(&denied));
+}
+
+/// Windows 的 ERROR_DISK_FULL 是 112。
+#[cfg(windows)]
+#[test]
+fn disk_full_error_is_recognized() {
+    let full = std::io::Error::from_raw_os_error(112);
+    assert!(nanoxide::files::is_disk_full(&full));
+
+    let denied = std::io::Error::from_raw_os_error(5); // ERROR_ACCESS_DENIED
+    assert!(!nanoxide::files::is_disk_full(&denied));
+}
