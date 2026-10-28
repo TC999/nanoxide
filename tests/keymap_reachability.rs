@@ -596,3 +596,26 @@ fn help_menu_and_scroll_keys_follow_global_c() {
     assert_eq!(f(0x22D, MMAIN), Some(FunctionId::DoScrollUp), "M-- 滚动");
     assert_eq!(f(0x23D, MMAIN), Some(FunctionId::DoScrollDown), "M-= 滚动");
 }
+
+/// `M-X` 切换帮助行（对应 `global.c` 的 `do_toggle NO_HELP`）。
+#[test]
+fn meta_x_toggles_help_lines() {
+    setup();
+
+    let shortcut = nanoxide::global::find_shortcut(0x278, MMAIN).expect("M-X 应绑定");
+    {
+        let borrowed = shortcut.borrow();
+        assert_eq!(borrowed.func, FunctionId::DoToggle);
+        assert_eq!(borrowed.toggle, NO_HELP as i32);
+    }
+
+    let before = ISSET(NO_HELP);
+    assert!(nanoxide::winio::handle_input_key(0x278));
+    assert_ne!(ISSET(NO_HELP), before, "M-X 应切换 NO_HELP");
+
+    /* 帮助查看器里不绑定 M-X（C 的 &~MFINDINHELP）。 */
+    assert!(
+        nanoxide::global::find_shortcut(0x278, MHELP).is_none(),
+        "帮助页不应有 M-X"
+    );
+}

@@ -332,6 +332,14 @@ pub fn shortcut_init() {
         FunctionId::DoFullRefresh,
         0,
     );
+    /* 切换帮助行（对应 global.c 的 M-X → do_toggle NO_HELP）。 */
+    add_to_sclist(
+        (MMOST | MBROWSER | MYESNO) & !MFINDINHELP,
+        "M-X",
+        0x278,
+        FunctionId::DoToggle,
+        NO_HELP as i32,
+    );
 
     if ISSET(MODERN_BINDINGS) {
         /* modern 键位（对应 global.c:1243-1262 与 1301 行的 ^E）。 */
