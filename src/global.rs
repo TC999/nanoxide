@@ -732,6 +732,23 @@ pub fn shortcut_init_rest() {
     add_to_sclist(MBROWSER, "PageUp", KEY_PPAGE, FunctionId::DoPageUp, 0);
     add_to_sclist(MBROWSER, "PageDown", KEY_NPAGE, FunctionId::DoPageDown, 0);
 
+    /* 帮助查看器（对应 global.c:1552-1565）：^G 退出、Home/End 首末行、
+     * M-\/M-/ 首末行、^Home/^End、Space 翻页、M-Up/M-Down 滚动。 */
+    add_to_sclist(MHELP, "^G", 7, FunctionId::DoExit, 0);
+    add_to_sclist(MHELP, "Home", KEY_HOME, FunctionId::DoFirstLine, 0);
+    add_to_sclist(MHELP, "End", KEY_END, FunctionId::DoLastLine, 0);
+    add_to_sclist(MHELP, "M-\\", 0x25C, FunctionId::DoFirstLine, 0);
+    add_to_sclist(MHELP, "M-/", 0x22F, FunctionId::DoLastLine, 0);
+    add_to_sclist(MHELP, "^Home", CONTROL_HOME, FunctionId::DoFirstLine, 0);
+    add_to_sclist(MHELP, "^End", CONTROL_END, FunctionId::DoLastLine, 0);
+    add_to_sclist(MHELP, "Space", 0x20, FunctionId::DoPageDown, 0);
+    add_to_sclist(MMAIN | MHELP, "M-Up", ALT_UP, FunctionId::DoScrollUp, 0);
+    add_to_sclist(MMAIN | MHELP, "M-Down", ALT_DOWN, FunctionId::DoScrollDown, 0);
+    add_to_sclist(MMAIN | MHELP, "M--", 0x22D, FunctionId::DoScrollUp, 0);
+    add_to_sclist(MMAIN | MHELP, "M-_", 0x25F, FunctionId::DoScrollUp, 0);
+    add_to_sclist(MMAIN | MHELP, "M-+", 0x22B, FunctionId::DoScrollDown, 0);
+    add_to_sclist(MMAIN | MHELP, "M-=", 0x23D, FunctionId::DoScrollDown, 0);
+
     // 函数列表补充
     add_to_funcs(FunctionId::GetOlderItem, MMAIN, crate::t!("key-get_older_item"), "older_gist", false);
     add_to_funcs(FunctionId::GetNewerItem, MMAIN, crate::t!("key-get_newer_item"), "newer_gist", false);

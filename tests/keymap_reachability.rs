@@ -561,3 +561,38 @@ fn browser_and_prompt_bindings_follow_global_c() {
     assert_eq!(f(20, MWRITEFILE), Some(FunctionId::ToFiles), "写文件 ^T");
     assert_eq!(f(20, MINSERTFILE), Some(FunctionId::ToFiles), "插入文件 ^T");
 }
+
+/// 帮助查看器与滚动键（对应 `global.c:1552-1565`）。
+#[test]
+fn help_menu_and_scroll_keys_follow_global_c() {
+    setup();
+    let f = |key: i32, menu: i32| {
+        nanoxide::global::find_shortcut(key, menu).map(|sc| sc.borrow().func)
+    };
+
+    assert_eq!(f(7, MHELP), Some(FunctionId::DoExit), "^G 退出帮助");
+    assert_eq!(f(KEY_HOME, MHELP), Some(FunctionId::DoFirstLine), "Home 首行");
+    assert_eq!(f(KEY_END, MHELP), Some(FunctionId::DoLastLine), "End 末行");
+    assert_eq!(f(0x25C, MHELP), Some(FunctionId::DoFirstLine), "M-\\ 首行");
+    assert_eq!(f(0x22F, MHELP), Some(FunctionId::DoLastLine), "M-/ 末行");
+    assert_eq!(
+        f(CONTROL_HOME, MHELP),
+        Some(FunctionId::DoFirstLine),
+        "^Home 首行"
+    );
+    assert_eq!(
+        f(CONTROL_END, MHELP),
+        Some(FunctionId::DoLastLine),
+        "^End 末行"
+    );
+    assert_eq!(f(0x20, MHELP), Some(FunctionId::DoPageDown), "Space 翻页");
+
+    assert_eq!(f(ALT_UP, MMAIN), Some(FunctionId::DoScrollUp), "M-Up 滚动");
+    assert_eq!(
+        f(ALT_DOWN, MMAIN),
+        Some(FunctionId::DoScrollDown),
+        "M-Down 滚动"
+    );
+    assert_eq!(f(0x22D, MMAIN), Some(FunctionId::DoScrollUp), "M-- 滚动");
+    assert_eq!(f(0x23D, MMAIN), Some(FunctionId::DoScrollDown), "M-= 滚动");
+}

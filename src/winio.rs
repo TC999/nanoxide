@@ -3293,8 +3293,8 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     // Alt 组合
     if key == ALT_LEFT { movement::do_prev_word(); edit_refresh(); return true; }
     if key == ALT_RIGHT { movement::do_next_word(false); edit_refresh(); return true; }
-    if key == ALT_UP { movement::to_para_begin(); edit_refresh(); return true; }
-    if key == ALT_DOWN { movement::to_para_end(); edit_refresh(); return true; }
+    /* ALT_UP / ALT_DOWN 交给 shortcut 表：C 的 M-Up/M-Down 是滚动屏幕
+     * （global.c:1559-1562），不是段落移动。 */
     /* ALT_HOME / ALT_END / ALT_INSERT / ALT_PAGEUP / ALT_PAGEDOWN 交给
      * shortcut 表（M-Home→ToTopRow、M-End→ToBottomRow、M-Ins→锚点、
      * M-PgUp/M-PgDn→锚点跳转，对应 global.c:1356-1362）。 */
