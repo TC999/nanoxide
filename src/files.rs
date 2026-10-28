@@ -363,8 +363,17 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
             /* 对应 C 版 read_file 末尾的 report_size = TRUE：MINIBAR 下
              * 下一次刷新时显示读入后的行数。 */
             with_global_mut(|g| g.report_size = true);
-            /* "Read N lines" 提示（打开文件路径：undoable = FALSE）。 */
-            show_read_message(num_lines, format, false);
+            /* 文件不可写时优先提示（对应 C 版 read_file 的 access(W_OK)
+             * 检查；查看模式不做检查）。 */
+            if !ISSET(VIEW_MODE) && !is_writable_file(filename) {
+                winio::statusline(
+                    MessageType::Alert,
+                    &crate::t!("files-unwritable", filename = filename),
+                );
+            } else {
+                /* "Read N lines" 提示（打开文件路径：undoable = FALSE）。 */
+                show_read_message(num_lines, format, false);
+            }
             OpenBufferResult::FileLoaded
         }
         Err(e) => {
@@ -708,6 +717,24 @@ fn read_file_lines(path: &Path) -> std::io::Result<(Vec<String>, FormatType, usi
         FormatType::NixFile
     };
     Ok((lines, format, num_lines))
+}
+
+/// 检查文件是否可写（对应 C 版 `read_file` 里的 `access(filename, W_OK)`）。
+/// Unix 直接用 `access`；Windows 没有该接口，以追加方式打开探测（不写入内容）。
+#[cfg(unix)]
+fn is_writable_file(path: &str) -> bool {
+    use std::ffi::CString;
+    let Ok(c_path) = CString::new(path) else {
+        return false;
+    };
+    /* 安全性：access 只读取路径字符串，不修改任何进程或文件状态。 */
+    unsafe { libc::access(c_path.as_ptr(), libc::W_OK) == 0 }
+}
+
+/// Windows：以追加方式打开做探测；打开成功即认为可写。
+#[cfg(not(unix))]
+fn is_writable_file(path: &str) -> bool {
+    std::fs::OpenOptions::new().append(true).open(path).is_ok()
 }
 
 /// 显示 "Read N lines" 消息（对应 `read_file` 末尾的状态栏提示）。

@@ -82,6 +82,7 @@ files-read_one = Read {count} line
 files-read_many = Read {count} lines
 files-read_dos_one = Read {count} line (converted from DOS format)
 files-read_dos_many = Read {count} lines (converted from DOS format)
+files-unwritable = File '{filename}' is unwritable
 files-making_backup = Making backup...
 files-too_many_backups = Too many existing backup files
 files-cannot_write_backup = Error writing backup file {filename}: {err}

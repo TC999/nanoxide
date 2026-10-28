@@ -92,3 +92,31 @@ fn read_message_is_silent_under_minibar() {
     );
     let _ = std::fs::remove_file(&path);
 }
+
+/// 只读文件打开时优先提示不可写（对应 C 版 read_file 的 access(W_OK)）。
+#[test]
+fn unwritable_file_shows_warning_instead_of_read_message() {
+    setup();
+    let path = make_file("readonly", b"one\n");
+    let mut perms = std::fs::metadata(&path).unwrap().permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&path, perms).unwrap();
+
+    /* root 下 access(W_OK) 仍成功，此时按"可写"处理，跳过断言。 */
+    #[cfg(unix)]
+    if unsafe { libc::geteuid() } == 0 {
+        let _ = std::fs::remove_file(&path);
+        return;
+    }
+
+    nanoxide::files::open_buffer(&path);
+    assert_eq!(
+        message(),
+        nanoxide::t!("files-unwritable", filename = path.clone())
+    );
+
+    let mut perms = std::fs::metadata(&path).unwrap().permissions();
+    perms.set_readonly(false);
+    std::fs::set_permissions(&path, perms).unwrap();
+    let _ = std::fs::remove_file(&path);
+}

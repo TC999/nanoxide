@@ -87,6 +87,7 @@ files-read_one = 已读取 {count} 行
 files-read_many = 已读取 {count} 行
 files-read_dos_one = 已读取 {count} 行（转换自 DOS 格式）
 files-read_dos_many = 已读取 {count} 行（转换自 DOS 格式）
+files-unwritable = 文件“{filename}”不可写入
 files-making_backup = 正在备份...
 files-too_many_backups = 现有备份文件过多
 files-cannot_write_backup = 写入备份文件 {filename} 出错：{err}
