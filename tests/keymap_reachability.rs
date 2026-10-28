@@ -445,3 +445,37 @@ fn execute_menu_keys_follow_global_c() {
     assert_eq!(f(26), Some(FunctionId::DoSuspend), "^Z 挂起");
     assert_eq!(f(0x25C), Some(FunctionId::FlipPipe), "M-\\ 管道");
 }
+
+/// 搜索/替换菜单的选项键与 `global.c:866-877` 一致。
+#[test]
+fn search_menu_options_follow_global_c() {
+    setup();
+    let f = |key: i32, menu: i32| {
+        nanoxide::global::find_shortcut(key, menu).map(|sc| sc.borrow().func)
+    };
+
+    for menu in [MWHEREIS, MREPLACE] {
+        assert_eq!(
+            f(0x263, menu),
+            Some(FunctionId::DoToggleCaseSensitive),
+            "M-C 区分大小写"
+        );
+        assert_eq!(
+            f(0x272, menu),
+            Some(FunctionId::DoToggleRegexp),
+            "M-R 正则表达式"
+        );
+        assert_eq!(
+            f(0x262, menu),
+            Some(FunctionId::DoToggleBackwards),
+            "M-B 反向搜索"
+        );
+    }
+
+    /* whereis 提示里 ^R 是切换到替换（C 的 flip_replace），不是正则。 */
+    assert_eq!(
+        f(18, MWHEREIS),
+        Some(FunctionId::FlipReplace),
+        "^R 切换到替换"
+    );
+}

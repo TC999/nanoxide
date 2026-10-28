@@ -459,13 +459,15 @@ pub fn shortcut_init() {
     // 搜索菜单
     add_to_sclist(MWHEREIS, r"^M", 13, FunctionId::DoSearchForward, 0);
     add_to_sclist(MWHEREIS, r"^C", 3, FunctionId::DoCancel, 0);
-    add_to_sclist(MWHEREIS, r"^R", 18, FunctionId::DoToggleRegexp, 0);
-    add_to_sclist(MWHEREIS, r"^B", 2, FunctionId::DoToggleBackwards, 0);
+    /* 搜索/替换选项（对应 global.c:866-877：M-C / M-R / M-B）。 */
+    add_to_sclist(MWHEREIS | MREPLACE, "M-C", 0x263, FunctionId::DoToggleCaseSensitive, 0);
+    add_to_sclist(MWHEREIS | MREPLACE, "M-R", 0x272, FunctionId::DoToggleRegexp, 0);
+    add_to_sclist(MWHEREIS | MREPLACE, "M-B", 0x262, FunctionId::DoToggleBackwards, 0);
+    /* whereis 提示里 ^R 切换到替换（对应 global.c:876 的 flip_replace）。 */
+    add_to_sclist(MWHEREIS, r"^R", 18, FunctionId::FlipReplace, 0);
     // 替换菜单
     add_to_sclist(MREPLACE, r"^M", 13, FunctionId::DoReplace, 0);
     add_to_sclist(MREPLACE, r"^C", 3, FunctionId::DoCancel, 0);
-    add_to_sclist(MREPLACE, r"^R", 18, FunctionId::DoToggleRegexp, 0);
-    add_to_sclist(MREPLACE, r"^B", 2, FunctionId::DoToggleBackwards, 0);
     // 通用提示快捷键（对应 C 的 MMOST|MBROWSER ^M、取消 ^C 与 Esc）
     add_to_sclist(MMOST | MBROWSER, r"^M", 13, FunctionId::DoEnter, 0);
     add_to_sclist((MMOST & !MMAIN) | MYESNO, r"^C", 3, FunctionId::DoCancel, 0);

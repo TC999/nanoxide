@@ -389,6 +389,7 @@ pub fn search_init(replacing: bool, retain_answer: bool) {
     };
 
     let mut retain_answer = retain_answer;
+    let mut replacing = replacing;
     loop {
         let menu = if inhelp {
             MFINDINHELP
@@ -453,6 +454,15 @@ pub fn search_init(replacing: bool, retain_answer: bool) {
             Some(FunctionId::DoToggleCaseSensitive) => TOGGLE(CASE_SENSITIVE),
             Some(FunctionId::DoToggleBackwards) => TOGGLE(BACKWARDS_SEARCH),
             Some(FunctionId::DoToggleRegexp) => TOGGLE(USE_REGEXP),
+            Some(FunctionId::FlipReplace) => {
+                /* whereis 提示里按 ^R 切到替换（对应 search.c:150-155）。 */
+                if ISSET(VIEW_MODE) {
+                    winio::print_view_warning();
+                    winio::napms(600);
+                } else {
+                    replacing = !replacing;
+                }
+            }
             _ => break,
         }
     }
