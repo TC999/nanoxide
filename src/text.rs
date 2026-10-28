@@ -3181,52 +3181,87 @@ pub fn parse_linter_output(text: &str) -> Vec<LintMessage> {
     text.lines().filter_map(parse_lint_line).collect()
 }
 
+/// 把 linter 命令按空格拆成程序与参数，并把文件名作为最后一个参数
+/// （对应 text.c 的 `construct_argument_list`：C 版按空格 `strtok`，
+/// 不处理引号，也不替换 `%s`）。
+pub fn build_linter_arguments(linter: &str, filename: &str) -> (String, Vec<String>) {
+    let mut parts = linter.split(' ').filter(|part| !part.is_empty());
+    let program = parts.next().unwrap_or("").to_string();
+    let mut args: Vec<String> = parts.map(|part| part.to_string()).collect();
+    args.push(filename.to_string());
+    (program, args)
+}
+
 /// 运行当前语法的 linter，并进入 linter 模式浏览消息
 /// （对应 text.c 的 `do_linter`）。
 ///
 /// 与 C 版相同的部分：按 `文件名:行[:列]: 消息` 解析、跳转到每条消息的
-/// 位置、`^Y`/`^V` 切换上一条/下一条、`^X`/Enter 退出。
-/// 简化：linter 在临时副本上运行（不先询问保存），且不处理“消息属于
-/// 未打开文件”的多缓冲区分支。
+/// 位置、`^Y`/`^V` 切换上一条/下一条、`^X`/Enter 退出；已修改时先询问
+/// 是否保存，linter 直接在真实文件上运行（参数用 `construct_argument_list`
+/// 的拆分方式）。
+/// 简化：不处理“消息属于未打开文件”的多缓冲区分支。
 pub fn do_linter() {
+    /* C 版在最前面就记下"运行过外部工具"，受限模式也一样。 */
+    with_global_mut(|g| g.ran_a_tool = true);
+
     if files::in_restricted_mode() {
         return;
     }
-    let linter = with_global(|g| {
-        g.openfile
+
+    let (linter, filename, modified) = with_global(|g| {
+        let of = g.openfile.as_ref().map(|o| o.borrow());
+        let linter = of
             .as_ref()
-            .and_then(|of| of.borrow().syntax.clone())
-            .and_then(|s| s.borrow().linter.clone())
+            .and_then(|r| r.syntax.clone())
+            .and_then(|s| s.borrow().linter.clone());
+        let filename = of
+            .as_ref()
+            .and_then(|r| r.filename.clone())
+            .unwrap_or_default();
+        let modified = of.as_ref().map(|r| r.modified).unwrap_or(false);
+        (linter, filename, modified)
     });
     let Some(linter) = linter else {
         winio::statusline(MessageType::Ahem, &crate::t!("linter-none"));
         return;
     };
 
-    with_global_mut(|g| g.ran_a_tool = true);
-    let Some(temp_name) = files::safe_tempfile_name() else {
-        return;
-    };
-    if !write_buffer_to_file(&temp_name) {
-        let _ = std::fs::remove_file(&temp_name);
-        return;
+    /* 清除标记（对应 C 版 `openfile->mark = NULL`）。 */
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            let mut r = of.borrow_mut();
+            r.mark = None;
+            r.mark_x = 0;
+        }
+    });
+    winio::edit_refresh();
+
+    /* 缓冲区已修改时先询问是否保存（对应 C 版 do_linter 中的
+     * "Save modified buffer before linting?"）。C 版用
+     * write_it_out(FALSE, FALSE)：有文件名时不提示，无名时进入提示。 */
+    if modified {
+        let choice = crate::prompt::ask_user(false, &crate::t!("linter-save_before"));
+        if choice == CANCEL {
+            winio::statusbar(&crate::t!("files-cancelled"));
+            return;
+        } else if choice == YES {
+            let saved = if filename.is_empty() {
+                files::do_writeout(false) > 0
+            } else {
+                files::write_it_out(false, false) > 0
+            };
+            if !saved {
+                return;
+            }
+        }
     }
 
     winio::statusbar(&crate::t!("linter-invoking"));
 
-    /* 把 %s 替换为临时文件名，其余交给 shell 执行。 */
-    let command = linter.replace("%s", &temp_name);
-    #[cfg(windows)]
-    let output = std::process::Command::new("cmd")
-        .args(["/C", &command])
-        .output();
-    #[cfg(not(windows))]
-    let output = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(&command)
-        .output();
-
-    let _ = std::fs::remove_file(&temp_name);
+    /* C 版按空格拆分命令、把文件名作为最后一个参数，不经过 shell、
+     * 也不替换 %s（对应 text.c 的 construct_argument_list）。 */
+    let (program, args) = build_linter_arguments(&linter, &filename);
+    let output = std::process::Command::new(&program).args(&args).output();
 
     let output = match output {
         Ok(output) => output,

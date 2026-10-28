@@ -366,6 +366,7 @@ linter-failed = 无法调用 linter
 linter-zero_parsable = 从命令 {cmd} 获得了 0 行可解析的行
 linter-at_first = 在第一条消息
 linter-at_last = 在最后一条消息
+linter-save_before = 运行代码语法检查之前保存已修改的缓冲区吗？
 signals-crash_message = 抱歉！Nano 崩溃了！代码：{code}。请报告错误。
 files-buffer_written_to = 缓冲已写入 {name}
 files-too_many_savefiles = .save 文件过多

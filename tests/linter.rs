@@ -63,3 +63,25 @@ fn linter_mode_keys_are_bound() {
         .map(|sc| sc.borrow().func);
     assert_eq!(next, Some(FunctionId::DoPageDown), "下一条消息");
 }
+
+/// linter 命令按 C 的 `construct_argument_list` 拆分：按空格断开、
+/// 文件名追加为最后一个参数，不替换 `%s`、不经过 shell。
+#[test]
+fn linter_arguments_follow_construct_argument_list() {
+    let (program, args) = nanoxide::text::build_linter_arguments("pyflakes", "a.py");
+    assert_eq!(program, "pyflakes");
+    assert_eq!(args, vec!["a.py"]);
+
+    /* 连续空格被跳过（C 用 strtok）。 */
+    let (program, args) = nanoxide::text::build_linter_arguments(
+        "python  -m pylint   --output-format=text",
+        "dir/a.py",
+    );
+    assert_eq!(program, "python");
+    assert_eq!(args, vec!["-m", "pylint", "--output-format=text", "dir/a.py"]);
+
+    /* C 不认识 %s：它作为普通参数保留，文件名仍追加在最后。 */
+    let (program, args) = nanoxide::text::build_linter_arguments("lint --file=%s", "a.py");
+    assert_eq!(program, "lint");
+    assert_eq!(args, vec!["--file=%s", "a.py"]);
+}

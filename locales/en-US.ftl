@@ -361,6 +361,7 @@ linter-failed = Could not invoke linter
 linter-zero_parsable = Got 0 parsable lines from command: {cmd}
 linter-at_first = At first message
 linter-at_last = At last message
+linter-save_before = Save modified buffer before linting?
 signals-crash_message = Sorry! Nano crashed!  Code: {code}.  Please report a bug.
 files-buffer_written_to = Buffer written to {name}
 files-too_many_savefiles = Too many .save files
