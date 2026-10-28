@@ -215,9 +215,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   不存在的无效文件名都会被拒绝并提示；根用户以新缓冲区打开无写位的文件
   时提示 `'<name>' is meant to be read-only`（对应 C 的 `open_buffer`
   检查；`tests/open_buffer.rs`）。
-- ✅ `has_valid_path`：新缓冲区打开前检查父目录是否存在/是目录/可写
-  （不可写只在 LOCKING 且非查看模式时给 MILD 提示），无效时不创建缓冲区
-  （`tests/open_buffer.rs`）。
+- ✅ `has_valid_path`：新缓冲区打开前检查父目录是否存在/是目录/可进入
+  （`access(X_OK)`）/可写（不可写只在 LOCKING 且非查看模式时给 MILD
+  提示），当前工作目录消失时提示；无效时不创建缓冲区（`tests/open_buffer.rs`）。
 - ✅ `execute_command` / `insert_a_file_or` / `do_insertfile` / `do_execute`（用 `std::process::Command` 替代 fork/pipe，支持 `|cmd` 与 `||cmd`）
   插入/执行提示支持 `^X`/`M-F`/`M-N`/`M-\`/`^T` 翻转键（`tests/insert_flip.rs`）
 - ✅ 锁文件（`write_lockfile` / `delete_lockfile` / `lock_filename_for`，1024 字节 vim/nano 兼容格式）
@@ -479,3 +479,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：补根用户只读提示（`should_warn_read_only`）与 `has_valid_path`
   的父目录检查（不存在/不是目录/不可写），无效时不创建缓冲区；
   `tests/open_buffer.rs` 增加判定与父目录检查用例。
+- 本轮：`has_valid_path` 补齐 `access(X_OK)` 与“工作目录已消失”检查
+  （Unix），新增 `files-path_not_accessible` / `files-working_dir_gone`
+  翻译；`tests/open_buffer.rs` 增加不可进入目录用例（root 下跳过）。
