@@ -205,6 +205,11 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 ### 2. 文件（`files.rs`）
 
 - ✅ `open_buffer` / `save_to` / `do_writeout` / `make_new_buffer` / `close_buffer` / `emergency_save_all`
+- ✅ `open_buffer` 的两种路径与 C 一致：新缓冲区（`fresh=true`，对应
+  `open_buffer(..., TRUE)`）才做 `has_valid_path`、才创建锁文件、文件不存在
+  时按新文件处理；非新缓冲区打开不存在的文件报
+  `File "<name>" not found`（`ErrorRead`），不建缓冲区、不创建锁
+  （`tests/open_buffer.rs`、`tests/lockfile_lifecycle.rs`）。
 - ✅ `read_file` 的 "Read N lines" 提示：按 C 的 `num_lines` 计行（空文件
   为 0），DOS 格式用 "(converted from DOS format)" 变体；打开文件在
   ZERO/MINIBAR 下静默、插入文件时仍显示（`tests/read_message.rs`）。
@@ -496,3 +501,7 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   `tests/open_buffer.rs` 增加旧缓冲区保留的测试。
 - 本轮：打开命名管道时显示 "Reading from FIFO..."（与写入侧的提示对称），
   新增 `files-reading_from_fifo` 翻译。
+- 本轮：`open_buffer` 对齐 C 的两条路径——非新缓冲区打开不存在的文件报
+  `File "<name>" not found`；锁文件只在 `new_one`（`fresh`）时创建。相应
+  把测试里“打开不存在文件”的场景改用 `open_another_buffer`，并新增
+  not-found 断言。
