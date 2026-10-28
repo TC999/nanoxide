@@ -218,8 +218,10 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ `do_linter`：执行菜单 `^Y` 调用；已修改时先询问是否保存
   （`linter-save_before`，有文件名直接保存、无名则进入提示），清除标记，
   按 `construct_argument_list` 的方式拆分命令并直接在真实文件上运行
-  （不经 shell、不替换 `%s`）；`^Y`/`^V` 切换消息、`^X`/Enter 退出
-  （`tests/linter.rs`）。简化：未处理“消息属于未打开文件”的多缓冲区分支。⚠️
+  （不经 shell、不替换 `%s`）；跨文件消息会切到对应缓冲区，未打开时询问
+  “在新缓冲区打开吗？”（是→打开、否→丢弃该文件的消息、取消→退出）；
+  `^Y`/`^V` 切换消息、`^X`/Enter 退出（`tests/linter.rs`）。
+  简化：用规范化路径代替 C 的 inode 比较。
 - ✅ `count_lines_words_and_characters`（`M-D`）：行/词/字符按 C 的格式
   显示，三个名词用 `count-*_one` / `count-*_many` 双键；有标记时只统计
   选区并加 "In Selection:" 前缀；行数按 C 的公式；词数用 `do_next_word`
@@ -369,3 +371,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：字数统计支持标记区域（`In Selection:` 前缀、C 的字符数公式），
   词数改用 `do_next_word` 逐步前进；`tests/count.rs` 增加跨行/单行/零长度
   选区与前缀断言。
+- 本轮：`do_linter` 的跨文件消息分支已实现（按规范化路径切缓冲区，
+  未打开时询问是否在新缓冲区打开、否则丢弃该文件的消息）；
+  `tests/linter.rs` 增加路径匹配与缓冲区查找测试。
