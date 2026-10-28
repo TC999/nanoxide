@@ -3226,18 +3226,16 @@ fn execute_function(key: i32, _menu: i32) -> bool {
     if key == 9 { text::do_tab(); edit_refresh(); return true; }                // Ctrl+I (Tab)
     if key == 10 { text::do_justify(); edit_refresh(); return true; }             // Ctrl+J: 对齐段落
     if key == 11 { cut::cut_text(); edit_refresh(); return true; }              // Ctrl+K
-    if key == 12 { text::do_refresh(); edit_refresh(); return true; }           // Ctrl+L
+    /* Ctrl+L / Ctrl+Q / Ctrl+S / Ctrl+T / Ctrl+W 交给 shortcut 表：
+     * 主菜单 ^L=居中、^Q=反向搜索、^S=保存、^T=执行命令、^W=正向搜索
+     * （对应 global.c 的 legacy 绑定）。 */
     if key == 13 { text::do_enter(); edit_refresh(); return true; }             // Ctrl+M (Enter)
     if key == 14 { movement::do_down(); edit_refresh(); return true; }          // Ctrl+N
     if key == 15 { files::do_writeout(false); return true; }                    // Ctrl+O
     if key == 16 { movement::do_up(); edit_refresh(); return true; }            // Ctrl+P
-    if key == 17 { text::do_refresh(); return true; }                           // Ctrl+Q
     if key == 18 { files::do_insertfile(); edit_refresh(); return true; }       // Ctrl+R
-    if key == 19 { text::do_suspend(); return true; }                           // Ctrl+S
-    if key == 20 { text::do_spell(); return true; }                             // Ctrl+T
     if key == 21 { cut::paste_text(); edit_refresh(); return true; }            // Ctrl+U
     if key == 22 { movement::do_page_down(); edit_refresh(); return true; }     // Ctrl+V
-    if key == 23 { search::do_search_forward(); edit_refresh(); return true; }  // Ctrl+W
     if key == 28 { search::do_replace(); edit_refresh(); return true; }          // Ctrl+\: 替换（对应 C 版 MMAIN "^\\", do_replace）
     if key == 24 {                                                              // Ctrl+X
         if with_global(|g| g.inhelp) { /* 退出帮助 */ }
@@ -3282,7 +3280,6 @@ fn execute_function(key: i32, _menu: i32) -> bool {
      * M-PgUp/M-PgDn→锚点跳转，对应 global.c:1356-1362）。 */
 
     // 其他
-    if key == KEY_IC { text::do_mark(); edit_refresh(); return true; }
     if key == KEY_SUSPEND { text::do_suspend(); return true; }
     if key == 29 { text::complete_a_word(); edit_refresh(); return true; }        // Ctrl+]: 单词补全
     if key == 31 { search::do_gotolinecolumn(); edit_refresh(); return true; }   // Ctrl+/ 或 Ctrl+_: 跳转到行

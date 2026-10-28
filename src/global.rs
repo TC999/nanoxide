@@ -308,8 +308,23 @@ pub fn shortcut_init() {
     add_to_sclist(MMAIN, r"^H", 8, FunctionId::DoBackspace, 0);
     add_to_sclist(MMAIN, r"^I", 9, FunctionId::DoTab, 0);
     add_to_sclist(MMAIN, r"^M", 13, FunctionId::DoEnter, 0);
-    // 全屏刷新（对应 C 的 full_refresh：MMOST|MBROWSER|MHELP|MYESNO）
-    add_to_sclist(MMAIN | MBROWSER | MHELP | MYESNO, r"^L", 12, FunctionId::DoFullRefresh, 0);
+    /* 保存/反向搜索在未设置 --preserve 时可用（对应 global.c:1266-1271）。 */
+    if !ISSET(PRESERVE) {
+        add_to_sclist(MMAIN, r"^S", 19, FunctionId::DoSaveFile, 0);
+        add_to_sclist(MMAIN | MBROWSER | MHELP, r"^Q", 17, FunctionId::DoSearchBackward, 0);
+    }
+    add_to_sclist(MMAIN | MBROWSER | MHELP, r"^W", 23, FunctionId::DoSearchForward, 0);
+    add_to_sclist(MMAIN, "M-R", 0x272, FunctionId::DoReplace, 0);
+    add_to_sclist(MMAIN, "Ins", KEY_IC, FunctionId::DoInsertFile, 0);
+    // 居中/全屏刷新（对应 global.c:1463-1467：MMAIN 是 do_center，其余是 full_refresh）
+    add_to_sclist(MMAIN, r"^L", 12, FunctionId::DoCenter, 0);
+    add_to_sclist(
+        (MMOST & !MMAIN) | MBROWSER | MHELP | MYESNO,
+        r"^L",
+        12,
+        FunctionId::DoFullRefresh,
+        0,
+    );
     // Alt 组合
     add_to_sclist(MMAIN, "M-U", 0, FunctionId::DoUndo, 0);
     add_to_sclist(MMAIN, "M-E", 0, FunctionId::DoRedo, 0);

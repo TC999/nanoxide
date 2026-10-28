@@ -284,3 +284,54 @@ fn meta_insert_toggles_anchor() {
     assert!(nanoxide::winio::handle_input_key(ALT_INSERT));
     assert!(!anchor_state(), "第二次 M-Ins 取消锚点");
 }
+
+/// 主菜单控制键与 `global.c:1264-1288` 的 legacy 绑定一致。
+#[test]
+fn control_keys_follow_legacy_bindings() {
+    setup();
+
+    assert_eq!(
+        shortcut_func(19),
+        Some(FunctionId::DoSaveFile),
+        "^S 保存（无 --preserve）"
+    );
+    assert_eq!(
+        shortcut_func(17),
+        Some(FunctionId::DoSearchBackward),
+        "^Q 反向搜索"
+    );
+    assert_eq!(
+        shortcut_func(23),
+        Some(FunctionId::DoSearchForward),
+        "^W 正向搜索"
+    );
+    assert_eq!(shortcut_func(12), Some(FunctionId::DoCenter), "^L 居中");
+    assert_eq!(
+        shortcut_func(KEY_IC),
+        Some(FunctionId::DoInsertFile),
+        "Ins 插入文件"
+    );
+    assert_eq!(shortcut_func(0x272), Some(FunctionId::DoReplace), "M-R 替换");
+    assert_eq!(
+        shortcut_func(20),
+        Some(FunctionId::DoExecute),
+        "^T 执行命令"
+    );
+}
+
+/// `--preserve` 时 ^S / ^Q 不绑定（对应 C 的 `!ISSET(PRESERVE)`），^W 仍可用。
+#[test]
+fn preserve_disables_save_and_backward_search_keys() {
+    nanoxide::global::global_init();
+    SET(PRESERVE);
+    nanoxide::global::shortcut_init();
+    with_global_mut(|g| g.openfile = None);
+    nanoxide::files::make_new_buffer();
+
+    let f = |key: i32| nanoxide::global::find_shortcut(key, MMAIN).map(|sc| sc.borrow().func);
+    assert_eq!(f(19), None, "PRESERVE 下 ^S 不绑定");
+    assert_eq!(f(17), None, "PRESERVE 下 ^Q 不绑定");
+    assert_eq!(f(23), Some(FunctionId::DoSearchForward), "^W 不受影响");
+
+    UNSET(PRESERVE);
+}
