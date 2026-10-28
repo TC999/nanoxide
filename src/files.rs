@@ -12,6 +12,7 @@ use crate::winio;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 
 /// 获取当前打开的缓冲区引用（对应 C 的全局 `openfile`）。
@@ -891,7 +892,30 @@ fn finish_save(
         winio::statusbar(&crate::t!("files-writing"));
     }
 
-    match fs::write(answer, &output) {
+    /* 写入并确保数据落盘（对应 C 版 write_file 的 fflush + fsync）。
+     * FIFO 没有可落盘的存储，跳过 fsync（C 的 `!S_ISFIFO(...)` 条件）。 */
+    let write_result = (|| -> std::io::Result<()> {
+        let mut file = fs::File::create(answer)?;
+        file.write_all(&output)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileTypeExt;
+            let is_fifo = file
+                .metadata()
+                .map(|meta| meta.file_type().is_fifo())
+                .unwrap_or(false);
+            if !is_fifo {
+                file.sync_all()?;
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            file.sync_all()?;
+        }
+        Ok(())
+    })();
+
+    match write_result {
         Ok(_) => {
             /* 保存成功。对应 C 版 write_file 的收尾：仅当 annotate（常规整
              * 缓冲区保存）时更新文件名/锁/修改标记并刷新标题栏；区域写入与
