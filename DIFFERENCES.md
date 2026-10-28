@@ -241,11 +241,12 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 
 - ✅ 前后向搜索、`do_research`、`do_findnext` / `do_findprevious`、`do_replace`、`goto_line_and_column`、`do_gotolinecolumn`（`^/`，含 `++` / `--` 相对跳转）、`do_find_bracket`（`M-]`）、`not_found_msg`
 - ⚠️ `replace_regexp` / `replace_line` 是简化版：匹配长度直接取 needle 长度
-- ⚠️ 锚点：`text.rs` 的 `do_anchor` / `to_prev_anchor` / `to_next_anchor`
-  已实现并由 `execute_by_id` 分发，但 `shortcut_init` 尚未绑定 C 的
-  `M-Ins` / `M-PgUp` / `M-PgDn` / `M-"` / `M-'`；`handle_input_key` 里
-  `ALT_INSERT` 被绑到“标记”、`ALT_PAGEUP/PAGEDOWN` 被绑到块移动，
-  与 `global.c:1356-1362` 不符。
+- ✅ 锚点：`text.rs` 的 `do_anchor` / `to_prev_anchor` / `to_next_anchor`
+  由 `execute_by_id` 分发；`M-Ins` / `M-PgUp` / `M-PgDn` / `M-"` / `M-'`
+  已按 `global.c:1356-1362` 绑定，`M-Home` / `M-End` 绑定到
+  `to_top_row` / `to_bottom_row`（`tests/keymap_reachability.rs`）。
+  `search.rs` 没有 `put_or_lift_anchor` 同名函数（C 的锚点逻辑已拆到
+  `text.rs`）。
 
 ### 5. 文件浏览器（`browser.rs`）
 
@@ -396,3 +397,8 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   `t!` 键在两种语言里都存在；删除 `search.rs` 的过时占位注释。
 - 复查：更新文档中的对比对象、源码行数、测试文件数（44）、条件编译
   描述、`rcfile.rs` 行数（约 1455）与锚点现状（键位尚未绑定）。
+- 本轮：锚点与视口行键位按 `global.c:1356-1362` 修正——`M-Ins`/`M-PgUp`/
+  `M-PgDn`/`M-"`/`M-'` 绑定锚点，`M-Home`/`M-End` 改为
+  `to_top_row`/`to_bottom_row`，移除 `handle_input_key` 里把
+  `ALT_INSERT` 当标记、`ALT_PAGEUP/PAGEDOWN` 当块移动的误绑；
+  `tests/keymap_reachability.rs` 增加绑定与 `M-Ins` 实际切换锚点的测试。
