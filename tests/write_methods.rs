@@ -94,3 +94,40 @@ fn disk_full_error_is_recognized() {
     let denied = std::io::Error::from_raw_os_error(5); // ERROR_ACCESS_DENIED
     assert!(!nanoxide::files::is_disk_full(&denied));
 }
+
+/// FIFO 识别与紧急保存的 0600 权限（对应 C 的 `S_ISFIFO` 与
+/// `S_IRUSR|S_IWUSR`）。
+#[cfg(unix)]
+#[test]
+fn fifo_detection_and_special_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = std::env::temp_dir().join(format!("nanoxide_fifo_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let fifo = dir.join("pipe");
+    let c_path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+    /* 安全性：mkfifo 只创建命名管道，不涉及内存或文件内容。 */
+    assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+    assert!(nanoxide::files::is_fifo_file(fifo.to_str().unwrap()));
+
+    let plain = dir.join("plain");
+    std::fs::write(&plain, b"x").unwrap();
+    assert!(!nanoxide::files::is_fifo_file(plain.to_str().unwrap()));
+    assert!(!nanoxide::files::is_fifo_file(
+        dir.join("missing").to_str().unwrap()
+    ));
+
+    /* SPECIAL（紧急保存）新建文件应为 0600。 */
+    setup();
+    nanoxide::text::inject(b"one", 3);
+    let target = dir.join("emergency");
+    let target_str = target.to_str().unwrap().to_string();
+    assert!(
+        nanoxide::files::save_to_with_method(&target_str, WritingType::Special) > 0
+    );
+    let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "SPECIAL 新建文件应为 0600，实际 {mode:o}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

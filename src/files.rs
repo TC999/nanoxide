@@ -755,6 +755,21 @@ pub fn is_disk_full(_err: &std::io::Error) -> bool {
     false
 }
 
+/// 目标是否是命名管道（对应 C 的 `S_ISFIFO(fileinfo.st_mode)` 判断）。
+#[cfg(unix)]
+pub fn is_fifo_file(path: &str) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+    fs::metadata(path)
+        .map(|meta| meta.file_type().is_fifo())
+        .unwrap_or(false)
+}
+
+/// Windows 没有命名管道文件类型。
+#[cfg(not(unix))]
+pub fn is_fifo_file(_path: &str) -> bool {
+    false
+}
+
 /// 显示 "Read N lines" 消息（对应 `read_file` 末尾的状态栏提示）。
 ///
 /// 打开文件时在 ZERO/MINIBAR 下静默（行数交给 minibar 显示）；插入文件时
@@ -891,11 +906,26 @@ fn finish_save(
     if method != WritingType::Special {
         winio::statusbar(&crate::t!("files-writing"));
     }
+    /* 目标是命名管道时单独提示（对应 C 的 `Writing to FIFO...`）。 */
+    if method != WritingType::Special && is_fifo_file(answer) {
+        winio::statusbar(&crate::t!("files-writing_to_fifo"));
+    }
 
     /* 写入并确保数据落盘（对应 C 版 write_file 的 fflush + fsync）。
-     * FIFO 没有可落盘的存储，跳过 fsync（C 的 `!S_ISFIFO(...)` 条件）。 */
+     * FIFO 没有可落盘的存储，跳过 fsync（C 的 `!S_ISFIFO(...)` 条件）；
+     * 紧急保存（SPECIAL）新建文件时权限收紧为 0600（C 的
+     * `S_IRUSR|S_IWUSR`）。 */
     let write_result = (|| -> std::io::Result<()> {
-        let mut file = fs::File::create(answer)?;
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            if method == WritingType::Special {
+                options.mode(0o600);
+            }
+        }
+        let mut file = options.open(answer)?;
         file.write_all(&output)?;
         #[cfg(unix)]
         {
