@@ -217,6 +217,9 @@ fn main() {
                 // main 继续处理下一个文件），最终打开空白缓冲区让编辑器可用。
                 // 状态栏已显示 "[ '目录' is a directory ]"（对应 statusline(ALERT)）。
             }
+            files::OpenBufferResult::Unsupported => {
+                // 设备文件或无效文件名：状态栏已提示，不加载该文件。
+            }
             files::OpenBufferResult::ErrorRead => {
                 // 读取失败：创建空缓冲区保证编辑器可继续工作
             }

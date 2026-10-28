@@ -34,6 +34,8 @@ pub enum OpenBufferResult {
     Directory,
     ErrorRead,
     Skipped,
+    /// 设备文件或无效文件名：显示提示后不加载（对应 C 的 open_buffer 返回 FALSE）。
+    Unsupported,
 }
 
 /// 打开文件并加载到缓冲区。
@@ -228,6 +230,40 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
             &format!("[ {} ]", crate::t!("files-is_a_directory", filename = filename)),
         );
         return OpenBufferResult::Directory;
+    }
+
+    /* 不打开字符/块设备文件（对应 C 的 `S_ISCHR` / `S_ISBLK` 检查）。 */
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt;
+        if path.exists() {
+            if let Ok(meta) = fs::metadata(path) {
+                let file_type = meta.file_type();
+                if file_type.is_char_device() || file_type.is_block_device() {
+                    winio::statusline_centered(
+                        crate::definitions::MessageType::Alert,
+                        &format!(
+                            "[ {} ]",
+                            crate::t!("files-is_device", filename = filename)
+                        ),
+                    );
+                    return OpenBufferResult::Unsupported;
+                }
+            }
+        }
+    }
+
+    /* 以分隔符结尾却又不存在的文件名无效（对应 C 的
+     * `filename[strlen - 1] == '/'` 分支）。 */
+    if !path.exists() && (filename.ends_with('/') || filename.ends_with('\\')) {
+        winio::statusline_centered(
+            crate::definitions::MessageType::Alert,
+            &format!(
+                "[ {} ]",
+                crate::t!("files-invalid_filename", filename = filename)
+            ),
+        );
+        return OpenBufferResult::Unsupported;
     }
 
     /* 打开文件前先处理锁文件（对应 C 版 open_buffer 中 do_lockfile 的调用：

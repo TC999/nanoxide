@@ -108,3 +108,39 @@ fn open_empty_filename_creates_blank_buffer() {
     assert!(matches!(result, nanoxide::files::OpenBufferResult::FileLoaded));
     assert!(openfile_filename().is_none());
 }
+
+/// 以分隔符结尾且不存在的文件名应被拒绝（对应 C 的 invalid filename）。
+#[test]
+fn open_invalid_filename_is_rejected() {
+    setup();
+    let name = "no_such_dir_xyz/";
+    let result = nanoxide::files::open_buffer(name);
+    assert!(matches!(
+        result,
+        nanoxide::files::OpenBufferResult::Unsupported
+    ));
+
+    let expected = format!(
+        "[ {} ]",
+        nanoxide::t!("files-invalid_filename", filename = name)
+    );
+    assert_eq!(statusbar_msg(), expected);
+}
+
+/// 字符设备文件不加载（对应 C 的 `S_ISCHR` 检查）。
+#[cfg(unix)]
+#[test]
+fn open_device_file_is_rejected() {
+    setup();
+    let result = nanoxide::files::open_buffer("/dev/null");
+    assert!(matches!(
+        result,
+        nanoxide::files::OpenBufferResult::Unsupported
+    ));
+
+    let expected = format!(
+        "[ {} ]",
+        nanoxide::t!("files-is_device", filename = "/dev/null")
+    );
+    assert_eq!(statusbar_msg(), expected);
+}
