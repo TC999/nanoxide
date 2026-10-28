@@ -761,6 +761,83 @@ pub fn hexadecimal_under_cursor() -> (String, bool) {
     (text, has_successor)
 }
 
+/// 补全列表的网格布局（对应 files.c `input_tab` 中
+/// `lastrow` / `longest_name` / `ncols` / `nrows` / `row` 的计算）。
+/// 返回 `(lastrow, longest, ncols, nrows, startrow)`。
+pub fn completion_list_layout(
+    cols: usize,
+    lines: usize,
+    editwinrows: usize,
+    zero: bool,
+    matches: &[String],
+) -> (usize, usize, usize, usize, usize) {
+    /* ZERO 且屏幕不止一行时，最后一行让给状态栏（C 的 lastrow 公式）。 */
+    let lastrow = editwinrows
+        .saturating_sub(1)
+        .saturating_sub(if zero && lines > 1 { 1 } else { 0 });
+
+    /* 最长候选的显示宽度，最多占满 COLS - 1 列。 */
+    let mut longest = 0usize;
+    for name in matches {
+        longest = longest.max(utils::breadth(name.as_bytes()));
+    }
+    if longest > cols.saturating_sub(1) {
+        longest = cols.saturating_sub(1);
+    }
+
+    /* 列间空两格，最后一列后空一格：C 的 (COLS + 1) / (longest_name + 2)。 */
+    let ncols = ((cols + 1) / (longest + 2)).max(1);
+    let nrows = (matches.len() + ncols - 1) / ncols;
+    let startrow = if nrows < lastrow { lastrow - nrows } else { 0 };
+
+    (lastrow, longest, ncols, nrows, startrow)
+}
+
+/// 在编辑窗口分栏列出补全候选（对应 files.c `input_tab` 末尾的列表绘制）。
+/// 清空编辑窗口、隐藏光标，从窗口底部往上排；行数不足时在最后一行显示
+/// "(more)"。
+pub fn draw_completion_list(matches: &[String]) {
+    if matches.is_empty() {
+        return;
+    }
+
+    let (cols, lines, editwinrows, zero) = with_global(|g| {
+        (
+            g.COLS,
+            g.LINES,
+            g.editwinrows.max(1) as usize,
+            ISSET(ZERO),
+        )
+    });
+    let (lastrow, longest, ncols, _nrows, startrow) =
+        completion_list_layout(cols, lines, editwinrows, zero, matches);
+
+    blank_edit();
+    let mut stdout = io::stdout();
+    let _ = execute!(stdout, Hide);
+
+    let mut row = startrow;
+    for (index, name) in matches.iter().enumerate() {
+        /* 当前行已满且后面还有候选时，在下一行开头显示 "(more)"。 */
+        if row == lastrow && (index + 1) % ncols == 0 && index + 1 < matches.len() {
+            let _ = execute!(stdout, cursor::MoveTo(0, (row + 1) as u16));
+            let _ = write!(stdout, "{}", crate::t!("files-more"));
+            break;
+        }
+
+        let col = (longest + 2) * (index % ncols);
+        let (clipped, _) = display_string(name.as_bytes(), 0, longest, false, false);
+        let _ = execute!(stdout, cursor::MoveTo(col as u16, (row + 1) as u16));
+        let _ = write!(stdout, "{}", clipped);
+
+        if (index + 1) % ncols == 0 {
+            row += 1;
+        }
+    }
+
+    let _ = stdout.flush();
+}
+
 /// 绘制极简状态栏（对应 winio.c 的 `minibar`）：在底部信息行显示
 /// 文件名、修改标记、光标行/列和行号百分比。
 /// 仅当 MINIBAR 模式、非 ZERO、且行数足够时由主循环调用。

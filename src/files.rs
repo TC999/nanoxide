@@ -2113,8 +2113,8 @@ pub fn input_tab(
         winio::beep();
     }
 
-    /* 多个候选：排序并在状态栏列出（C 在编辑窗口分栏显示；
-     * 这里用状态栏简化，避免覆盖编辑区）。 */
+    /* 多个候选：排序后在编辑窗口分栏列出（对应 C 版 input_tab 末尾的
+     * qsort + 网格绘制；不在状态栏写消息，以免覆盖提示行）。 */
     if matches.len() > 1 {
         matches.sort_by(|a, b| {
             let folded_a = a.to_lowercase();
@@ -2124,7 +2124,7 @@ pub fn input_tab(
         if !*listed {
             winio::beep();
         }
-        winio::statusline(MessageType::Info, &matches.join("  "));
+        winio::draw_completion_list(&matches);
         *listed = true;
     }
 }

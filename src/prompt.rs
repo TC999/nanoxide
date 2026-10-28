@@ -11,7 +11,7 @@
 //! - C 的函数指针（`functionptrtype`）用 [`FunctionId`] 枚举替代，
 //!   比较与调用均按枚举匹配；
 //! - `absorb_character` 的静态输入缓冲用 `thread_local!`；
-//! - 文件补全 `input_tab` 暂以简化实现（`files.rs` 完整翻译时完善）；
+//! - 文件补全委托给 `files::input_tab`（多候选在编辑区分栏列出）；
 //! - 提示栏渲染委托给 [`crate::winio`] 的状态栏显示。
 
 use crate::definitions::*;
@@ -745,9 +745,6 @@ pub fn do_prompt(
     retval
 }
 
-// ======================== 文件补全（对应 files.c 的 input_tab） ========================
-
-/// 文件名补全（对应 `input_tab`；当前为简化实现，browser 完善后扩展）。
 // ======================== Yes/No 询问（对应 ask_user） ========================
 
 const UNDECIDED: i32 = -2;

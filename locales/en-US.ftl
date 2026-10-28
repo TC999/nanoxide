@@ -387,3 +387,6 @@ winio-minibar_line_one = ({count} line)
 winio-minibar_line_many = ({count} lines)
 winio-minibar_line_dos_one = ({count} line, {fmt})
 winio-minibar_line_dos_many = ({count} lines, {fmt})
+
+# ---------- 补全列表（对应 files.c input_tab 的 "(more)"） ----------
+files-more = (more)
