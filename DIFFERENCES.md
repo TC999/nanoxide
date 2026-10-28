@@ -220,11 +220,12 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   `do_writeout` 的提示循环支持 M-A/M-P/M-D/M-B/^Q/^T；`exiting` 为真时
   忽略标记、整块保存（对应 C 版 `write_it_out` 的 `exiting` 参数）。
   证据：`tests/file_format.rs`、`tests/write_methods.rs`
-- ✅ 写入反馈与落盘：正常保存前显示 "Writing..."；写入后用 `sync_all`
-  确保数据落盘（FIFO 跳过，对应 C 的 `fflush + fsync` 与
-  `!S_ISFIFO(...)` 条件）；磁盘满（Unix ENOSPC / Windows
-  ERROR_DISK_FULL）时额外警告文件可能已被截断并提示恢复步骤，同时刷新
-  statinfo（`tests/write_methods.rs`）。
+- ✅ 写入反馈与落盘：正常保存前显示 "Writing..."；目标是命名管道时显示
+  "Writing to FIFO..."；写入后用 `sync_all` 确保数据落盘（FIFO 跳过，
+  对应 C 的 `fflush + fsync` 与 `!S_ISFIFO(...)` 条件）；SPECIAL（紧急保存）
+  新建文件权限为 0600（C 的 `S_IRUSR|S_IWUSR`）；磁盘满（Unix ENOSPC /
+  Windows ERROR_DISK_FULL）时额外警告文件可能已被截断并提示恢复步骤，
+  同时刷新 statinfo（`tests/write_methods.rs`）。
 - ✅ `write_region_to_file`（写选区，`tests/write_region.rs`；区域也可追加/前置）、`do_savefile`
 - ✅ `scoop_stdin`（命令行 `-`，`tests/stdin_args.rs`）
 - ✅ `diralphasort`、`init_backup_dir`（`tests/file_tools.rs`）
@@ -462,3 +463,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   增加断言。
 - 本轮：补 `M-X`（切换帮助行，`DoToggle NO_HELP`）绑定，帮助查看器内
   不绑定；`tests/keymap_reachability.rs` 验证绑定与切换。
+- 本轮：写文件补 FIFO 识别与 "Writing to FIFO..." 提示，SPECIAL（紧急
+  保存）新建文件权限收紧为 0600（Unix）；`tests/write_methods.rs` 增加
+  FIFO 识别与权限断言（仅 Unix 运行）。
