@@ -77,14 +77,27 @@ fn open_directory_shows_is_a_directory() {
     assert!(openfile_filename().is_none());
 }
 
-/// 文件存在：正常加载，状态栏不出现 New File / directory 消息。
+/// 文件存在：正常加载，状态栏显示 "Read N lines" 而不是 New File / directory。
 #[test]
 fn open_existing_file_loads() {
     setup();
     let result = nanoxide::files::open_buffer("Cargo.toml");
     assert!(matches!(result, nanoxide::files::OpenBufferResult::FileLoaded));
     assert_eq!(openfile_filename().as_deref(), Some("Cargo.toml"));
-    assert!(statusbar_msg().is_empty());
+
+    /* read_file 末尾会报告读入的行数（对应 C 的 "Read %zu line(s)"）；
+     * 工作区文件按 core.autocrlf 可能是 CRLF，故按实际字节判断 DOS 变体。 */
+    let bytes = std::fs::read("Cargo.toml").unwrap();
+    let line_count = String::from_utf8_lossy(&bytes).lines().count();
+    let dos = bytes.windows(2).any(|pair| pair == b"\r\n");
+    let count = line_count.to_string();
+    let expected = match (dos, line_count == 1) {
+        (true, true) => nanoxide::t!("files-read_dos_one", count = count),
+        (true, false) => nanoxide::t!("files-read_dos_many", count = count),
+        (false, true) => nanoxide::t!("files-read_one", count = count),
+        (false, false) => nanoxide::t!("files-read_many", count = count),
+    };
+    assert_eq!(statusbar_msg(), expected);
 }
 
 /// 空文件名：创建不带文件名的空白缓冲区。

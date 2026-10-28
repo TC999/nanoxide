@@ -77,7 +77,7 @@ pub fn scoop_stdin() -> bool {
     }
 
     /* 与 read_file 一致：按 -N/-u 处理 stdin 的行尾并检测 DOS 格式。 */
-    let (stdin_lines, dos_format) = split_file_lines(&bytes);
+    let (stdin_lines, dos_format, _num_lines) = split_file_lines(&bytes);
     let format = if ISSET(MAKE_IT_UNIX) {
         FormatType::NixFile
     } else if dos_format {
@@ -309,7 +309,7 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
 
     // 文件存在：读取内容（保留/检测 DOS 行尾，受 -N 与 -u 影响）。
     match read_file_lines(path) {
-        Ok((lines_data, detected_fmt)) => {
+        Ok((lines_data, detected_fmt, num_lines)) => {
             /* -u/--unix 强制按 Unix 格式保存；否则采用检测到的格式
              * （对应 C 版 read_file 末尾的 MAKE_IT_UNIX / UNSPECIFIED 判断）。 */
             let format = if ISSET(MAKE_IT_UNIX) {
@@ -363,6 +363,8 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
             /* 对应 C 版 read_file 末尾的 report_size = TRUE：MINIBAR 下
              * 下一次刷新时显示读入后的行数。 */
             with_global_mut(|g| g.report_size = true);
+            /* "Read N lines" 提示（打开文件路径：undoable = FALSE）。 */
+            show_read_message(num_lines, format, false);
             OpenBufferResult::FileLoaded
         }
         Err(e) => {
@@ -660,11 +662,15 @@ fn make_backup_of(realname: &str) -> bool {
 ///   遇到 CRLF 时报告 DOS 格式（与 C 的 `num_lines == 0` 判断一致）。
 /// - 文件末尾没有换行时保留最后一段；空文件返回一个空行。
 /// - `NO_CONVERT` 时保留 `\r`，这样保存回去仍是原始 CRLF。
-fn split_file_lines(bytes: &[u8]) -> (Vec<String>, bool) {
+///
+/// 第三个返回值是 C 的 `num_lines`：每个换行计一行，末尾无换行的内容
+/// 再计一行；空文件为 0（与用于显示的"一个空行"区分开）。
+fn split_file_lines(bytes: &[u8]) -> (Vec<String>, bool, usize) {
     let keep_cr = ISSET(NO_CONVERT);
     let mut lines: Vec<String> = Vec::new();
     let mut start = 0;
     let mut dos_format = false;
+    let mut num_lines = 0usize;
 
     for index in 0..bytes.len() {
         if bytes[index] == b'\n' {
@@ -677,29 +683,50 @@ fn split_file_lines(bytes: &[u8]) -> (Vec<String>, bool) {
                 }
             }
             lines.push(String::from_utf8_lossy(&bytes[start..end]).into_owned());
+            num_lines += 1;
             start = index + 1;
         }
     }
 
     if start < bytes.len() {
         lines.push(String::from_utf8_lossy(&bytes[start..]).into_owned());
+        num_lines += 1;
     } else if lines.is_empty() {
         lines.push(String::new());
     }
 
-    (lines, dos_format)
+    (lines, dos_format, num_lines)
 }
 
 /// 读取文件的全部行并返回检测到的格式（供 open_buffer / insert_a_file 共用）。
-fn read_file_lines(path: &Path) -> std::io::Result<(Vec<String>, FormatType)> {
+fn read_file_lines(path: &Path) -> std::io::Result<(Vec<String>, FormatType, usize)> {
     let bytes = fs::read(path)?;
-    let (lines, dos_format) = split_file_lines(&bytes);
+    let (lines, dos_format, num_lines) = split_file_lines(&bytes);
     let format = if dos_format {
         FormatType::DosFile
     } else {
         FormatType::NixFile
     };
-    Ok((lines, format))
+    Ok((lines, format, num_lines))
+}
+
+/// 显示 "Read N lines" 消息（对应 `read_file` 末尾的状态栏提示）。
+///
+/// 打开文件时在 ZERO/MINIBAR 下静默（行数交给 minibar 显示）；插入文件时
+/// 即使处于这两种模式也显示（对应 C 的 `!(we_are_running && undoable)`）。
+fn show_read_message(num_lines: usize, format: FormatType, undoable: bool) {
+    if (ISSET(ZERO) || ISSET(MINIBAR)) && !(with_global(|g| g.we_are_running) && undoable) {
+        return;
+    }
+
+    let count = num_lines.to_string();
+    let msg = match (format == FormatType::DosFile, num_lines == 1) {
+        (true, true) => crate::t!("files-read_dos_one", count = count),
+        (true, false) => crate::t!("files-read_dos_many", count = count),
+        (false, true) => crate::t!("files-read_one", count = count),
+        (false, false) => crate::t!("files-read_many", count = count),
+    };
+    winio::statusline(MessageType::Remark, &msg);
 }
 
 /// 收集给定缓冲区的全部行数据。
@@ -1698,7 +1725,7 @@ fn insert_a_file_or(execute: bool) {
                 g.openfile.as_ref().map(|of| of.borrow().current_x).unwrap_or(0)
             });
             match read_file_lines(Path::new(&answer)) {
-                Ok((read_lines, detected_fmt)) => {
+                Ok((read_lines, detected_fmt, num_lines)) => {
                     /* 与 C 版 read_file 一致：插入时也按 -N/-u 处理行尾，
                      * 且仅当缓冲区格式仍是 UNSPECIFIED 时采用检测到的格式。 */
                     let text = read_lines.join("\n");
@@ -1729,6 +1756,14 @@ fn insert_a_file_or(execute: bool) {
                     }
                     /* 对应 C 版 read_file 末尾的 report_size = TRUE。 */
                     with_global_mut(|g| g.report_size = true);
+                    /* 插入文件时 undoable = TRUE：即使 ZERO/MINIBAR 也显示
+                     * "Read N lines"；格式按 -u 的覆盖规则判断。 */
+                    let shown_format = if ISSET(MAKE_IT_UNIX) {
+                        FormatType::NixFile
+                    } else {
+                        detected_fmt
+                    };
+                    show_read_message(num_lines, shown_format, true);
                 }
                 Err(e) => {
                     winio::statusline(
