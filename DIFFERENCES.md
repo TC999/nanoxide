@@ -221,10 +221,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   （不经 shell、不替换 `%s`）；`^Y`/`^V` 切换消息、`^X`/Enter 退出
   （`tests/linter.rs`）。简化：未处理“消息属于未打开文件”的多缓冲区分支。⚠️
 - ✅ `count_lines_words_and_characters`（`M-D`）：行/词/字符按 C 的格式
-  显示，三个名词用 `count-*_one` / `count-*_many` 双键；行数按末尾魔法行
-  公式计算（`tests/count.rs`）。
-  简化：只统计整个缓冲区（C 支持选区），词数用 `split_whitespace`
-  （C 用 `do_next_word`，标点算词的一部分）。
+  显示，三个名词用 `count-*_one` / `count-*_many` 双键；有标记时只统计
+  选区并加 "In Selection:" 前缀；行数按 C 的公式；词数用 `do_next_word`
+  从起点逐步前进到终点（`tests/count.rs`）。
 - 🔧 绑定修正：`M-D` 之前误绑到 `ALT_DELETE` 的剪切，导致字数统计不可达；
   现按 `global.c` 改为 `M-D` → 字数统计、`M-Del` → 剪切整行。
 - ❓ `suck_up_input_and_paste_it`、`copy_character`、`replace_buffer` 在 Rust 中找不到同名函数，可能已改名或合并，未核对语义
@@ -299,7 +298,7 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
    “Function not implemented”而不是静默吞键。写文件提示的
    DosFormat/BackItUp/Append/Prepend/Discard 循环已移植。
 3. 显示层主要剩 `do_credits` 的滚动/版本行这类小幅差异（见第三、六节）。
-4. i18n 只有两种语言；单复数已用双键处理，词数统计与“In Selection”区域统计仍有简化。
+4. i18n 只有两种语言；单复数已用双键处理。
 
 ## 七、与上一版文档的主要更正
 
@@ -367,3 +366,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   并更新 `tests/open_buffer.rs` 的过时断言。
 - 本轮：打开文件时检查可写性，不可写优先提示 `File '<name>' is unwritable`
   （Unix `access(W_OK)`、Windows 追加打开探测），补充到 `tests/read_message.rs`。
+- 本轮：字数统计支持标记区域（`In Selection:` 前缀、C 的字符数公式），
+  词数改用 `do_next_word` 逐步前进；`tests/count.rs` 增加跨行/单行/零长度
+  选区与前缀断言。
