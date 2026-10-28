@@ -1061,8 +1061,47 @@ pub fn refresh_screen() {
     let _ = stdout.flush();
 }
 
+/// 计算软换行下编辑窗口实际覆盖的行数（对应 C 版 `draw_scrollbar` 中的
+/// `coveredlines` 循环）：从 edittop 起累计每行的额外块数，直到累计的
+/// "行号 + 额外块" 超出窗口或到达文件末尾。
+pub fn scrollbar_covered_lines(winrows: isize) -> isize {
+    let (edittop, fromline, firstcolumn) = with_global(|g| {
+        let of = g.openfile.as_ref().map(|o| o.borrow());
+        let edittop = of.as_ref().and_then(|r| r.edittop.clone());
+        let fromline = edittop
+            .as_ref()
+            .map(|l| l.borrow().lineno)
+            .unwrap_or(1)
+            - 1;
+        let firstcolumn = of.as_ref().map(|r| r.firstcolumn).unwrap_or(0);
+        (edittop, fromline, firstcolumn)
+    });
+
+    let Some(mut line) = edittop else {
+        return winrows;
+    };
+
+    let mut extras = extra_chunks_in(&line) as isize - chunk_for(firstcolumn, &line) as isize;
+    loop {
+        let lineno = line.borrow().lineno;
+        if lineno + extras >= fromline + winrows {
+            break;
+        }
+        let next = { line.borrow().next.clone() };
+        match next {
+            Some(n) => {
+                line = n;
+                extras += extra_chunks_in(&line) as isize;
+            }
+            None => break,
+        }
+    }
+
+    let covered = line.borrow().lineno - fromline;
+    covered
+}
+
 /// 绘制右侧的位置/比例指示条（对应 winio.c 的 `draw_scrollbar`）。
-/// 简化：非软换行时按 C 的公式计算可见块；软换行下按行数近似。
 fn draw_scrollbar(stdout: &mut io::Stdout, cols: usize) {
     let (fromline, totallines, rows, softwrap) = with_global(|g| {
         let of = g.openfile.as_ref().map(|o| o.borrow());
@@ -1082,8 +1121,16 @@ fn draw_scrollbar(stdout: &mut io::Stdout, cols: usize) {
         (fromline, totallines, g.editwinrows.max(1) as isize, ISSET(SOFTWRAP))
     });
 
+    /* 软换行下窗口覆盖的行数要按块累计，不能直接用 editwinrows
+     * （对应 C 版 draw_scrollbar 的 coveredlines 循环）。 */
+    let coveredlines = if softwrap {
+        scrollbar_covered_lines(rows)
+    } else {
+        rows
+    };
+
     let mut lowest = (fromline * rows) / totallines;
-    let mut highest = lowest + (rows * rows) / totallines;
+    let mut highest = lowest + (rows * coveredlines) / totallines;
 
     if rows > totallines && !softwrap {
         highest = rows;
