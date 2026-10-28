@@ -273,6 +273,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 ### 5. 文件浏览器（`browser.rs`）
 
 - ✅ `browse` / `browse_in` / `read_the_list` / `reselect` / `findfile` / `search_filename` / `research_filename` / `to_first_file` / `to_last_file`
+- ✅ 键位按 `global.c:1537-1556` 对齐：`^T` 退出浏览器、`Home`/`End`/
+  `^Home`/`^End` 跳首/末文件、`^/` 与 `M-G` 切换目录、`Space` 下一页、
+  `Bsp`/`Sh-Del` 上一页；移除误绑的 `^H`（原是切换目录）与 `^S`（原是 Enter）。
 
 ### 6. 显示（`winio.rs`）
 
@@ -442,3 +445,7 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：提示历史与首/末文件键补齐——六菜单的 `^P`/`^N`/`Up`/`Down`
   历史翻页、`MWHEREISFILE` 的 `^Y`/`^V`、浏览器的 `M-\`/`M-/`；
   `tests/keymap_reachability.rs` 增加逐菜单断言。
+- 本轮：浏览器菜单键位按 `global.c:1537-1556` 对齐（`^T` 退出、
+  `Home`/`End`/`^Home`/`^End` 首末文件、`^/`/`M-G` 切换目录、`Space`
+  翻页、`Bsp`/`Sh-Del` 上一页），移除误绑的 `^H`/`^S`；写/插入提示的
+  `^T` 统一绑到浏览。
