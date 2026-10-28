@@ -427,3 +427,21 @@ fn modern_ctrl_z_undoes_instead_of_suggesting() {
 
     UNSET(MODERN_BINDINGS);
 }
+
+/// 执行菜单（MEXECUTE）的快捷键与 `global.c:1304-1305、1315、1449、1458` 一致。
+#[test]
+fn execute_menu_keys_follow_global_c() {
+    setup();
+    let f = |key: i32| {
+        nanoxide::global::find_shortcut(key, MEXECUTE).map(|sc| sc.borrow().func)
+    };
+
+    assert_eq!(f(19), Some(FunctionId::DoSpell), "^S 拼写检查（无 --preserve）");
+    assert_eq!(f(20), Some(FunctionId::DoSpell), "^T 拼写检查");
+    assert_eq!(f(15), Some(FunctionId::DoFormatter), "^O 格式化");
+    assert_eq!(f(22), Some(FunctionId::DoCutToEof), "^V 剪切到文件末尾");
+    assert_eq!(f(10), Some(FunctionId::DoFullJustify), "^J 全文对齐");
+    assert_eq!(f(25), Some(FunctionId::DoLinter), "^Y linter");
+    assert_eq!(f(26), Some(FunctionId::DoSuspend), "^Z 挂起");
+    assert_eq!(f(0x25C), Some(FunctionId::FlipPipe), "M-\\ 管道");
+}

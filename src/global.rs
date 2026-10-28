@@ -674,6 +674,14 @@ pub fn shortcut_init_rest() {
     add_to_sclist(MEXECUTE, "^Y", 25, FunctionId::DoLinter, 0);
     /* 执行菜单里 ^Z 挂起（对应 global.c:1450）。 */
     add_to_sclist(MEXECUTE, "^Z", 26, FunctionId::DoSuspend, 0);
+    /* 执行菜单其余快捷键（对应 global.c:1304-1305、1315、1449、1458）。 */
+    if !ISSET(PRESERVE) {
+        add_to_sclist(MEXECUTE, "^S", 19, FunctionId::DoSpell, 0);
+    }
+    add_to_sclist(MEXECUTE, "^T", 20, FunctionId::DoSpell, 0);
+    add_to_sclist(MEXECUTE, "^O", 15, FunctionId::DoFormatter, 0);
+    add_to_sclist(MEXECUTE, "^V", 22, FunctionId::DoCutToEof, 0);
+    add_to_sclist(MEXECUTE, "^J", 10, FunctionId::DoFullJustify, 0);
     add_to_sclist(MLINTER, "^X", 24, FunctionId::DoCancel, 0);
 
     // 浏览器菜单
