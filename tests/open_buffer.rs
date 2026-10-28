@@ -153,3 +153,33 @@ fn read_only_warning_condition_follows_c() {
     assert!(!nanoxide::files::should_warn_read_only(true, 0o644, 1));
     assert!(!nanoxide::files::should_warn_read_only(true, 0o444, 0));
 }
+
+/// 父目录检查（对应 C 的 `has_valid_path`）。
+#[test]
+fn has_valid_path_checks_parent_directory() {
+    setup();
+    with_global_mut(|g| g.statusbar_msg.clear());
+
+    assert!(!nanoxide::files::has_valid_path("no_such_dir_xyz/file.txt"));
+    let expected = nanoxide::t!(
+        "files-directory_does_not_exist",
+        dir = "no_such_dir_xyz"
+    );
+    assert_eq!(statusbar_msg(), expected);
+
+    /* 父路径是普通文件时报告“不是目录”。 */
+    let file = std::env::temp_dir().join(format!("nanoxide_path_{}", std::process::id()));
+    std::fs::write(&file, b"x").unwrap();
+    let child = format!("{}/child.txt", file.to_str().unwrap());
+    assert!(!nanoxide::files::has_valid_path(&child));
+    let expected = nanoxide::t!(
+        "files-path_not_a_directory",
+        path = file.to_str().unwrap()
+    );
+    assert_eq!(statusbar_msg(), expected);
+
+    /* 当前目录有效。 */
+    assert!(nanoxide::files::has_valid_path("plain.txt"));
+
+    let _ = std::fs::remove_file(&file);
+}

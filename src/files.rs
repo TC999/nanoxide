@@ -58,7 +58,10 @@ pub fn open_another_buffer(filename: &str) -> OpenBufferResult {
     /* 目录等失败情况不保留空缓冲区（对应 C：open_buffer 失败时 continue）。 */
     if matches!(
         result,
-        OpenBufferResult::Directory | OpenBufferResult::ErrorRead | OpenBufferResult::Skipped
+        OpenBufferResult::Directory
+            | OpenBufferResult::ErrorRead
+            | OpenBufferResult::Skipped
+            | OpenBufferResult::Unsupported
     ) {
         close_buffer();
     }
@@ -282,6 +285,12 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
                 );
             }
         }
+    }
+
+    /* 新缓冲区：先验证父目录有效（对应 C 的 `has_valid_path`）；无效时
+     * 不创建缓冲区（调用方会关闭刚建的空缓冲区）。 */
+    if fresh && !has_valid_path(filename) {
+        return OpenBufferResult::Unsupported;
     }
 
     /* 打开文件前先处理锁文件（对应 C 版 open_buffer 中 do_lockfile 的调用：
@@ -829,6 +838,57 @@ pub fn is_fifo_file(_path: &str) -> bool {
 /// `euid_is_root` 用 0/1 传入，便于跨平台测试。
 pub fn should_warn_read_only(fresh: bool, mode: u32, euid_is_root: u32) -> bool {
     fresh && (mode & 0o222) == 0 && euid_is_root == 1
+}
+
+/// 检查文件名的父目录是否有效（对应 C 的 `has_valid_path`）：
+/// 父目录必须存在且是目录；LOCKING 且非查看模式下父目录不可写时给 MILD
+/// 提示但仍返回 TRUE（与原版一致）。无目录部分时按当前目录检查。
+pub fn has_valid_path(filename: &str) -> bool {
+    let parent = match filename.rfind(|c| c == '/' || c == '\\') {
+        Some(index) => {
+            let dir = &filename[..index];
+            if dir.is_empty() {
+                /* 根目录下的文件，如 "/a"。 */
+                "/"
+            } else {
+                dir
+            }
+        }
+        None => ".",
+    };
+
+    match fs::metadata(parent) {
+        Ok(meta) => {
+            if !meta.is_dir() {
+                winio::statusline(
+                    MessageType::Alert,
+                    &crate::t!("files-path_not_a_directory", path = parent),
+                );
+                return false;
+            }
+            if ISSET(LOCKING) && !ISSET(VIEW_MODE) && !is_writable_file(parent) {
+                winio::statusline(
+                    MessageType::Mild,
+                    &crate::t!("files-directory_not_writable", dir = parent),
+                );
+            }
+            true
+        }
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                winio::statusline(
+                    MessageType::Alert,
+                    &crate::t!("files-directory_does_not_exist", dir = parent),
+                );
+            } else {
+                winio::statusline(
+                    MessageType::Alert,
+                    &crate::t!("files-path_error", path = parent, err = e.to_string()),
+                );
+            }
+            false
+        }
+    }
 }
 
 /// 显示 "Read N lines" 消息（对应 `read_file` 末尾的状态栏提示）。
