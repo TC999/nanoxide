@@ -43,12 +43,13 @@ fn openfile_filename() -> Option<String> {
     })
 }
 
-/// 文件不存在：返回 NewFile；按 main.rs 的处理在欢迎消息位置显示 "[ New File ]"。
+/// 文件不存在：新缓冲区路径（open_another_buffer）返回 NewFile；
+/// 按 main.rs 的处理在欢迎消息位置显示 "[ New File ]"。
 #[test]
 fn open_nonexistent_shows_new_file() {
     setup();
     let name = "_rustnano_nonexistent_xyz.tmp";
-    let result = nanoxide::files::open_buffer(name);
+    let result = nanoxide::files::open_another_buffer(name);
     assert!(matches!(result, nanoxide::files::OpenBufferResult::NewFile));
 
     // main.rs 的 NewFile 分支：在欢迎消息（welcome-message）的位置居中显示。
@@ -57,6 +58,24 @@ fn open_nonexistent_shows_new_file() {
 
     // 与原版 open_file 一致：新文件缓冲区也带文件名。
     assert_eq!(openfile_filename().as_deref(), Some(name));
+}
+
+/// 非新缓冲区打开不存在的文件：按 C 报 "File "<name>" not found"，且不建缓冲区。
+#[test]
+fn open_missing_file_reports_not_found() {
+    setup();
+    nanoxide::files::make_new_buffer();
+    let name = "_rustnano_missing_xyz.tmp";
+
+    let result = nanoxide::files::open_buffer(name);
+    assert!(matches!(
+        result,
+        nanoxide::files::OpenBufferResult::ErrorRead
+    ));
+
+    let expected = nanoxide::t!("files-file_not_found", filename = name);
+    assert_eq!(statusbar_msg(), expected);
+    assert!(openfile_filename().is_none(), "不应创建带名字的缓冲区");
 }
 
 /// 参数是目录：返回 Directory，状态栏显示 "[ '<目录>' is a directory ]"，

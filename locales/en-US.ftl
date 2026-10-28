@@ -66,6 +66,7 @@ files-path_not_accessible = Path '{path}' is not accessible
 files-working_dir_gone = The working directory has disappeared
 files-directory_not_writable = Directory '{dir}' is not writable
 files-new_file = New File
+files-file_not_found = File "{filename}" not found
 files-insert_file = File to insert
 files-insert_unconverted = File to insert unconverted
 files-insert_new_buffer = File to read into new buffer

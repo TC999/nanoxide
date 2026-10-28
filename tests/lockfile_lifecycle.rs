@@ -52,8 +52,8 @@ fn lockfile_created_on_open_and_removed_on_exit() {
     fs::write(&path, "hello\n").unwrap();
     let lockpath = dir.join(".test.txt.swp");
 
-    // 1. 打开已存在文件 → 生成锁文件。
-    let result = nanoxide::files::open_buffer(path.to_str().unwrap());
+    // 1. 打开已存在文件 → 生成锁文件（C 只在 new_one 时锁，故走新缓冲区路径）。
+    let result = nanoxide::files::open_another_buffer(path.to_str().unwrap());
     assert!(matches!(result, nanoxide::files::OpenBufferResult::FileLoaded));
     assert!(lockpath.exists(), "打开已存在文件后应生成 .swp 锁文件");
 
@@ -62,9 +62,9 @@ fn lockfile_created_on_open_and_removed_on_exit() {
     assert!(!lockpath.exists(), "退出后 .swp 锁文件应被删除");
     assert!(!with_global(|g| g.we_are_running), "do_exit 应停止主循环");
 
-    // 3. 重新打开（替换当前缓冲区）→ 锁文件重新创建；
+    // 3. 重新打开 → 锁文件重新创建；
     //    delete_all_lockfiles → 删除所有缓冲区的锁文件并清空记录。
-    let result = nanoxide::files::open_buffer(path.to_str().unwrap());
+    let result = nanoxide::files::open_another_buffer(path.to_str().unwrap());
     assert!(matches!(result, nanoxide::files::OpenBufferResult::FileLoaded));
     assert!(lockpath.exists(), "再次打开后应重新生成 .swp 锁文件");
 
@@ -132,10 +132,11 @@ fn do_lockfile_detects_existing_lock() {
     let content = fs::read(&lockpath).unwrap();
     assert_eq!(content, b"short", "坏锁文件不应被覆盖");
 
-    // 4. 打开不存在文件（NewFile）也会创建锁文件（与 C 版 open_buffer 一致）。
+    // 4. 打开不存在文件（新缓冲区路径）也会创建锁文件（与 C 版 open_buffer
+    //    在 new_one 时先 do_lockfile 一致）。
     let newpath = dir.join("brand_new.txt");
     let newlock = dir.join(".brand_new.txt.swp");
-    let result = nanoxide::files::open_buffer(newpath.to_str().unwrap());
+    let result = nanoxide::files::open_another_buffer(newpath.to_str().unwrap());
     assert!(matches!(result, nanoxide::files::OpenBufferResult::NewFile));
     assert!(newlock.exists(), "打开新文件也应创建锁文件");
 

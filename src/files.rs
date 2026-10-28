@@ -293,11 +293,10 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
         return OpenBufferResult::Unsupported;
     }
 
-    /* 打开文件前先处理锁文件（对应 C 版 open_buffer 中 do_lockfile 的调用：
-     * 在 open_file 之前、LOCKING 且非 VIEW_MODE 且文件名非空时创建锁；
-     * 对不存在的文件同样创建（原版如此）。用户选择不打开时返回 Skipped，
-     * 不创建缓冲区。 */
-    let lock_filename = if ISSET(LOCKING) && !ISSET(VIEW_MODE) {
+    /* 打开文件前先处理锁文件（对应 C 版 open_buffer：只在 new_one（fresh）
+     * 时、LOCKING 且非 VIEW_MODE 且文件名非空时创建锁；用户选择不打开时
+     * 返回 Skipped，不创建缓冲区）。 */
+    let lock_filename = if fresh && ISSET(LOCKING) && !ISSET(VIEW_MODE) && !filename.is_empty() {
         match do_lockfile(filename, true) {
             DoLockfileResult::Locked(name) => Some(name),
             DoLockfileResult::NoLock => None,
@@ -340,8 +339,16 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
         return OpenBufferResult::FileLoaded;
     }
 
-    // 文件不存在：视为新文件。
+    // 文件不存在：非新缓冲区时按 C 报 "File "<name>" not found"；否则视为新文件。
     if !path.exists() {
+        if !fresh {
+            /* 对应 C 的 open_file：new_one 为 FALSE 且 stat 失败。 */
+            winio::statusline(
+                MessageType::Alert,
+                &crate::t!("files-file_not_found", filename = filename),
+            );
+            return OpenBufferResult::ErrorRead;
+        }
         with_global_mut(|g| {
             let new_file = Rc::new(RefCell::new(OpenFileStruct {
                 filename: Some(filename.to_string()),

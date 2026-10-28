@@ -159,7 +159,7 @@ fn no_welcome_message_with_content_or_name() {
     });
 
     // 带文件名（即使文件不存在，新文件分支也有名字）→ 不显示
-    nanoxide::files::open_buffer("named_file.txt");
+    nanoxide::files::open_another_buffer("named_file.txt");
     assert!(!nanoxide::winio::show_welcome_message());
 
     // 无文件名但有内容 → 不显示

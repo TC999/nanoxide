@@ -71,6 +71,7 @@ files-path_not_accessible = 路径“{path}”不可访问
 files-working_dir_gone = 当前工作目录已消失
 files-directory_not_writable = 目录“{dir}”不可写入
 files-new_file = 新文件
+files-file_not_found = 文件“{filename}”未找到
 files-insert_file = 插入文件
 files-insert_unconverted = 不经转换插入文件
 files-insert_new_buffer = 读取文件到新缓冲区

@@ -160,8 +160,8 @@ fn syntax_binding_primes_colorpairs() {
     setup();
     parse_c_syntax();
 
-    // 打开一个 .c 文件并注入代码
-    let ok = nanoxide::files::open_buffer("test_syntax.c");
+    // 打开一个 .c 文件并注入代码（新缓冲区路径；文件不存在时得到 NewFile）
+    let ok = nanoxide::files::open_another_buffer("test_syntax.c");
     assert!(matches!(ok, nanoxide::files::OpenBufferResult::NewFile | nanoxide::files::OpenBufferResult::FileLoaded));
     nanoxide::text::inject(b"int main(void) { return 0; }", 28);
     nanoxide::files::prepare_for_display();
@@ -265,7 +265,7 @@ fn binding_automatically_primes_syntax_colorpairs() {
     setup();
     parse_c_syntax();
 
-    let ok = nanoxide::files::open_buffer("test_syntax.c");
+    let ok = nanoxide::files::open_another_buffer("test_syntax.c");
     assert!(matches!(ok, nanoxide::files::OpenBufferResult::NewFile | nanoxide::files::OpenBufferResult::FileLoaded));
     nanoxide::text::inject(b"int main(void) { return 0; }", 28);
     nanoxide::files::prepare_for_display();
