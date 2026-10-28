@@ -164,6 +164,14 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
      `update_positions_register` 已接入启动、打开与关闭流程；位置寄存器
      解析改为按“数字+空格”扫描锚点，兼容 Windows 的 `C:\...` 路径
      （`tests/positionlog.rs`）。
+9. ✅ **主菜单控制键按 9.2 的 legacy 绑定修正**：`^S` 保存、`^Q` 反向搜索、
+   `^W` 正向搜索、`^L` 居中（其余菜单全屏刷新）、`^T` 执行命令、`Ins`
+   插入文件、`M-R` 替换；`--preserve` 时不绑定 `^S`/`^Q`
+   （`tests/keymap_reachability.rs`）。此前 `handle_input_key` 的硬编码把
+   `^S` 当挂起、`^Q`/`^L` 当刷新、`^T` 当拼写、`Ins` 当标记。
+10. ⚠️ **`--modernbindings`（`-/`）尚未切换键位表**：目前只处理
+    `--preserve` 与提示的取消键；C 的 modern 表（`^S` 保存、`^W` 写文件、
+    `^O` 读文件、`^Q` 退出、`^D`/`^G` 查找等）未实现。
 
 ---
 
@@ -402,3 +410,7 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   `to_top_row`/`to_bottom_row`，移除 `handle_input_key` 里把
   `ALT_INSERT` 当标记、`ALT_PAGEUP/PAGEDOWN` 当块移动的误绑；
   `tests/keymap_reachability.rs` 增加绑定与 `M-Ins` 实际切换锚点的测试。
+- 本轮：绑定审计——主菜单控制键按 `global.c` 的 legacy 表修正
+  （`^S` 保存、`^Q` 反向搜索、`^W` 正向搜索、`^L` 居中、`^T` 执行命令、
+  `Ins` 插入文件、`M-R` 替换），`--preserve` 时 `^S`/`^Q` 不绑定；
+  记录 `--modernbindings` 键位表尚未实现。
