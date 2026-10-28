@@ -1,7 +1,8 @@
 # nanoxide 与 GNU nano 9.2 的差异清单
 
-- 对比对象：nanoxide（commit `4e66630`，2026-08-31）的 `src/` 与 GNU nano 9.2 的 `src/`
-- 核对方式：**静态阅读源码**与函数名、选项表、快捷键表的脚本比对。除非条目里另有说明，**没有编译运行**。
+- 对比对象：nanoxide 的 `src/`（持续更新）与 GNU nano 9.2 的 `src/`
+- 核对方式：**静态阅读源码**与函数名、选项表、快捷键表的脚本比对；行为变更均配集成测试。
+  除非条目里另有说明，**没有在真实终端里逐项手工操作验证**。
 - 状态图例：
   - ✅ 已实现且可从用户入口触达（有绑定或命令行入口）
   - ⚠️ 函数存在，但**触达不了**或只是简化版
@@ -15,16 +16,16 @@
 
 | 维度 | GNU nano 9.2 | nanoxide |
 |------|--------------|----------|
-| 规模 | `src/*.c` 约 2.4 万行（不含 gnulib） | `src/*.rs` 约 2.24 万行，模块基本一一对应 |
+| 规模 | `src/*.c` 约 2.0 万行（不含 gnulib） | `src/*.rs` 约 2.3 万行，模块基本一一对应 |
 | 构建 | autotools | Cargo + `build.rs`（把 `locales/*.ftl` 复制到 `target/*/locales`） |
 | 依赖 | ncurses、gettext、系统 libc | 仅 `crossterm`、`libc` |
-| 条件编译 | 约 21 个 `ENABLE_*` / `NANO_TINY` 开关 | 只保留 `ENABLE_COLOR`，其余功能始终编入，无 tiny 构建 |
+| 条件编译 | 约 21 个 `ENABLE_*` / `NANO_TINY` 开关 | 无编译开关，所有功能始终编入（无 tiny 构建）；仅在注释中标出对应的 C 开关 |
 | 全局状态 | 裸全局变量 + `prototypes.h` | `GlobalState` + `with_global` / `with_global_mut` + `Rc<RefCell<…>>` |
 | 内存 | `malloc` / `free` | 所有权；`nmalloc` 等改为 `Vec` |
 | 终端 | ncurses | crossterm，`color.rs` 里有 `init_pair` / `COLOR_PAIR` / `wattron` 适配层 |
 | 平台 | 类 Unix | Linux 与 Windows；信号相关仅 Unix 生效 |
 | 二进制名 | `nano` | `nax` |
-| 测试 | 无 | `tests/` 下 15 个集成测试文件 |
+| 测试 | 无 | `tests/` 下 44 个集成测试文件 |
 
 ### 正则
 
@@ -50,7 +51,8 @@
 | 机制 | gettext，`_()` | 自研 ftl 加载器 `i18n.rs`，`t!("key", arg = val)`，运行时读 `locales/*.ftl` |
 | 语言 | 40 种 `.po` | `en-US`、`zh-CN` |
 | 复数 | `ngettext` | `_one` / `_many` 双键，由代码按数量选择（`files-wrote_*`、`files-lines_*`、`search-replaced_*`、`winio-minibar_line_*`、`count-{line,word,char}_*`） |
-| 缺失文案 | — | ⚠️ `search.rs` 有一处翻译被注释占位 |
+| 缺失文案 | — | 无（`tests/i18n_keys.rs` 扫描 `src/` 里的 `t!` 字面量键，校验两种语言都有） |
+| 底部栏标签 | `add_to_funcs` 的 tag | 全部走 `t!("key-*")`，文本按 9.2 `global.c` 的 tag 对齐 |
 
 README 写的是 fluent，但项目并未依赖 fluent crate，格式只是类 ftl。
 
@@ -239,7 +241,11 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 
 - ✅ 前后向搜索、`do_research`、`do_findnext` / `do_findprevious`、`do_replace`、`goto_line_and_column`、`do_gotolinecolumn`（`^/`，含 `++` / `--` 相对跳转）、`do_find_bracket`（`M-]`）、`not_found_msg`
 - ⚠️ `replace_regexp` / `replace_line` 是简化版：匹配长度直接取 needle 长度
-- ❌ `put_or_lift_anchor` 同名函数；❓ 锚点相关功能另有实现，未逐项核对
+- ⚠️ 锚点：`text.rs` 的 `do_anchor` / `to_prev_anchor` / `to_next_anchor`
+  已实现并由 `execute_by_id` 分发，但 `shortcut_init` 尚未绑定 C 的
+  `M-Ins` / `M-PgUp` / `M-PgDn` / `M-"` / `M-'`；`handle_input_key` 里
+  `ALT_INSERT` 被绑到“标记”、`ALT_PAGEUP/PAGEDOWN` 被绑到块移动，
+  与 `global.c:1356-1362` 不符。
 
 ### 5. 文件浏览器（`browser.rs`）
 
@@ -292,7 +298,7 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 
 ### 8. 覆盖较完整的模块
 
-`cut.rs`、`chars.rs`、`movement.rs`、`history.rs`、`help.rs`、`color.rs`、`utils.rs`、`rcfile.rs` 的函数基本对等。`history.rs` 的位置寄存器（`-P`）已接入打开/关闭流程，并修正了 Windows 绝对路径的解析。`rcfile.rs` 当前 1585 行（旧版文档写 718 行，已过时）。`chars.rs` 比原版多 `mbstrcasestr` / `revstrstr`，`movement.rs` 多 `do_first_line` / `do_last_line`。
+`cut.rs`、`chars.rs`、`movement.rs`、`history.rs`、`help.rs`、`color.rs`、`utils.rs`、`rcfile.rs` 的函数基本对等。`history.rs` 的位置寄存器（`-P`）已接入打开/关闭流程，并修正了 Windows 绝对路径的解析。`rcfile.rs` 当前约 1455 行。`chars.rs` 比原版多 `mbstrcasestr` / `revstrstr`，`movement.rs` 多 `do_first_line` / `do_last_line`。
 
 ---
 
@@ -304,7 +310,8 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 2. `execute_by_id` 已审计：主菜单绑定全部可达；未分发的 rc 占位函数会显示
    “Function not implemented”而不是静默吞键。写文件提示的
    DosFormat/BackItUp/Append/Prepend/Discard 循环已移植。
-3. 显示层主要剩 `do_credits` 的滚动/版本行这类小幅差异（见第三、六节）。
+3. 显示层基本完成：`do_credits` 的动画未在真实终端里手工验证；锚点键位
+   尚未按 `global.c` 绑定（见第五节搜索条目）。
 4. i18n 只有两种语言；单复数已用双键处理。
 
 ## 七、与上一版文档的主要更正
@@ -384,3 +391,8 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   与 `tests/write_methods.rs` 的平台相关测试。
 - 本轮：保存改为 `File::create + write_all + sync_all`（FIFO 跳过
   fsync），对应 C 版 write_file 的 fflush + fsync；现有写入测试全部通过。
+- 本轮：底部栏标签全部改走 `t!`（21 处硬编码英文 tag、38 个缺失的
+  `key-*`），文本按 `global.c` 对齐；新增 `tests/i18n_keys.rs` 校验
+  `t!` 键在两种语言里都存在；删除 `search.rs` 的过时占位注释。
+- 复查：更新文档中的对比对象、源码行数、测试文件数（44）、条件编译
+  描述、`rcfile.rs` 行数（约 1455）与锚点现状（键位尚未绑定）。
