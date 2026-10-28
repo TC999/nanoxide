@@ -372,6 +372,10 @@ fn open_buffer_impl(filename: &str, fresh: bool) -> OpenBufferResult {
     }
 
     // 文件存在：读取内容（保留/检测 DOS 行尾，受 -N 与 -u 影响）。
+    /* 从命名管道读取时提示（对应 C 的 `S_ISFIFO` → "Reading from FIFO..."）。 */
+    if is_fifo_file(filename) {
+        winio::statusbar(&crate::t!("files-reading_from_fifo"));
+    }
     match read_file_lines(path) {
         Ok((lines_data, detected_fmt, num_lines)) => {
             /* -u/--unix 强制按 Unix 格式保存；否则采用检测到的格式
