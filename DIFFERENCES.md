@@ -177,6 +177,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
     `^T` 跳行、`^E` 执行、`^H` 帮助、`^R` 替换、`^P` 报告位置）。
     `execute_function` 在该模式下先查 shortcut 表，避免 legacy 硬编码覆盖
     （`tests/keymap_reachability.rs`）。
+11. ✅ **执行菜单（MEXECUTE）快捷键已补齐**：`^S`/`^T` 拼写、`^O` 格式化、
+    `^V` 剪切到末尾、`^J` 全文对齐、`^Y` linter、`^Z` 挂起、`M-\` 管道
+    （`global.c:1304-1305、1315、1449、1458`；`tests/keymap_reachability.rs`）。
 
 ---
 
@@ -424,3 +427,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：legacy 的 `^Z` 改为 `suggest_ctrlT_ctrlZ`（仅当 `^T` 是 Execute
   且执行菜单 `^Z` 是 Suspend 时提示），补执行菜单的 `^Z` → Suspend 绑定
   与 `global-suspend_hint` 翻译；`execute_by_id` 接入 `SuggestSuspend`。
+- 本轮：执行菜单（MEXECUTE）补齐 `^S`/`^T` 拼写、`^O` 格式化、`^V`
+  剪切到末尾、`^J` 全文对齐等快捷键，与 `global.c` 对齐；
+  `tests/keymap_reachability.rs` 增加对应断言。
