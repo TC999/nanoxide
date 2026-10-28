@@ -526,3 +526,38 @@ fn prompt_history_and_file_bounds_follow_global_c() {
         "查找帮助 ^Y 首行"
     );
 }
+
+/// 浏览器菜单与 insert/write 提示的键位（对应 `global.c:1537-1556`）。
+#[test]
+fn browser_and_prompt_bindings_follow_global_c() {
+    setup();
+    let f = |key: i32, menu: i32| {
+        nanoxide::global::find_shortcut(key, menu).map(|sc| sc.borrow().func)
+    };
+
+    assert_eq!(f(20, MBROWSER), Some(FunctionId::DoExit), "^T 退出浏览器");
+    assert_eq!(f(KEY_HOME, MBROWSER), Some(FunctionId::ToFirstFile), "Home 首文件");
+    assert_eq!(f(KEY_END, MBROWSER), Some(FunctionId::ToLastFile), "End 末文件");
+    assert_eq!(
+        f(CONTROL_HOME, MBROWSER),
+        Some(FunctionId::ToFirstFile),
+        "^Home 首文件"
+    );
+    assert_eq!(
+        f(CONTROL_END, MBROWSER),
+        Some(FunctionId::ToLastFile),
+        "^End 末文件"
+    );
+    assert_eq!(f(31, MBROWSER), Some(FunctionId::DoGotoDir), "^/ 切换目录");
+    assert_eq!(f(0x267, MBROWSER), Some(FunctionId::DoGotoDir), "M-G 切换目录");
+    assert_eq!(f(0x20, MBROWSER), Some(FunctionId::DoPageDown), "Space 下一页");
+    assert_eq!(
+        f(KEY_BACKSPACE, MBROWSER),
+        Some(FunctionId::DoPageUp),
+        "Bsp 上一页"
+    );
+
+    /* ^T 在写文件与插入文件提示里都是浏览（C 的 to_files）。 */
+    assert_eq!(f(20, MWRITEFILE), Some(FunctionId::ToFiles), "写文件 ^T");
+    assert_eq!(f(20, MINSERTFILE), Some(FunctionId::ToFiles), "插入文件 ^T");
+}

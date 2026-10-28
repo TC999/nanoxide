@@ -680,7 +680,7 @@ pub fn shortcut_init_rest() {
     add_to_sclist(MWRITEFILE, "M-B", 0x262, FunctionId::BackItUp, 0);
     add_to_sclist(MWRITEFILE, "M-A", 0x261, FunctionId::AppendIt, 0);
     add_to_sclist(MWRITEFILE, "M-P", 0x270, FunctionId::PrependIt, 0);
-    add_to_sclist(MWRITEFILE, "^T", 20, FunctionId::ToFiles, 0);
+    add_to_sclist(MWRITEFILE | MINSERTFILE, "^T", 20, FunctionId::ToFiles, 0);
 
     /* 插入/执行提示的翻转键（对应 global.c:1551-1559）。 */
     add_to_sclist(MINSERTFILE | MEXECUTE, "^X", 24, FunctionId::FlipExecute, 0);
@@ -703,12 +703,21 @@ pub fn shortcut_init_rest() {
     add_to_sclist(MEXECUTE, "^J", 10, FunctionId::DoFullJustify, 0);
     add_to_sclist(MLINTER, "^X", 24, FunctionId::DoCancel, 0);
 
-    // 浏览器菜单
+    // 浏览器菜单（对应 global.c:1537-1556）
     add_to_sclist(MBROWSER, "^F", 6, FunctionId::DoSearchForward, 0);
     add_to_sclist(MBROWSER, "^B", 2, FunctionId::DoSearchBackward, 0);
     add_to_sclist(MBROWSER, "^C", 3, FunctionId::DoExit, 0);
-    add_to_sclist(MBROWSER, "^S", 19, FunctionId::DoEnter, 0);
-    add_to_sclist(MBROWSER, "^H", 8, FunctionId::DoGotoDir, 0);
+    add_to_sclist(MBROWSER, "^T", 20, FunctionId::DoExit, 0);
+    add_to_sclist(MBROWSER, "Home", KEY_HOME, FunctionId::ToFirstFile, 0);
+    add_to_sclist(MBROWSER, "End", KEY_END, FunctionId::ToLastFile, 0);
+    add_to_sclist(MBROWSER, "^Home", CONTROL_HOME, FunctionId::ToFirstFile, 0);
+    add_to_sclist(MBROWSER, "^End", CONTROL_END, FunctionId::ToLastFile, 0);
+    /* 切换目录：^/（或 ^-）、M-G、^_（C 的 SLASH_OR_DASH 与 goto_dir 绑定）。 */
+    add_to_sclist(MBROWSER, r"^/", 31, FunctionId::DoGotoDir, 0);
+    add_to_sclist(MBROWSER, "M-G", 0x267, FunctionId::DoGotoDir, 0);
+    add_to_sclist(MBROWSER, "Space", 0x20, FunctionId::DoPageDown, 0);
+    add_to_sclist(MBROWSER | MHELP, "Bsp", KEY_BACKSPACE, FunctionId::DoPageUp, 0);
+    add_to_sclist(MBROWSER | MHELP, "Sh-Del", SHIFT_DELETE, FunctionId::DoPageUp, 0);
     add_to_sclist(MBROWSER, "Up", KEY_UP, FunctionId::DoUp, 0);
     add_to_sclist(MBROWSER, "Down", KEY_DOWN, FunctionId::DoDown, 0);
     add_to_sclist(MBROWSER, "Left", KEY_LEFT, FunctionId::DoLeft, 0);
