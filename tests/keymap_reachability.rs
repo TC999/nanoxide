@@ -390,3 +390,40 @@ fn modern_x_cuts_instead_of_exiting() {
 
     UNSET(MODERN_BINDINGS);
 }
+
+/// legacy 下 ^Z 提示挂起方式（对应 nano.c 的 `suggest_ctrlT_ctrlZ`）。
+#[test]
+fn legacy_ctrl_z_suggests_suspend_keys() {
+    setup();
+    with_global_mut(|g| g.statusbar_msg.clear());
+
+    assert_eq!(
+        shortcut_func(26),
+        Some(FunctionId::SuggestSuspend),
+        "legacy ^Z 是挂起提示"
+    );
+    assert!(nanoxide::winio::handle_input_key(26));
+    let msg = with_global(|g| g.statusbar_msg.clone());
+    assert_eq!(msg, nanoxide::t!("global-suspend_hint"));
+}
+
+/// modern 下 ^Z 是撤销，不显示挂起提示。
+#[test]
+fn modern_ctrl_z_undoes_instead_of_suggesting() {
+    nanoxide::global::global_init();
+    SET(MODERN_BINDINGS);
+    nanoxide::global::shortcut_init();
+    with_global_mut(|g| {
+        g.openfile = None;
+        g.currmenu = MMAIN;
+    });
+    nanoxide::files::make_new_buffer();
+
+    assert_eq!(
+        shortcut_func(26),
+        Some(FunctionId::DoUndo),
+        "modern ^Z 是撤销"
+    );
+
+    UNSET(MODERN_BINDINGS);
+}

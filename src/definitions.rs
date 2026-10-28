@@ -399,6 +399,7 @@ pub enum FunctionId {
     DiscardBuffer, DoSaveFile, DoZap, DoFullJustify, DoCycle, DoCenter,
     ToTopRow, ToBottomRow, ChopPrevWord, ChopNextWord, CountWords,
     PutOrLiftAnchor, ToPrevAnchor, ToNextAnchor,
+    SuggestSuspend,
     DosFormat, AppendIt, PrependIt, BackItUp,
     FlipExecute, FlipPipe, FlipConvert, FlipNewBuffer,
     CaseSensVoid, RegexpVoid, BackwardsVoid, FlipReplace,

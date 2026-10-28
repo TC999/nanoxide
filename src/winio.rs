@@ -3093,6 +3093,7 @@ fn execute_by_id(func: FunctionId) -> bool {
         FunctionId::CountWords => text::count_lines_words_and_characters(),
         FunctionId::DoZap => cut::zap_text(),
         FunctionId::DoSaveFile => files::do_savefile(),
+        FunctionId::SuggestSuspend => global::suggest_ctrlT_ctrlZ(),
         FunctionId::DoRecordMacro => record_macro(),
         FunctionId::DoRunMacro => run_macro(),
         FunctionId::DoLinter => text::do_linter(),
@@ -3262,7 +3263,7 @@ fn execute_function(key: i32, _menu: i32) -> bool {
         return true;
     }
     if key == 25 { movement::do_page_up(); edit_refresh(); return true; }       // Ctrl+Y
-    if key == 26 { text::do_undo(); edit_refresh(); return true; }              // Ctrl+Z (Undo)
+    /* Ctrl+Z 交给 shortcut 表：legacy 是挂起提示，modern 是撤销。 */
 
     // 方向键
     if key == KEY_LEFT { movement::do_left(); edit_refresh(); return true; }

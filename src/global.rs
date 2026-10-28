@@ -282,6 +282,32 @@ pub fn is_on_a_vt() -> bool {
 }
 
 /// 分配并设置快捷键列表（所有菜单）。
+/// 返回指定菜单中某函数的第一条快捷键键码（对应 C 的 `first_sc_for`）。
+fn first_shortcut_keycode(menu: i32, func: FunctionId) -> Option<i32> {
+    let mut shortcut = with_global(|g| g.shortcuts.clone());
+    while let Some(node) = shortcut {
+        let (menus, f, keycode, next) = {
+            let r = node.borrow();
+            (r.menus, r.func, r.keycode, r.next.clone())
+        };
+        if (menus & menu) != 0 && f == func {
+            return Some(keycode);
+        }
+        shortcut = next;
+    }
+    None
+}
+
+/// legacy 键位下提示挂起方式（对应 nano.c 的 `suggest_ctrlT_ctrlZ`）：
+/// 仅当主菜单的 Execute 仍是 ^T、执行菜单里 Suspend 是 ^Z 时才提示。
+pub fn suggest_ctrlT_ctrlZ() {
+    let execute_key = first_shortcut_keycode(MMAIN, FunctionId::DoExecute);
+    let suspend_key = first_shortcut_keycode(MEXECUTE, FunctionId::DoSuspend);
+    if execute_key == Some(0x14) && suspend_key == Some(0x1A) {
+        crate::winio::statusline(MessageType::Ahem, &crate::t!("global-suspend_hint"));
+    }
+}
+
 pub fn shortcut_init() {
     // 主菜单快捷键（与 C 版 global.c 对应）
     /* 两套键位共用：搜索、剪切/复制/粘贴、替换、插入文件、换行/制表、
@@ -349,6 +375,8 @@ pub fn shortcut_init() {
         add_to_sclist(MMAIN, r"^H", 8, FunctionId::DoBackspace, 0);
         add_to_sclist(MMAIN, r"^D", 4, FunctionId::DoDelete, 0);
         add_to_sclist(MMAIN, r"^T", 20, FunctionId::DoExecute, 0);
+        /* legacy 的 ^Z 用来提示挂起方式（对应 global.c:1451）。 */
+        add_to_sclist(MMAIN, r"^Z", 26, FunctionId::SuggestSuspend, 0);
     }
     // Alt 组合
     add_to_sclist(MMAIN, "M-U", 0, FunctionId::DoUndo, 0);
@@ -644,6 +672,8 @@ pub fn shortcut_init_rest() {
     /* Linter：执行菜单里的 ^Y 调用，linter 模式里 ^X 退出
      * （对应 global.c:1312、1579）。 */
     add_to_sclist(MEXECUTE, "^Y", 25, FunctionId::DoLinter, 0);
+    /* 执行菜单里 ^Z 挂起（对应 global.c:1450）。 */
+    add_to_sclist(MEXECUTE, "^Z", 26, FunctionId::DoSuspend, 0);
     add_to_sclist(MLINTER, "^X", 24, FunctionId::DoCancel, 0);
 
     // 浏览器菜单

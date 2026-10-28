@@ -19,6 +19,7 @@ winio-cursor_position = line {lineno}/{filebot_lineno} ({linepct}%), col {column
 winio-view_warning = Key is invalid in view mode
 winio-function_not_implemented = Function not implemented: {func}
 winio-nameless = (nameless)
+global-suspend_hint = To suspend, type ^T^Z
 
 # ---------- browser（文件浏览器） ----------
 browser-search = Search
