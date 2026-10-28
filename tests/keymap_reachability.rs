@@ -479,3 +479,50 @@ fn search_menu_options_follow_global_c() {
         "^R 切换到替换"
     );
 }
+
+/// 提示历史翻页与首/末文件键（对应 `global.c:884-895、1529-1533`）。
+#[test]
+fn prompt_history_and_file_bounds_follow_global_c() {
+    setup();
+    let f = |key: i32, menu: i32| {
+        nanoxide::global::find_shortcut(key, menu).map(|sc| sc.borrow().func)
+    };
+
+    for menu in [
+        MWHEREIS,
+        MREPLACE,
+        MREPLACEWITH,
+        MWHEREISFILE,
+        MFINDINHELP,
+        MEXECUTE,
+    ] {
+        assert_eq!(f(16, menu), Some(FunctionId::GetOlderItem), "^P 上一条历史");
+        assert_eq!(f(14, menu), Some(FunctionId::GetNewerItem), "^N 下一条历史");
+    }
+
+    assert_eq!(
+        f(25, MWHEREISFILE),
+        Some(FunctionId::ToFirstFile),
+        "查找文件提示 ^Y 首文件"
+    );
+    assert_eq!(
+        f(22, MWHEREISFILE),
+        Some(FunctionId::ToLastFile),
+        "查找文件提示 ^V 末文件"
+    );
+    assert_eq!(
+        f(0x25C, MBROWSER),
+        Some(FunctionId::ToFirstFile),
+        "浏览器 M-\\ 首文件"
+    );
+    assert_eq!(
+        f(0x22F, MBROWSER),
+        Some(FunctionId::ToLastFile),
+        "浏览器 M-/ 末文件"
+    );
+    assert_eq!(
+        f(25, MFINDINHELP),
+        Some(FunctionId::DoFirstLine),
+        "查找帮助 ^Y 首行"
+    );
+}

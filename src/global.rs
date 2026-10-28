@@ -631,8 +631,8 @@ pub fn shortcut_init_rest() {
     add_to_sclist(MWHEREIS | MGOTOLINE, "^T", 20, FunctionId::FlipGoto, 0);
     add_to_sclist(MGOTOLINE, "^W", 23, FunctionId::DoParaBegin, 0);
     add_to_sclist(MGOTOLINE, "^O", 15, FunctionId::DoParaEnd, 0);
-    add_to_sclist(MGOTOLINE | MWHEREIS, "^Y", 25, FunctionId::DoFirstLine, 0);
-    add_to_sclist(MGOTOLINE | MWHEREIS, "^V", 22, FunctionId::DoLastLine, 0);
+    add_to_sclist(MGOTOLINE | MWHEREIS | MFINDINHELP, "^Y", 25, FunctionId::DoFirstLine, 0);
+    add_to_sclist(MGOTOLINE | MWHEREIS | MFINDINHELP, "^V", 22, FunctionId::DoLastLine, 0);
 
     // 提示菜单：方向键与编辑键
     let mmi = MMAIN | MWHEREIS | MREPLACE | MREPLACEWITH | MGOTOLINE | MINSERTFILE
@@ -641,6 +641,23 @@ pub fn shortcut_init_rest() {
     add_to_sclist(mmi, "Right", KEY_RIGHT, FunctionId::DoRight, 0);
     add_to_sclist(mmi, "Up", KEY_UP, FunctionId::GetOlderItem, 0);
     add_to_sclist(mmi, "Down", KEY_DOWN, FunctionId::GetNewerItem, 0);
+    /* 提示历史翻页（对应 global.c:884-895 的 ^P/^N 与文件浏览器提示）。 */
+    add_to_sclist(
+        MWHEREIS | MREPLACE | MREPLACEWITH | MWHEREISFILE | MFINDINHELP | MEXECUTE,
+        "^P",
+        16,
+        FunctionId::GetOlderItem,
+        0,
+    );
+    add_to_sclist(
+        MWHEREIS | MREPLACE | MREPLACEWITH | MWHEREISFILE | MFINDINHELP | MEXECUTE,
+        "^N",
+        14,
+        FunctionId::GetNewerItem,
+        0,
+    );
+    add_to_sclist(MWHEREISFILE | MFINDINHELP, "Up", KEY_UP, FunctionId::GetOlderItem, 0);
+    add_to_sclist(MWHEREISFILE | MFINDINHELP, "Down", KEY_DOWN, FunctionId::GetNewerItem, 0);
     add_to_sclist(mmi, "Home", KEY_HOME, FunctionId::DoHome, 0);
     add_to_sclist(mmi, "End", KEY_END, FunctionId::DoEnd, 0);
     add_to_sclist(mmi, "M-Left", ALT_LEFT, FunctionId::DoPrevWord, 0);
@@ -698,6 +715,11 @@ pub fn shortcut_init_rest() {
     add_to_sclist(MBROWSER, "Right", KEY_RIGHT, FunctionId::DoRight, 0);
     add_to_sclist(MBROWSER, "M-<", ALT_LESS, FunctionId::ToFirstFile, 0);
     add_to_sclist(MBROWSER, "M->", ALT_GREATER, FunctionId::ToLastFile, 0);
+    /* 文件浏览器与“查找文件”提示的首/末文件（对应 global.c:1529-1533）。 */
+    add_to_sclist(MWHEREISFILE, "^Y", 25, FunctionId::ToFirstFile, 0);
+    add_to_sclist(MWHEREISFILE, "^V", 22, FunctionId::ToLastFile, 0);
+    add_to_sclist(MBROWSER | MWHEREISFILE, "M-\\", 0x25C, FunctionId::ToFirstFile, 0);
+    add_to_sclist(MBROWSER | MWHEREISFILE, "M-/", 0x22F, FunctionId::ToLastFile, 0);
     add_to_sclist(MBROWSER, "PageUp", KEY_PPAGE, FunctionId::DoPageUp, 0);
     add_to_sclist(MBROWSER, "PageDown", KEY_NPAGE, FunctionId::DoPageDown, 0);
 
