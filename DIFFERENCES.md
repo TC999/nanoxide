@@ -185,6 +185,8 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
     `M-Up`/`M-Down`/`M--`/`M-_`/`M-+`/`M-=` 滚动屏幕——此前
     `handle_input_key` 把 `M-Up`/`M-Down` 当段落移动
     （`global.c:1552-1565`；`tests/keymap_reachability.rs`）。
+13. ✅ **`M-X` 切换帮助行**：绑定 `(MMOST|MBROWSER|MYESNO) & ~MFINDINHELP`
+    → `DoToggle NO_HELP`，帮助查看器内不绑定（`tests/keymap_reachability.rs`）。
 
 ---
 
@@ -458,3 +460,5 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   `M-Up`/`M-Down`/`M--`/`M-_`/`M-+`/`M-=` 改为滚动屏幕（原先
   `M-Up`/`M-Down` 被硬编码成段落移动）；`tests/keymap_reachability.rs`
   增加断言。
+- 本轮：补 `M-X`（切换帮助行，`DoToggle NO_HELP`）绑定，帮助查看器内
+  不绑定；`tests/keymap_reachability.rs` 验证绑定与切换。
