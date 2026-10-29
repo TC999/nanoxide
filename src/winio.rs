@@ -23,7 +23,7 @@ use crossterm::{
     cursor::{self, Hide, Show},
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-        KeyModifiers, MouseButton, MouseEventKind,
+        KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     },
     execute,
     style::{Attribute, Color, SetAttribute, SetForegroundColor, SetBackgroundColor},
@@ -395,10 +395,16 @@ fn handle_event(event: Event) -> i32 {
             }
         }
         Event::Mouse(mouse) => {
-            /* 鼠标点击（对应 C 版 process_click）：仅启用鼠标时处理
-             * 编辑区内的左键按下；其它按钮/拖动忽略。 */
-            if ISSET(USE_MOUSE) && mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-                handle_mouse_click(mouse.column, mouse.row)
+            /* 鼠标点击（对应 C 版 get_mouseinput）：左键（编辑区/底部栏）
+             * 或滚轮（编辑区/状态行）。 */
+            let interesting = matches!(
+                mouse.kind,
+                MouseEventKind::Down(MouseButton::Left)
+                    | MouseEventKind::ScrollUp
+                    | MouseEventKind::ScrollDown
+            );
+            if ISSET(USE_MOUSE) && interesting {
+                handle_mouse_event(mouse)
             } else {
                 ERR
             }
@@ -1518,27 +1524,14 @@ fn draw_bottombars_lines(stdout: &mut io::Stdout, cols: usize, lines: usize) {
         }
 
         // 收集所有匹配当前菜单的函数条目
-        let mut entries: Vec<(String, String)> = Vec::new();
-        let mut current_func = g.allfuncs.clone();
-        while let Some(f) = current_func {
-            let f_ref = f.borrow();
-            if (f_ref.menus & menu) != 0 {
-                // 在 shortcuts 中查找匹配当前菜单的对应快捷键（与 C 版 first_sc_for 一致）
-                let mut current_sc = g.shortcuts.clone();
-                while let Some(s) = current_sc {
-                    let s_ref = s.borrow();
-                    if (s_ref.menus & menu) != 0 && s_ref.func == f_ref.func && !s_ref.keystr.is_empty() {
-                        entries.push((s_ref.keystr.clone(), f_ref.tag.clone()));
-                        break;
-                    }
-                    current_sc = s_ref.next.clone();
-                }
-            }
-            current_func = f_ref.next.clone();
-        }
+        let entries: Vec<(String, String)> = shortcut_entries(menu)
+            .into_iter()
+            .map(|(keystr, tag, _, _)| (keystr, tag))
+            .collect();
 
         // 限制条目数量（与 C 版 shown_entries_for 一致：((COLS + 40) / 20) * 2）
         let maximum = ((cols + 40) / 20) * 2;
+        let mut entries = entries;
         entries.truncate(maximum);
 
         let number = entries.len();
@@ -1576,6 +1569,132 @@ fn draw_bottombars_lines(stdout: &mut io::Stdout, cols: usize, lines: usize) {
             let _ = write!(stdout, "{:width$}", truncated, width = thiswidth.min(cols.saturating_sub(col as usize)));
         }
     });
+}
+
+/// 收集某菜单下可显示的快捷键条目：(keystr, tag, func, toggle)。
+/// 顺序与 C 的 allfuncs 遍历 + first_sc_for 一致，供底部栏绘制与点击共用。
+fn shortcut_entries(menu: i32) -> Vec<(String, String, FunctionId, i32)> {
+    let mut entries = Vec::new();
+    with_global(|g| {
+        let mut current_func = g.allfuncs.clone();
+        while let Some(f) = current_func {
+            let (func, menus, tag, next) = {
+                let r = f.borrow();
+                (r.func, r.menus, r.tag.clone(), r.next.clone())
+            };
+            if (menus & menu) != 0 {
+                let mut current_sc = g.shortcuts.clone();
+                while let Some(s) = current_sc {
+                    let (sfunc, smenus, keystr, toggle, snext) = {
+                        let r = s.borrow();
+                        (r.func, r.menus, r.keystr.clone(), r.toggle, r.next.clone())
+                    };
+                    if (smenus & menu) != 0 && sfunc == func && !keystr.is_empty() {
+                        entries.push((keystr, tag, func, toggle));
+                        break;
+                    }
+                    current_sc = snext;
+                }
+            }
+            current_func = next;
+        }
+    });
+    let cols = with_global(|g| g.COLS);
+    let maximum = ((cols + 40) / 20) * 2;
+    entries.truncate(maximum);
+    entries
+}
+
+/// 根据底部栏点击位置计算快捷键下标（1 起；None 表示点空）。
+/// `footer_row` 是 footwin 内的行号（bottombars 画在第 1、2 行）。
+/// 对应 C 的 get_mouseinput 中 footer 分支：`width` 由条目数决定，
+/// 最后两个较宽条目需要回退两格。
+pub fn footer_index(column: usize, footer_row: usize, cols: usize, number: usize) -> Option<usize> {
+    if number == 0 {
+        return None;
+    }
+    let width = if number < 5 {
+        cols / 2
+    } else {
+        cols / ((number + 1) / 2)
+    };
+    if width == 0 {
+        return None;
+    }
+    let mut index = (column / width) * 2 + footer_row;
+    if index > number && column % width < cols % width {
+        index -= 2;
+    }
+    if index == 0 || index > number {
+        None
+    } else {
+        Some(index)
+    }
+}
+
+/// 处理底部栏点击：执行被点中的快捷键（对应 C 的 get_mouseinput）。
+fn handle_footer_click(column: u16, footer_row: usize) -> i32 {
+    let (cols, menu) = with_global(|g| (g.COLS, g.currmenu));
+    let entries = shortcut_entries(menu);
+    let Some(index) = footer_index(column as usize, footer_row, cols, entries.len()) else {
+        return ERR;
+    };
+    let (_, _, func, toggle) = entries[index - 1].clone();
+    if func == FunctionId::DoToggle {
+        TOGGLE(toggle as usize);
+        if toggle == USE_MOUSE as i32 {
+            mouse_init();
+        }
+        edit_refresh();
+    } else {
+        execute_by_id(func);
+    }
+    1
+}
+
+/// 处理鼠标事件：左键点击（标题栏/编辑区/底部栏）与滚轮
+/// （对应 C 的 get_mouseinput）。
+fn handle_mouse_event(mouse: MouseEvent) -> i32 {
+    let (lines, bottomrows, nohelp) =
+        with_global(|g| (g.LINES, bottomrows_for(g.LINES), ISSET(NO_HELP)));
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            let row = mouse.row as usize; // crossterm 行从 1 起
+            /* 底部栏（屏幕最后两行；点状态行不处理，对应 C 的
+             * `if (*mouse_y == (LINES - 3)) return 0;`）。footer_row 为
+             * footwin 内的 1/2（bottombars 画在第 1、2 行）。 */
+            if bottomrows > 1
+                && !nohelp
+                && with_global(|g| g.currmenu) != MYESNO
+                && row >= lines.saturating_sub(1)
+            {
+                let footer_row = row.saturating_sub(lines.saturating_sub(2));
+                return handle_footer_click(mouse.column, footer_row);
+            }
+            handle_mouse_click(mouse.column, mouse.row)
+        }
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+            /* 编辑区或状态行：一次滚轮滚动两行（对应 C 推入两次
+             * ALT_UP/ALT_DOWN）。 */
+            let in_edit = mouse.row >= 1
+                && (mouse.row as usize) <= with_global(|g| g.editwinrows).max(0) as usize;
+            let in_status = (mouse.row as usize) == lines.saturating_sub(bottomrows) + 1;
+            if in_edit || in_status {
+                let up = mouse.kind == MouseEventKind::ScrollUp;
+                for _ in 0..2 {
+                    if up {
+                        crate::movement::do_scroll_up();
+                    } else {
+                        crate::movement::do_scroll_down();
+                    }
+                }
+                edit_refresh();
+                return 1;
+            }
+            ERR
+        }
+        _ => ERR,
+    }
 }
 
 /// 在状态栏写入消息（status_row 行）；centered 时水平居中。
