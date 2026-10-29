@@ -322,6 +322,20 @@ impl MatchPattern {
     pub fn find_from(&self, text: &[u8], start: usize, notbol: bool) -> Option<(usize, usize)> {
         self.re.find_bytes(text, start, notbol)
     }
+    /// 捕获组数量（对应 POSIX `re_nsub`）。
+    pub fn nsub(&self) -> usize {
+        self.re.nsub()
+    }
+    /// 从指定偏移开始查找，并返回捕获组边界
+    /// （对应 `regexec` 填写 `regmatch_t` 数组）。
+    pub fn find_from_captures(
+        &self,
+        text: &[u8],
+        start: usize,
+        notbol: bool,
+    ) -> Option<crate::regex::MatchResult> {
+        self.re.find_bytes_captures(text, start, notbol)
+    }
     /// 原始模式字符串。
     pub fn pattern_str(&self) -> &str {
         &self.pattern

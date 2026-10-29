@@ -18,6 +18,18 @@
 #[derive(Debug, Clone)]
 pub struct Regex {
     prog: Node,
+    /// 捕获组数量（对应 POSIX `re_nsub`）。
+    nsub: usize,
+}
+
+/// 一次匹配的结果（对应 C 的 `regmatch_t` 数组）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchResult {
+    /// 整体匹配的起点/终点。
+    pub so: usize,
+    pub eo: usize,
+    /// 第 0 项为整体匹配，1..=nsub 为捕获组；未参与的组为 None。
+    pub groups: Vec<Option<(usize, usize)>>,
 }
 
 /// 匹配树的节点。
@@ -45,6 +57,8 @@ enum Node {
     Alt(Vec<Node>),
     /// 重复：min 次到 max 次（None 表示不限）。
     Rep(Box<Node>, usize, Option<usize>),
+    /// 捕获组 `(...)`：内部节点与组号（从 1 开始）。
+    Group(Box<Node>, usize),
 }
 
 impl Regex {
@@ -54,12 +68,21 @@ impl Regex {
             chars: pattern.as_bytes(),
             pos: 0,
             icase,
+            groups: 0,
         };
         let prog = parser.parse_alt(false)?;
         if parser.pos != parser.chars.len() {
             return Err(crate::t!("regex-unexpected", ch = (parser.chars[parser.pos] as char).to_string()));
         }
-        Ok(Regex { prog })
+        Ok(Regex {
+            prog,
+            nsub: parser.groups,
+        })
+    }
+
+    /// 捕获组数量（对应 POSIX `re_nsub`）。
+    pub fn nsub(&self) -> usize {
+        self.nsub
     }
 
     /// 在 text 中从 start 起查找第一个匹配（部分匹配），返回 (起点, 终点)。
@@ -71,19 +94,58 @@ impl Regex {
     /// 字节串版本的 find（nano 文本为字节级存储）。
     /// POSIX 语义：最左优先、同起点取最长匹配（leftmost-longest）。
     pub fn find_bytes(&self, text: &[u8], start: usize, notbol: bool) -> Option<(usize, usize)> {
+        self.find_bytes_captures(text, start, notbol)
+            .map(|m| (m.so, m.eo))
+    }
+
+    /// 在 text 中从 start 起查找第一个匹配，并返回捕获组边界
+    /// （对应 POSIX `regexec` 填写 `regmatch_t` 数组）。
+    ///
+    /// 整体匹配仍取最左、同起点最长；捕获组取该条最长路径上的值。
+    /// POSIX 对同一整体长度下多条路径的子表达式优先级规则更细，
+    /// 这里保留最先枚举到的那条，未逐一复刻。
+    #[allow(clippy::type_complexity)]
+    pub fn find_bytes_captures(
+        &self,
+        text: &[u8],
+        start: usize,
+        notbol: bool,
+    ) -> Option<MatchResult> {
         let len = text.len();
         let start = start.min(len);
         for so in start..=len {
             let notbol_here = notbol || so != start;
-            /* 收集所有可能终点，取最长（对应 POSIX leftmost-longest）。 */
-            let best: std::cell::Cell<Option<usize>> = std::cell::Cell::new(None);
-            match_node(&self.prog, text, so, so, len, notbol_here, &|eo| {
-                let prev = best.get();
-                best.set(Some(prev.map_or(eo, |b: usize| b.max(eo))));
-                None // 返回 None 以继续枚举其它可能终点
-            });
-            if let Some(eo) = best.get() {
-                return Some((so, eo));
+            let initial = vec![None; self.nsub + 1];
+
+            /* 收集所有可能终点，取最长（对应 POSIX leftmost-longest），
+             * 同时保留产生该终点时的捕获组快照。 */
+            let mut best: Option<(usize, Vec<Option<(usize, usize)>>)> = None;
+            {
+                let mut collect = |eo: usize, caps: &[Option<(usize, usize)>]| {
+                    let better = match &best {
+                        None => true,
+                        Some((prev, _)) => eo > *prev,
+                    };
+                    if better {
+                        best = Some((eo, caps.to_vec()));
+                    }
+                    None // 返回 None 以继续枚举其它可能终点
+                };
+                match_node(
+                    &self.prog,
+                    text,
+                    so,
+                    so,
+                    len,
+                    notbol_here,
+                    &initial,
+                    &mut collect,
+                );
+            }
+
+            if let Some((eo, mut groups)) = best {
+                groups[0] = Some((so, eo));
+                return Some(MatchResult { so, eo, groups });
             }
         }
         None
@@ -104,22 +166,32 @@ impl Regex {
 }
 
 /// 递归回溯（continuation 风格）：匹配 node 从 pos 开始，成功后调用
-/// continuation k(新位置)；失败返回 None。量词贪婪并支持回退。
-fn match_node(node: &Node, text: &[u8], pos: usize, bol_pos: usize, end: usize, notbol: bool, k: &dyn Fn(usize) -> Option<usize>) -> Option<usize> {
+/// continuation k(新位置, 当前捕获组)；失败返回 None。量词贪婪并支持回退。
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn match_node(
+    node: &Node,
+    text: &[u8],
+    pos: usize,
+    bol_pos: usize,
+    end: usize,
+    notbol: bool,
+    caps: &[Option<(usize, usize)>],
+    k: &mut dyn FnMut(usize, &[Option<(usize, usize)>]) -> Option<usize>,
+) -> Option<usize> {
     match node {
         Node::Char(lo, hi) => {
             if pos < end {
                 let c = text[pos];
                 let c2 = if c.is_ascii_uppercase() { c + 32 } else { c };
                 if c2 >= *lo && c2 <= *hi {
-                    return k(pos + 1);
+                    return k(pos + 1, caps);
                 }
             }
             None
         }
         Node::Any => {
             if pos < end {
-                k(pos + 1)
+                k(pos + 1, caps)
             } else {
                 None
             }
@@ -138,21 +210,21 @@ fn match_node(node: &Node, text: &[u8], pos: usize, bol_pos: usize, end: usize, 
                 }
             }
             if in_class != *negated {
-                k(pos + 1)
+                k(pos + 1, caps)
             } else {
                 None
             }
         }
         Node::Bol => {
             if !notbol && pos == bol_pos {
-                k(pos)
+                k(pos, caps)
             } else {
                 None
             }
         }
         Node::Eol => {
             if pos == end {
-                k(pos)
+                k(pos, caps)
             } else {
                 None
             }
@@ -161,7 +233,7 @@ fn match_node(node: &Node, text: &[u8], pos: usize, bol_pos: usize, end: usize, 
             let before = if pos > 0 { is_word_char(text[pos - 1]) } else { false };
             let after = if pos < end { is_word_char(text[pos]) } else { false };
             if before != after {
-                k(pos)
+                k(pos, caps)
             } else {
                 None
             }
@@ -170,7 +242,7 @@ fn match_node(node: &Node, text: &[u8], pos: usize, bol_pos: usize, end: usize, 
             let before = if pos > 0 { is_word_char(text[pos - 1]) } else { false };
             let after = if pos < end { is_word_char(text[pos]) } else { false };
             if !before && after {
-                k(pos)
+                k(pos, caps)
             } else {
                 None
             }
@@ -179,33 +251,49 @@ fn match_node(node: &Node, text: &[u8], pos: usize, bol_pos: usize, end: usize, 
             let before = if pos > 0 { is_word_char(text[pos - 1]) } else { false };
             let after = if pos < end { is_word_char(text[pos]) } else { false };
             if before && !after {
-                k(pos)
+                k(pos, caps)
             } else {
                 None
             }
         }
         Node::Seq(items) => {
             // 依次匹配每一项，最后一项的 continuation 是外层 k。
-            fn walk(items: &[Node], idx: usize, text: &[u8], pos: usize, bol: usize, end: usize, notbol: bool, k: &dyn Fn(usize) -> Option<usize>) -> Option<usize> {
+            #[allow(clippy::type_complexity, clippy::too_many_arguments)]
+            fn walk(
+                items: &[Node],
+                idx: usize,
+                text: &[u8],
+                pos: usize,
+                bol: usize,
+                end: usize,
+                notbol: bool,
+                caps: &[Option<(usize, usize)>],
+                k: &mut dyn FnMut(usize, &[Option<(usize, usize)>]) -> Option<usize>,
+            ) -> Option<usize> {
                 if idx == items.len() {
-                    return k(pos);
+                    return k(pos, caps);
                 }
-                let cont = |np: usize| walk(items, idx + 1, text, np, bol, end, notbol, k);
-                match_node(&items[idx], text, pos, bol, end, notbol, &cont)
+                let mut cont = |np: usize, c: &[Option<(usize, usize)>]| {
+                    walk(items, idx + 1, text, np, bol, end, notbol, c, &mut *k)
+                };
+                match_node(&items[idx], text, pos, bol, end, notbol, caps, &mut cont)
             }
-            walk(items, 0, text, pos, bol_pos, end, notbol, k)
+            walk(items, 0, text, pos, bol_pos, end, notbol, caps, &mut *k)
         }
         Node::Alt(branches) => {
             for branch in branches {
-                if let Some(np) = match_node(branch, text, pos, bol_pos, end, notbol, k) {
+                if let Some(np) =
+                    match_node(branch, text, pos, bol_pos, end, notbol, caps, &mut *k)
+                {
                     return Some(np);
                 }
             }
             None
         }
         Node::Rep(inner, min, max) => {
-            // 第一阶段：贪婪扩展，记录每一步的位置（含起点）。
-            let mut positions: Vec<usize> = vec![pos];
+            // 第一阶段：贪婪扩展，记录每一步的位置与捕获快照（含起点）。
+            let mut positions: Vec<(usize, Vec<Option<(usize, usize)>>)> =
+                vec![(pos, caps.to_vec())];
             let mut p = pos;
             loop {
                 let count = positions.len() - 1;
@@ -214,17 +302,24 @@ fn match_node(node: &Node, text: &[u8], pos: usize, bol_pos: usize, end: usize, 
                         break;
                     }
                 }
-                let found = match_node(inner, text, p, bol_pos, end, notbol, &|np| {
-                    if np == p {
-                        None // 空匹配：停止扩展
-                    } else {
-                        Some(np)
-                    }
-                });
-                match found {
-                    Some(np) => {
+                let step_start = p;
+                let step_caps = positions[count].1.clone();
+                let mut next: Option<(usize, Vec<Option<(usize, usize)>>)> = None;
+                {
+                    let mut capture = |np: usize, c: &[Option<(usize, usize)>]| {
+                        if np == step_start {
+                            None // 空匹配：停止扩展
+                        } else {
+                            next = Some((np, c.to_vec()));
+                            Some(np)
+                        }
+                    };
+                    match_node(inner, text, p, bol_pos, end, notbol, &step_caps, &mut capture);
+                }
+                match next {
+                    Some((np, c)) => {
                         p = np;
-                        positions.push(p);
+                        positions.push((np, c));
                     }
                     None => break,
                 }
@@ -233,7 +328,7 @@ fn match_node(node: &Node, text: &[u8], pos: usize, bol_pos: usize, end: usize, 
             let mut count = positions.len() - 1;
             loop {
                 if count >= *min {
-                    if let Some(r) = k(positions[count]) {
+                    if let Some(r) = k(positions[count].0, &positions[count].1) {
                         return Some(r);
                     }
                 }
@@ -243,6 +338,15 @@ fn match_node(node: &Node, text: &[u8], pos: usize, bol_pos: usize, end: usize, 
                 count -= 1;
             }
             None
+        }
+        Node::Group(inner, index) => {
+            let start = pos;
+            let mut cont = |np: usize, inner_caps: &[Option<(usize, usize)>]| {
+                let mut updated = inner_caps.to_vec();
+                updated[*index] = Some((start, np));
+                k(np, &updated)
+            };
+            match_node(inner, text, pos, bol_pos, end, notbol, caps, &mut cont)
         }
     }
 }
@@ -256,6 +360,8 @@ struct Parser<'a> {
     chars: &'a [u8],
     pos: usize,
     icase: bool,
+    /// 已分配的捕获组数量（对应 re_nsub）。
+    groups: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -414,11 +520,13 @@ impl<'a> Parser<'a> {
             b'$' => Ok(Node::Eol),
             b'[' => self.parse_class(),
             b'(' => {
+                self.groups += 1;
+                let index = self.groups;
                 let inner = self.parse_alt(true)?;
                 if self.eat() != Some(b')') {
                     return Err("missing ')'".into());
                 }
-                Ok(inner)
+                Ok(Node::Group(Box::new(inner), index))
             }
             b'\\' => self.parse_escape(),
             b'*' | b'+' | b'?' => Err(crate::t!("regex-dangling", ch = (c as char).to_string())),
@@ -719,5 +827,49 @@ mod tests {
         assert_eq!(find("@(x)|y)\\>", "y)"), None);
         assert_eq!(find("@(x)|y)\\>", "y)a"), None);
         assert_eq!(find("a|b)", "b)"), Some((0, 2)));
+    }
+
+    #[test]
+    fn capture_groups() {
+        let re = Regex::compile("(a+)(b+)", false).unwrap();
+        assert_eq!(re.nsub(), 2);
+        let m = re.find_bytes_captures(b"aaabb", 0, false).unwrap();
+        assert_eq!((m.so, m.eo), (0, 5));
+        assert_eq!(m.groups[1], Some((0, 3)));
+        assert_eq!(m.groups[2], Some((3, 5)));
+    }
+
+    #[test]
+    fn capture_nested_and_optional() {
+        let re = Regex::compile("((a)(b))?c", false).unwrap();
+        assert_eq!(re.nsub(), 3);
+
+        let m = re.find_bytes_captures(b"abc", 0, false).unwrap();
+        assert_eq!((m.so, m.eo), (0, 3));
+        assert_eq!(m.groups[1], Some((0, 2)));
+        assert_eq!(m.groups[2], Some((0, 1)));
+        assert_eq!(m.groups[3], Some((1, 2)));
+
+        /* 可选组未参与匹配时为 None。 */
+        let m2 = re.find_bytes_captures(b"c", 0, false).unwrap();
+        assert_eq!(m2.groups[1], None);
+        assert_eq!(m2.groups[2], None);
+        assert_eq!(m2.groups[3], None);
+    }
+
+    #[test]
+    fn capture_repetition_takes_last() {
+        /* 重复的捕获组取最后一次迭代（POSIX 行为）。 */
+        let re = Regex::compile("(a|b)+", false).unwrap();
+        let m = re.find_bytes_captures(b"abab", 0, false).unwrap();
+        assert_eq!(m.groups[1], Some((3, 4)));
+    }
+
+    #[test]
+    fn nsub_counts_only_capturing_parens() {
+        assert_eq!(Regex::compile("(a)(b)(c)", false).unwrap().nsub(), 3);
+        /* `\(` 是字面量，不算捕获组。 */
+        assert_eq!(Regex::compile(r"\(a\)(b)", false).unwrap().nsub(), 1);
+        assert_eq!(Regex::compile("a|b", false).unwrap().nsub(), 0);
     }
 }

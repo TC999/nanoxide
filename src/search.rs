@@ -24,9 +24,10 @@ pub fn regexp_init(pattern: &str) -> bool {
     let icase = !ISSET(CASE_SENSITIVE);
     match MatchPattern::from_regex(pattern, icase) {
         Ok(pat) => {
+            let nsub = pat.nsub();
             with_global_mut(|g| {
                 g.search_regexp = Some(pat);
-                g.regexp_nsub = 0;
+                g.regexp_nsub = nsub;
             });
             true
         }
@@ -347,8 +348,10 @@ pub fn regexp_init_real(regexp: &str) -> bool {
     let icase = !ISSET(CASE_SENSITIVE);
     match MatchPattern::from_regex(regexp, icase) {
         Ok(pat) => {
+            let nsub = pat.nsub();
             with_global_mut(|g| {
                 g.search_regexp = Some(pat);
+                g.regexp_nsub = nsub;
                 g.regexp_compiled = true;
             });
             true
@@ -477,16 +480,28 @@ pub fn search_init(replacing: bool, retain_answer: bool) {
     }
 }
 
-/// 返回正则匹配的真实长度（对应 C 的 `regmatches[0].rm_eo - rm_so`）：
+/// 返回正则匹配的真实长度（对应 C 的 `regmatches[0].rm_eo - rm_so`），
+/// 并在命中时填写 `regmatches` 供 `replace_regexp` 展开 `\1`..`\9`。
 /// 非正则、正则未编译或未在 from 处匹配时退化为 needle 长度。
 pub fn regexp_match_len(text: &[u8], from: usize, needle_len: usize) -> usize {
     if !ISSET(USE_REGEXP) {
         return needle_len;
     }
     let re = with_global(|g| g.search_regexp.clone());
-    match re.and_then(|re| re.find_from(text, from, true)) {
-        Some((so, eo)) if so == from => eo - so,
-        _ => needle_len,
+    match re.and_then(|re| re.find_from_captures(text, from, true)) {
+        Some(m) if m.so == from => {
+            /* C 的 regmatch_t 数组固定 10 项（含下标 0 的整体匹配）。 */
+            let mut regs = vec![(None, None); 10];
+            for (i, slot) in m.groups.iter().enumerate().take(10) {
+                regs[i] = (*slot).map_or((None, None), |(so, eo)| (Some(so), Some(eo)));
+            }
+            with_global_mut(|g| g.regmatches = regs);
+            m.eo - m.so
+        }
+        _ => {
+            with_global_mut(|g| g.regmatches = vec![(None, None); 10]);
+            needle_len
+        }
     }
 }
 
@@ -826,11 +841,16 @@ pub fn do_findnext() {
 }
 
 /// 返回给定 regex 的替换文本大小，考虑子表达式引用
-/// （对应 `replace_regexp`；简化实现）。
-fn replace_regexp(string: Option<&mut String>) -> usize {
+/// （对应 `replace_regexp`）。
+///
+/// `string` 非空时把展开后的替换文本写入其中。`\1`..`\9` 仅在
+/// 组号不超过 `regexp_nsub` 且该组实际参与匹配时展开，否则按字面量。
+pub fn replace_regexp(string: Option<&mut String>) -> usize {
     let answer = with_global(|g| g.answer.clone()).unwrap_or_default();
+    let nsub = with_global(|g| g.regexp_nsub);
     let mut replacement_size = 0;
-    let mut output = String::new();
+    /* 按字节构造，避免把 UTF-8 多字节字符逐字节转成 char。 */
+    let mut output: Vec<u8> = Vec::new();
 
     let given = answer.as_bytes();
     let mut i = 0;
@@ -839,40 +859,40 @@ fn replace_regexp(string: Option<&mut String>) -> usize {
         let digit = if i + 1 < given.len() { given[i + 1] - b'0' } else { 0 };
 
         /* 有效的反向引用时使用子表达式，否则使用字面回答。 */
-        if c == b'\\' && 0 < digit && digit < 10 {
+        if c == b'\\' && 0 < digit && digit < 10 && (digit as usize) <= nsub {
             let d = digit as usize;
-            if let Some(reg) = with_global(|g| g.regmatches.get(d).cloned()) {
-                if let (Some(so), Some(eo)) = reg {
-                    let of = openfile_ref();
-                    let data = of.borrow().current.as_ref().map(|c| c.borrow().data.clone()).unwrap_or_default();
-                    if so <= eo && eo <= data.len() {
-                        let extent = &data.as_bytes()[so..eo];
-                        output.push_str(&String::from_utf8_lossy(extent));
-                        replacement_size += extent.len();
-                        i += 2;
-                        continue;
-                    }
+            if let Some((Some(so), Some(eo))) =
+                with_global(|g| g.regmatches.get(d).cloned())
+            {
+                let of = openfile_ref();
+                let data = of.borrow().current.as_ref().map(|c| c.borrow().data.clone()).unwrap_or_default();
+                if so <= eo && eo <= data.len() {
+                    let extent = &data.as_bytes()[so..eo];
+                    output.extend_from_slice(extent);
+                    replacement_size += extent.len();
+                    i += 2;
+                    continue;
                 }
             }
-            output.push(c as char);
+            output.push(c);
             replacement_size += 1;
             i += 1;
         } else {
-            output.push(c as char);
+            output.push(c);
             replacement_size += 1;
             i += 1;
         }
     }
 
     if let Some(s) = string {
-        *s = output;
+        *s = String::from_utf8_lossy(&output).into_owned();
     }
 
     replacement_size
 }
 
 /// 返回当前行的一个 needle 被替换后的副本（对应 `replace_line`）。
-fn replace_line(needle: &str) -> String {
+pub fn replace_line(needle: &str) -> String {
     let answer = with_global(|g| g.answer.clone()).unwrap_or_default();
     let of = openfile_ref();
     let (data, current_x) = {
@@ -889,7 +909,15 @@ fn replace_line(needle: &str) -> String {
     let mut copy = String::new();
     let head_end = current_x.min(data.len());
     copy.push_str(&data[..head_end]);
-    copy.push_str(&answer);
+    if ISSET(USE_REGEXP) {
+        /* 展开 \1..\9（对应 C 在 replace_line 中对 USE_REGEXP 调
+         * replace_regexp）。regmatches 已由上面的 regexp_match_len 填好。 */
+        let mut expanded = String::new();
+        replace_regexp(Some(&mut expanded));
+        copy.push_str(&expanded);
+    } else {
+        copy.push_str(&answer);
+    }
     let tail_start = (current_x + match_len).min(data.len());
     copy.push_str(&data[tail_start..]);
     copy

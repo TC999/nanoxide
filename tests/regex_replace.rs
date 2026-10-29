@@ -91,3 +91,95 @@ fn match_length_is_needle_len_without_regexp() {
         5
     );
 }
+
+/// 正则替换展开 \1..\9（对应 C 的 replace_regexp / replace_line）。
+#[test]
+fn regexp_replacement_expands_backreferences() {
+    setup();
+    SET(USE_REGEXP);
+    assert!(nanoxide::search::regexp_init_real("([a-z]+)-([0-9]+)"));
+
+    nanoxide::text::inject(b"abc-123", 7);
+    with_global_mut(|g| {
+        g.answer = Some(r"\2-\1".to_string());
+        g.openfile.as_ref().unwrap().borrow_mut().current_x = 0;
+    });
+
+    let data = b"abc-123";
+    assert_eq!(nanoxide::search::regexp_match_len(data, 0, 7), 7);
+
+    let (g0, g1, g2) = with_global(|g| (g.regmatches[0], g.regmatches[1], g.regmatches[2]));
+    assert_eq!(g0, (Some(0), Some(7)));
+    assert_eq!(g1, (Some(0), Some(3)));
+    assert_eq!(g2, (Some(4), Some(7)));
+
+    let mut expanded = String::new();
+    let size = nanoxide::search::replace_regexp(Some(&mut expanded));
+    assert_eq!(expanded, "123-abc");
+    assert_eq!(size, 7);
+
+    assert_eq!(
+        nanoxide::search::replace_line("([a-z]+)-([0-9]+)"),
+        "123-abc"
+    );
+
+    UNSET(USE_REGEXP);
+    nanoxide::search::regexp_cleanup();
+}
+
+/// 组号超过 re_nsub 时 `\2` 按字面量保留（对应 C 的
+/// `digit <= search_regexp.re_nsub` 条件）。
+#[test]
+fn regexp_replacement_keeps_out_of_range_backrefs_literal() {
+    setup();
+    SET(USE_REGEXP);
+    assert!(nanoxide::search::regexp_init_real("(a)"));
+
+    nanoxide::text::inject(b"a", 1);
+    with_global_mut(|g| {
+        g.answer = Some(r"\2".to_string());
+        g.openfile.as_ref().unwrap().borrow_mut().current_x = 0;
+    });
+
+    assert_eq!(nanoxide::search::regexp_match_len(b"a", 0, 1), 1);
+    let mut expanded = String::new();
+    nanoxide::search::replace_regexp(Some(&mut expanded));
+    assert_eq!(expanded, r"\2");
+
+    UNSET(USE_REGEXP);
+    nanoxide::search::regexp_cleanup();
+}
+
+/// 非正则替换不展开反斜杠（对应 C 的 else 分支 `strcpy(..., answer)`）。
+#[test]
+fn literal_replacement_keeps_backslash_literal() {
+    setup();
+    UNSET(USE_REGEXP);
+    nanoxide::text::inject(b"a", 1);
+    with_global_mut(|g| {
+        g.answer = Some(r"\1".to_string());
+        g.openfile.as_ref().unwrap().borrow_mut().current_x = 0;
+    });
+
+    assert_eq!(nanoxide::search::replace_line("a"), r"\1");
+}
+
+/// 替换文本中的中文按 UTF-8 原样保留（replace_regexp 按字节构造）。
+#[test]
+fn regexp_replacement_keeps_utf8_replacement_text() {
+    setup();
+    SET(USE_REGEXP);
+    assert!(nanoxide::search::regexp_init_real("(a)"));
+
+    nanoxide::text::inject(b"a", 1);
+    with_global_mut(|g| {
+        g.answer = Some("中\\1文".to_string());
+        g.openfile.as_ref().unwrap().borrow_mut().current_x = 0;
+    });
+
+    assert_eq!(nanoxide::search::regexp_match_len(b"a", 0, 1), 1);
+    assert_eq!(nanoxide::search::replace_line("(a)"), "中a文");
+
+    UNSET(USE_REGEXP);
+    nanoxide::search::regexp_cleanup();
+}

@@ -33,7 +33,8 @@
 - `DIFFERENCES.md` 旧版称 `regex.rs` 封装了 `regex` crate，**这是错的**：`Cargo.toml` 没有该依赖，`regex.rs`（约 683 行）是自写引擎。
 - ⚠️ 与 POSIX 的语义一致性：`\<`（词首）/ `\>`（词尾）/ `\b`（任意词边界）
   已分别实现，并用 GNU grep 交叉验证 `\<word`、`word\>` 在词中/词尾的行为；
-  反向引用（`\1`）未实现；交替的最左最长/最左优先与字符类边界情形仍未
+  模式内的反向引用（`\1`）未实现（替换文本的 `\1`..`\9` 已支持，见第五节）；
+  交替的最左最长/最左优先与字符类边界情形仍未
   逐一验证。语法高亮和搜索替换都依赖它，是回归测试的重点。
 
 ### 模块映射
@@ -306,9 +307,11 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   （`regmatches[0]` 的 `eo - so`）；`regexp_init` / `regexp_init_real`
   按 ERE 编译（此前误把正则当字面量/glob），错误时显示带原因的
   `Bad regex`。测试见 `tests/regex_replace.rs`。
-- ⚠️ `replace_regexp` 的子表达式引用（`\1`）未实现：项目自研的
-  `regex` 引擎不返回捕获组，`regmatches[digits]` 始终为空，`\1` 按字面量处理
-  （C 在正则含 `\(...\)` 时会展开子表达式）。
+- ✅ `replace_regexp` 的子表达式引用（`\1`..`\9`）：自研引擎现返回捕获组
+  边界，`regexp_match_len` 在每次正则命中后填写 `regmatches`；`replace_line`
+  在 `USE_REGEXP` 下用展开后的替换文本。组号超过 `re_nsub` 或该组未参与
+  匹配时按字面量保留。证据：`tests/regex_replace.rs`（展开、越界、非正则
+  回退）与 `regex.rs` 的捕获组单元测试。
 - ✅ 锚点：`text.rs` 的 `do_anchor` / `to_prev_anchor` / `to_next_anchor`
   由 `execute_by_id` 分发；`M-Ins` / `M-PgUp` / `M-PgDn` / `M-"` / `M-'`
   已按 `global.c:1356-1362` 绑定，`M-Home` / `M-End` 绑定到
@@ -556,3 +559,7 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   editwinrows + 1` 换算并 `goto_line_and_column(..., TRUE)`）；同时把鼠标
   点击底部栏、滚轮处理后返回的 `1` 改为 `FOREIGN_SEQUENCE`，避免主循环
   把它当成 `^A` 再执行一次；新增 `tests/mouse_scrollbar.rs`。
+- 本轮：正则替换支持 `\1`..`\9` 子表达式——`Regex` 记录捕获组边界
+  （`nsub`、`find_bytes_captures`），`regexp_match_len` 填写 `regmatches`，
+  `replace_line` 展开替换文本；组号越界或组未参与匹配时保留字面量。
+  新增 `tests/regex_replace.rs` 用例与 `regex.rs` 的捕获组单元测试。
