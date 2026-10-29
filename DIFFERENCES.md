@@ -355,7 +355,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ minibar 刷新、`CONSTANT_SHOW`、`confirm_margin`、信号标志消费
 - ✅ 多命令行文件、`+LINE,COLUMN`、colon-parsing（`file:line:col`）、命令行搜索串
 - ✅ `--listsyntaxes`（`list_syntax_names`）；`-h` 的选项表已按 9.2 的 `usage()` 重写
-- ❌ BOM 提示、`ZERO` 模式的特殊重绘
+- ✅ BOM 提示：光标停在 UTF-8 BOM 上时显示 "Byte Order Mark"，倒计时 1
+  （`winio::cursor_is_on_bom` / `set_blankdelay_to_one`，`tests/bom_notice.rs`）
+- ❌ `ZERO` 模式的特殊重绘
 - ❓ `-h` 输出与 C 版 `usage()` 的逐字对齐（受限于未接入的 gettext 文案）
 
 ### 8. 覆盖较完整的模块
@@ -522,3 +524,5 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：正则搜索/替换修正——`regexp_init`/`regexp_init_real` 改按 ERE
   编译（此前按字面量/glob），`findnextstr` 与 `replace_line` 用真实匹配
   长度；`search-bad_regex` 补错误原因；新增 `tests/regex_replace.rs`。
+- 本轮：主循环补 BOM 提示（光标在行首且该行以 EF BB BF 开头、UTF-8 模式
+  显示 "Byte Order Mark"，倒计时 1）；新增 `tests/bom_notice.rs`。
