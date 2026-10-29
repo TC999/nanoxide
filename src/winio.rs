@@ -1634,6 +1634,33 @@ pub fn blank_it_when_expired() {
     }
 }
 
+/// 把状态栏消息的保留时间设为 1（对应 winio.c 的 `set_blankdelay_to_one`）。
+pub fn set_blankdelay_to_one() {
+    with_global_mut(|g| g.statusbar_countdown = 1);
+}
+
+/// 光标是否停在当前行的 UTF-8 BOM 上（对应 C 主循环的 BOM 检测：
+/// `current_x == 0 && data` 以 EF BB BF 开头且 `using_utf8`）。
+pub fn cursor_is_on_bom() -> bool {
+    if !with_global(|g| g.using_utf8) {
+        return false;
+    }
+    with_global(|g| {
+        g.openfile.as_ref().is_some_and(|of| {
+            let of_ref = of.borrow();
+            if of_ref.current_x != 0 {
+                return false;
+            }
+            of_ref.current.as_ref().is_some_and(|line| {
+                line.borrow()
+                    .data
+                    .as_bytes()
+                    .starts_with(&[0xEF, 0xBB, 0xBF])
+            })
+        })
+    })
+}
+
 /// 显示底部栏快捷键。
 /// 在底部两行显示指定菜单的快捷键，并把当前菜单设为该菜单
 /// （对应 C 的 `bottombars(menu)`，内部先 `currmenu = menu`）。

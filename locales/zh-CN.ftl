@@ -24,6 +24,7 @@ winio-cursor_position = 行 {lineno}/{filebot_lineno} ({linepct}%)，列 {column
 winio-view_warning = 该键在查看模式中无效
 winio-function_not_implemented = 功能未实现：{func}
 winio-nameless = (未命名)
+global-byte_order_mark = 字节顺序标记
 global-suspend_hint = 如需挂起，输入 ^T^Z
 
 # ---------- browser（文件浏览器） ----------

@@ -346,6 +346,16 @@ pub fn main_loop() {
             nanoxide::global::report_cursor_position();
         }
 
+        // 光标停在 UTF-8 BOM 上时提示（对应 C 主循环的 BOM 检测与
+        // set_blankdelay_to_one：只短暂显示）。
+        if winio::cursor_is_on_bom() {
+            winio::statusline(
+                nanoxide::definitions::MessageType::Notice,
+                &nanoxide::t!("global-byte_order_mark"),
+            );
+            winio::set_blankdelay_to_one();
+        }
+
         // 检查是否需要刷新
         if with_global(|g| g.refresh_needed) {
             with_global_mut(|g| g.refresh_needed = false);
