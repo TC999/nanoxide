@@ -292,7 +292,13 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ 提示历史与首/末文件键：六个提示菜单的 `^P`/`^N`/`Up`/`Down` 切换历史；
   查找文件提示的 `^Y`/`^V` 与浏览器的 `M-\`/`M-/` 跳到首/末文件
   （`global.c:884-895、1529-1533`；`tests/keymap_reachability.rs`）。
-- ⚠️ `replace_regexp` / `replace_line` 是简化版：匹配长度直接取 needle 长度
+- ✅ `replace_line` / `findnextstr` 的匹配长度取正则的真实匹配
+  （`regmatches[0]` 的 `eo - so`）；`regexp_init` / `regexp_init_real`
+  按 ERE 编译（此前误把正则当字面量/glob），错误时显示带原因的
+  `Bad regex`。测试见 `tests/regex_replace.rs`。
+- ⚠️ `replace_regexp` 的子表达式引用（`\1`）未实现：项目自研的
+  `regex` 引擎不返回捕获组，`regmatches[digits]` 始终为空，`\1` 按字面量处理
+  （C 在正则含 `\(...\)` 时会展开子表达式）。
 - ✅ 锚点：`text.rs` 的 `do_anchor` / `to_prev_anchor` / `to_next_anchor`
   由 `execute_by_id` 分发；`M-Ins` / `M-PgUp` / `M-PgDn` / `M-"` / `M-'`
   已按 `global.c:1356-1362` 绑定，`M-Home` / `M-End` 绑定到
@@ -513,3 +519,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   0600 创建与权限复制（Windows 处理 `\\?\` 前缀与盘符冒号）；新增
   `files-cannot_read_original`；`tests/write_methods.rs` 增加默认/目录/
   insecure 备份测试。
+- 本轮：正则搜索/替换修正——`regexp_init`/`regexp_init_real` 改按 ERE
+  编译（此前按字面量/glob），`findnextstr` 与 `replace_line` 用真实匹配
+  长度；`search-bad_regex` 补错误原因；新增 `tests/regex_replace.rs`。
