@@ -232,7 +232,11 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   失败时不误清原缓冲区的修改标记（`tests/open_buffer.rs`）。
 - ✅ 锁文件（`write_lockfile` / `delete_lockfile` / `lock_filename_for`，1024 字节 vim/nano 兼容格式）
 - ✅ 多缓冲区切换（`M-,` / `M-.`）
-- ⚠️ `make_backup_of`：只做 `文件名~`，没有 `backupdir`、`insecure_backup` 的完整逻辑
+- ✅ `make_backup_of`：默认生成 `文件名~`；设置 `backupdir` 时在指定目录
+  生成编号备份（完整路径的分隔符换成 `!`，Windows 的盘符冒号也替换），
+  `INSECURE_BACKUP` 时截断覆盖、否则用 `O_EXCL`；Unix 下备份先按 0600
+  创建、再复制原文件权限。简化：省略 C 在失败后重试到 HOME 目录的逻辑
+  （`tests/write_methods.rs`）。
 - ✅ `save_to` 支持覆盖/追加/前置（`WritingType`），行尾按 DOS/Unix 格式转换；
   `do_writeout` 的提示循环支持 M-A/M-P/M-D/M-B/^Q/^T；`exiting` 为真时
   忽略标记、整块保存（对应 C 版 `write_it_out` 的 `exiting` 参数）。
@@ -505,3 +509,7 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   `File "<name>" not found`；锁文件只在 `new_one`（`fresh`）时创建。相应
   把测试里“打开不存在文件”的场景改用 `open_another_buffer`，并新增
   not-found 断言。
+- 本轮：`make_backup_of` 补齐 `backupdir` 编号备份、`INSECURE_BACKUP`、
+  0600 创建与权限复制（Windows 处理 `\\?\` 前缀与盘符冒号）；新增
+  `files-cannot_read_original`；`tests/write_methods.rs` 增加默认/目录/
+  insecure 备份测试。
