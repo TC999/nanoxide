@@ -131,3 +131,96 @@ fn fifo_detection_and_special_permissions() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// MAKE_BACKUP：默认在文件名后加 `~`，内容是保存前的原文件。
+#[test]
+fn backup_appends_tilde_by_default() {
+    setup();
+    SET(MAKE_BACKUP);
+
+    let dir = std::env::temp_dir().join(format!("nanoxide_bak_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let target = dir.join("note.txt");
+    std::fs::write(&target, "old\n").unwrap();
+    let target_str = target.to_str().unwrap().to_string();
+
+    nanoxide::text::inject(b"new", 3);
+    assert!(nanoxide::files::save_to_with_method(&target_str, WritingType::Overwrite) > 0);
+
+    let backup = format!("{}~", target_str);
+    assert_eq!(std::fs::read_to_string(&backup).unwrap(), "old\n");
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "new\n");
+
+    UNSET(MAKE_BACKUP);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `--backupdir`：备份写到指定目录，完整路径的分隔符换成 `!`。
+#[test]
+fn backup_uses_backup_directory() {
+    setup();
+    let dir = std::env::temp_dir().join(format!("nanoxide_bdir_{}", std::process::id()));
+    let backups = dir.join("backups");
+    std::fs::create_dir_all(&backups).unwrap();
+    let target = dir.join("note.txt");
+    std::fs::write(&target, "old\n").unwrap();
+    let target_str = target.to_str().unwrap().to_string();
+
+    let sep = std::path::MAIN_SEPARATOR;
+    SET(MAKE_BACKUP);
+    with_global_mut(|g| {
+        g.backup_dir = Some(format!("{}{}", backups.display(), sep));
+    });
+
+    nanoxide::text::inject(b"new", 3);
+    assert!(nanoxide::files::save_to_with_method(&target_str, WritingType::Overwrite) > 0);
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "new\n");
+
+    let entries: Vec<_> = std::fs::read_dir(&backups)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(entries.len(), 1, "应在备份目录生成一个备份");
+    let name = entries[0].file_name().to_string_lossy().to_string();
+    assert!(name.contains('!'), "路径分隔符应换成 !，实际：{name}");
+    assert_eq!(std::fs::read_to_string(entries[0].path()).unwrap(), "old\n");
+
+    with_global_mut(|g| g.backup_dir = None);
+    UNSET(MAKE_BACKUP);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// INSECURE_BACKUP：只读的旧备份在普通模式下导致失败，设置后可覆盖。
+#[cfg(unix)]
+#[test]
+fn insecure_backup_overwrites_readonly_backup() {
+    use std::os::unix::fs::PermissionsExt;
+
+    setup();
+    let dir = std::env::temp_dir().join(format!("nanoxide_ins_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let target = dir.join("note.txt");
+    std::fs::write(&target, "old\n").unwrap();
+    let target_str = target.to_str().unwrap().to_string();
+    let backup = format!("{}~", target_str);
+    std::fs::write(&backup, "stale\n").unwrap();
+    let mut perms = std::fs::metadata(&backup).unwrap().permissions();
+    perms.set_mode(0o400);
+    std::fs::set_permissions(&backup, perms).unwrap();
+
+    SET(MAKE_BACKUP);
+    nanoxide::text::inject(b"first", 5);
+    assert!(
+        nanoxide::files::save_to_with_method(&target_str, WritingType::Overwrite) <= 0,
+        "只读旧备份在普通模式下应导致失败"
+    );
+
+    SET(INSECURE_BACKUP);
+    nanoxide::text::inject(b"second", 6);
+    assert!(nanoxide::files::save_to_with_method(&target_str, WritingType::Overwrite) > 0);
+    assert_eq!(std::fs::read_to_string(&backup).unwrap(), "first\n");
+
+    UNSET(INSECURE_BACKUP);
+    UNSET(MAKE_BACKUP);
+    let _ = std::fs::remove_dir_all(&dir);
+}

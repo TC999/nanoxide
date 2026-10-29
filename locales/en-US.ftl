@@ -102,6 +102,7 @@ files-disk_full_remedy = Maybe ^T^Z, make room on disk, resume, then ^S^X
 files-making_backup = Making backup...
 files-too_many_backups = Too many existing backup files
 files-cannot_write_backup = Error writing backup file {filename}: {err}
+files-cannot_read_original = Cannot read original file
 files-invalid_backup_dir = Invalid backup directory: {dir}
 files-append_to_file = Append to File
 files-prepend_to_file = Prepend to File

@@ -107,6 +107,7 @@ files-disk_full_remedy = 尝试输入 ^T^Z，释放一些磁盘空间，解除�
 files-making_backup = 正在备份...
 files-too_many_backups = 现有备份文件过多
 files-cannot_write_backup = 写入备份文件 {filename} 出错：{err}
+files-cannot_read_original = 无法读取原始文件
 files-invalid_backup_dir = 无效的备份目录：{dir}
 files-append_to_file = 追加到文件末尾
 files-prepend_to_file = 插入到文件开头

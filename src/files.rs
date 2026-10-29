@@ -691,21 +691,84 @@ pub fn do_lockfile(filename: &str, ask_the_user: bool) -> DoLockfileResult {
     }
 }
 
-/// 创建已有文件的备份（对应 `make_backup_of` 的简化版：在文件名后加 ~）。
-/// 成功返回 TRUE。
+/// 创建已有文件的备份（对应 `make_backup_of`）：
+/// - 未设置 `backup_dir` 时在文件名后加 `~`；
+/// - 设置了 `backup_dir` 时，用完整路径（分隔符换成 `!`）加编号
+///   （`~`、`~.1`……，对应 C 的 `get_next_filename`）；
+/// - 已有备份先删除；`INSECURE_BACKUP` 时改为截断覆盖；
+/// - Unix 下备份先以 0600 创建，随后复制原文件权限（失败忽略）。
+///
+/// 简化：省略 C 在失败后重试到 HOME 目录的逻辑。
 fn make_backup_of(realname: &str) -> bool {
     winio::statusbar(&crate::t!("files-making_backup"));
 
-    let backupname = format!("{}~", realname);
+    let backup_dir = with_global(|g| g.backup_dir.clone());
+    let insecure = ISSET(INSECURE_BACKUP);
 
-    /* 先删除已有备份文件。 */
-    if std::fs::remove_file(&backupname).is_err()
-        && !std::path::Path::new(&backupname).exists()
+    /* 决定备份文件名。 */
+    let backupname = match backup_dir {
+        None => format!("{}~", realname),
+        Some(dir) => {
+            let mut thename = match get_full_path(realname) {
+                Some(full) => {
+                    /* Windows 的 canonicalize 会带 `\\?\` 前缀，其中的 `?`
+                     * 不能出现在文件名里，先去掉。 */
+                    let trimmed = full.strip_prefix(r"\\?\").unwrap_or(&full);
+                    trimmed.replace(['/', '\\'], "!")
+                }
+                None => crate::utils::tail(realname).to_string(),
+            };
+            /* Windows 的盘符冒号在文件名中非法（C 的 get_full_path 在
+             * Windows 上同样会带冒号），这里一并换成 '!'。 */
+            #[cfg(windows)]
+            {
+                thename = thename.replace(':', "!");
+            }
+            let base = format!("{}{}", dir, thename);
+            let name = get_next_filename(&base, "~");
+            if name.is_empty() {
+                winio::statusline(
+                    MessageType::Alert,
+                    &crate::t!("files-too_many_backups"),
+                );
+                return false;
+            }
+            name
+        }
+    };
+
+    /* 先删除已有备份文件（对应 C 的 unlink）；失败且文件确实存在、
+     * 又不是 INSECURE_BACKUP 时放弃。 */
+    if fs::remove_file(&backupname).is_err()
+        && Path::new(&backupname).exists()
+        && !insecure
     {
-        /* 备份文件不存在则无需删除。 */
+        winio::statusline(
+            MessageType::Alert,
+            &crate::t!(
+                "files-cannot_write_backup",
+                filename = backupname,
+                err = std::io::Error::last_os_error().to_string()
+            ),
+        );
+        return false;
     }
 
-    match fs::File::open(realname) {
+    /* 创建备份文件：普通模式用 O_EXCL，INSECURE_BACKUP 时用截断覆盖。 */
+    let mut options = fs::OpenOptions::new();
+    options.write(true);
+    if insecure {
+        options.create(true).truncate(true);
+    } else {
+        options.create_new(true);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+
+    let mut backup_file = match options.open(&backupname) {
         Err(e) => {
             winio::statusline(
                 MessageType::Alert,
@@ -713,31 +776,30 @@ fn make_backup_of(realname: &str) -> bool {
             );
             return false;
         }
-        Ok(original) => {
-            let mut original = original;
-            let mut backup_file = match fs::File::create(&backupname) {
-                Err(e) => {
-                    winio::statusline(
-                        MessageType::Alert,
-                        &crate::t!("files-cannot_write_backup", filename = backupname, err = e.to_string()),
-                    );
-                    return false;
-                }
-                Ok(f) => f,
-            };
-            /* 流式复制原文件内容到备份文件（对应 C 版 copy_file）。 */
-            match copy_file(&mut original, &mut backup_file, true) {
-                Ok(_) => true,
-                Err(e) => {
-                    winio::statusline(
-                        MessageType::Alert,
-                        &crate::t!("files-cannot_write_backup", filename = backupname, err = e.to_string()),
-                    );
-                    false
-                }
-            }
+        Ok(f) => f,
+    };
+
+    /* 流式复制原文件内容到备份文件（对应 C 版 copy_file）。 */
+    let copied = (|| -> std::io::Result<()> {
+        let mut original = fs::File::open(realname)?;
+        copy_file(&mut original, &mut backup_file, true)?;
+        /* 复制原文件的权限位（对应 C 的 fchmod；失败不影响保存）。 */
+        #[cfg(unix)]
+        if let Ok(meta) = fs::metadata(realname) {
+            let _ = fs::set_permissions(&backupname, meta.permissions());
         }
+        Ok(())
+    })();
+
+    if copied.is_err() {
+        winio::statusline(
+            MessageType::Alert,
+            &crate::t!("files-cannot_read_original"),
+        );
+        return false;
     }
+
+    true
 }
 
 /// 按 C 版 `read_file` 的规则把文件字节切成行，并检测 DOS 行尾。
