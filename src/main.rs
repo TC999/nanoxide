@@ -362,6 +362,17 @@ pub fn main_loop() {
             winio::edit_refresh();
         }
 
+        // ZERO 模式的消息显示在最后一行（对应 C 主循环尾部）：
+        // 有消息时重绘整屏（含状态行），只有次要消息时重绘编辑区最后一行。
+        if ISSET(ZERO) {
+            let lastmessage = with_global(|g| g.lastmessage);
+            if lastmessage > nanoxide::definitions::MessageType::Hush {
+                winio::refresh_screen();
+            } else if lastmessage > nanoxide::definitions::MessageType::Vacuum {
+                winio::edit_refresh();
+            }
+        }
+
         // 获取按键
         let key = winio::wgetch();
 

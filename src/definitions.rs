@@ -353,7 +353,7 @@ fn escape_regex(pattern: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormatType { Unspecified, NixFile, DosFile }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MessageType { Vacuum, Hush, Remark, Info, Notice, Ahem, Mild, Alert }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

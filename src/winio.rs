@@ -250,13 +250,63 @@ pub fn update_wrap_at() {
     });
 }
 
+/// 按 C 的 `window_init` 规则计算编辑窗口行数：
+/// MINIBAR/ZERO 没有标题栏；NO_HELP 或屏幕太矮时底部栏只有 1 行；
+/// ZERO 模式编辑窗口延伸到状态行（+1）。
+pub fn compute_editwinrows(lines: usize) -> i32 {
+    let lines = lines as i32;
+    if lines < 3 {
+        return if ISSET(ZERO) { lines.max(1) } else { 1 };
+    }
+    let minimum = if ISSET(ZERO) {
+        3
+    } else if ISSET(MINIBAR) {
+        4
+    } else {
+        5
+    };
+    let mut toprows = if ISSET(EMPTY_LINE) && lines > minimum { 2 } else { 1 };
+    let bottomrows = if ISSET(NO_HELP) || lines < minimum { 1 } else { 3 };
+    if ISSET(MINIBAR) || ISSET(ZERO) {
+        toprows = 0;
+    }
+    (lines - toprows - bottomrows + if ISSET(ZERO) { 1 } else { 0 }).max(1)
+}
+
+/// 编辑区上方的行数（标题栏；MINIBAR/ZERO 为 0）。
+pub fn toprows_for(lines: usize) -> usize {
+    if ISSET(MINIBAR) || ISSET(ZERO) || lines < 3 {
+        0
+    } else if ISSET(EMPTY_LINE) && lines > 5 {
+        2
+    } else {
+        1
+    }
+}
+
+/// 编辑区下方的行数（状态行 + 底部栏；NO_HELP 或屏幕太矮时为 1）。
+pub fn bottomrows_for(lines: usize) -> usize {
+    let minimum = if ISSET(ZERO) {
+        3
+    } else if ISSET(MINIBAR) {
+        4
+    } else {
+        5
+    };
+    if ISSET(NO_HELP) || lines < minimum {
+        1
+    } else {
+        3
+    }
+}
+
 /// 更新屏幕尺寸。
 pub fn update_screen_size() {
     if let Ok((cols, rows)) = terminal::size() {
         with_global_mut(|g| {
             g.COLS = cols as usize;
             g.LINES = rows as usize;
-            g.editwinrows = (rows as i32).saturating_sub(4).max(1);
+            g.editwinrows = compute_editwinrows(rows as usize);
             let sidebar_width = if g.sidebar { 1 } else { 0 };
             g.editwincols = (cols as i32 - g.margin - sidebar_width).max(1) as usize;
         });
@@ -357,7 +407,7 @@ fn handle_event(event: Event) -> i32 {
             with_global_mut(|g| {
                 g.COLS = cols as usize;
                 g.LINES = rows as usize;
-                g.editwinrows = (rows as i32).saturating_sub(4).max(1);
+                g.editwinrows = compute_editwinrows(rows as usize);
             });
             THE_WINDOW_RESIZED
         }
@@ -1068,14 +1118,23 @@ pub fn refresh_screen() {
      * 再由 read_keys_from() 的 doupdate() + curs_set(1) 在正确位置显示。 */
     let _ = execute!(stdout, Hide);
 
-    let (cols, lines, edit_rows) =
-        with_global(|g| (g.COLS, g.LINES, g.LINES.saturating_sub(4)));
+    let (cols, lines) = with_global(|g| (g.COLS, g.LINES));
+    let toprows = toprows_for(lines);
+    let bottomrows = bottomrows_for(lines);
+    let edit_rows = compute_editwinrows(lines) as usize;
 
-    // 绘制标题栏（屏幕顶部第0行）
-    let _ = execute!(stdout, cursor::MoveTo(0, 0));
-    draw_titlebar_line(&mut stdout, cols);
+    // 绘制标题栏（屏幕顶部第0行；ZERO/MINIBAR 没有标题栏）
+    if toprows > 0 {
+        let _ = execute!(stdout, cursor::MoveTo(0, 0));
+        draw_titlebar_line(&mut stdout, cols);
+        if toprows > 1 {
+            /* --emptyline：标题栏下留一个空行。 */
+            let _ = execute!(stdout, cursor::MoveTo(0, 1));
+            let _ = execute!(stdout, Clear(ClearType::UntilNewLine));
+        }
+    }
 
-    // 绘制编辑区域（从第1行开始）：逐行调用 update_line（含语法高亮）。
+    // 绘制编辑区域（从 toprows 行开始）：逐行调用 update_line（含语法高亮）。
     let (edittop, current, current_x) = with_global(|g| match &g.openfile {
         Some(of) => {
             let o = of.borrow();
@@ -1103,13 +1162,13 @@ pub fn refresh_screen() {
         }
         // 清空剩余编辑行
         while row < edit_rows as i32 {
-            let _ = execute!(stdout, cursor::MoveTo(0, 1 + row as u16));
+            let _ = execute!(stdout, cursor::MoveTo(0, toprows as u16 + row as u16));
             let _ = execute!(stdout, Clear(ClearType::UntilNewLine));
             row += 1;
         }
     } else {
         for row in 0..edit_rows as u16 {
-            let _ = execute!(stdout, cursor::MoveTo(0, 1 + row));
+            let _ = execute!(stdout, cursor::MoveTo(0, toprows as u16 + row));
             let _ = execute!(stdout, Clear(ClearType::UntilNewLine));
         }
     }
@@ -1119,12 +1178,14 @@ pub fn refresh_screen() {
         draw_scrollbar(&mut stdout, cols);
     }
 
-    // 绘制状态栏（倒数第3行）
-    let status_row = (lines.saturating_sub(3)) as u16;
+    // 绘制状态栏（编辑区下方第一行）
+    let status_row = (lines.saturating_sub(bottomrows)) as u16;
     let _ = execute!(stdout, cursor::MoveTo(0, status_row));
     draw_statusbar_line(&mut stdout, cols);
-    // 绘制底部快捷键（倒数第2行和倒数第1行）
-    draw_bottombars_lines(&mut stdout, cols, lines);
+    // 绘制底部快捷键（仅底部栏有 3 行时）
+    if bottomrows > 1 {
+        draw_bottombars_lines(&mut stdout, cols, lines);
+    }
 
     let _ = stdout.flush();
 
@@ -1523,7 +1584,7 @@ fn draw_bottombars_lines(stdout: &mut io::Stdout, cols: usize, lines: usize) {
 fn write_statusbar_impl(msg: &str, centered: bool) {
     let mut stdout = io::stdout();
     let (lines, cols) = with_global(|g| (g.LINES, g.COLS));
-    let status_row = (lines.saturating_sub(3)) as u16;
+    let status_row = lines.saturating_sub(bottomrows_for(lines)) as u16;
     let _ = execute!(stdout, cursor::MoveTo(0, status_row));
     /* 先清空整行。 */
     let _ = write!(stdout, "{:width$}", "", width = cols);
@@ -1613,7 +1674,7 @@ pub fn wipe_statusbar() {
     let mut stdout = io::stdout();
     let lines = with_global(|g| g.LINES);
     let cols = with_global(|g| g.COLS);
-    let status_row = (lines.saturating_sub(3)) as u16;
+    let status_row = lines.saturating_sub(bottomrows_for(lines)) as u16;
     let _ = execute!(stdout, cursor::MoveTo(0, status_row));
     let _ = write!(stdout, "{:width$}", "", width = cols);
     let _ = stdout.flush();
@@ -1692,7 +1753,7 @@ pub fn blank_edit() {
     let mut stdout = io::stdout();
     let lines = with_global(|g| g.LINES);
     let cols = with_global(|g| g.COLS);
-    let edit_rows = lines.saturating_sub(4);
+    let edit_rows = compute_editwinrows(lines) as usize;
     for row in 0..edit_rows as u16 {
         let _ = execute!(stdout, cursor::MoveTo(0, 1 + row));
         let _ = write!(stdout, "{:width$}", "", width = cols);
@@ -1732,10 +1793,19 @@ pub fn place_the_cursor() {
             let mut stdout = io::stdout();
             let _ = execute!(
                 stdout,
-                cursor::MoveTo((screen_column + margin) as u16, (row + 1) as u16)
+                cursor::MoveTo(
+                    (screen_column + margin) as u16,
+                    edit_top_row() + row as u16
+                )
             );
         }
     }
+}
+
+/// 编辑区首行的屏幕行号（标题栏下方；ZERO/MINIBAR 为 0）。
+fn edit_top_row() -> u16 {
+    let lines = with_global(|g| g.LINES);
+    toprows_for(lines) as u16
 }
 
 /// 计算光标应处的屏幕行与列（编辑区相对坐标，行 0 对应编辑区首行）。
@@ -1786,8 +1856,11 @@ fn cursor_screen_position(
     (row, screen_column)
 }
 
-/// 重绘标题栏。
+/// 重绘标题栏（ZERO/MINIBAR 或单行终端没有标题栏，对应 C 的 titlebar）。
 pub fn titlebar(_file: Option<&str>) {
+    if ISSET(ZERO) || ISSET(MINIBAR) || with_global(|g| g.LINES) == 1 {
+        return;
+    }
     let mut stdout = io::stdout();
     let cols = with_global(|g| g.COLS);
     let _ = execute!(stdout, cursor::MoveTo(0, 0));
@@ -2675,7 +2748,7 @@ pub fn update_line(line: &LineRef, index: usize) -> i32 {
         let edittop_lineno = of.edittop.as_ref().map(|e| e.borrow().lineno).unwrap_or(1);
         line.borrow().lineno - edittop_lineno
     });
-    let row = (1 + row) as u16;
+    let row = edit_top_row() + (row as u16);
 
     draw_row(&mut stdout, row, converted.as_bytes(), line, from_col, from_col + span);
 
@@ -2709,7 +2782,7 @@ pub fn update_line(line: &LineRef, index: usize) -> i32 {
 /// firstcolumn 开始显示），否则显示整行。返回占用的屏幕行数。
 fn update_softwrapped_line(line: &LineRef) -> i32 {
     /* 编辑器显示区域的行数（对应 editwinrows）。 */
-    let editwinrows = with_global(|g| g.LINES.saturating_sub(4) as i32);
+    let editwinrows = with_global(|g| compute_editwinrows(g.LINES));
 
     let (edittop, firstcolumn) = with_global(|g| {
         let of = g.openfile.as_ref().expect("no open file").borrow();
@@ -2758,10 +2831,10 @@ fn update_softwrapped_line(line: &LineRef) -> i32 {
         }
 
         let (converted, _has_more) = display_string(data.as_bytes(), from_col, to_col - from_col, true, false);
-        draw_row(&mut stdout, (1 + screen_row) as u16, converted.as_bytes(), line, from_col, to_col);
+        draw_row(&mut stdout, edit_top_row() + screen_row as u16, converted.as_bytes(), line, from_col, to_col);
         /* 聚光高亮逐块绘制；consume 传 FALSE，避免第一块画完就清掉
          * 标志导致后续块不高亮。 */
-        spotlight_line(&mut stdout, (1 + screen_row) as u16, converted.as_bytes(), line, from_col, current_margin(), false);
+        spotlight_line(&mut stdout, edit_top_row() + screen_row as u16, converted.as_bytes(), line, from_col, current_margin(), false);
 
         from_col = to_col;
         screen_row += 1;
