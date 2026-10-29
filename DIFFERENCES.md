@@ -191,6 +191,15 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
     （`global.c:1552-1565`；`tests/keymap_reachability.rs`）。
 13. ✅ **`M-X` 切换帮助行**：绑定 `(MMOST|MBROWSER|MYESNO) & ~MFINDINHELP`
     → `DoToggle NO_HELP`，帮助查看器内不绑定（`tests/keymap_reachability.rs`）。
+14. ✅ **Shift+方向键选择文本**：`translate_keycode` 按 `parse_kbinput`
+    把 Shift+方向/Home/End/PgUp/PgDn 解析成普通 `KEY_*` 并置
+    `shift_held`（对应 `KEY_SLEFT`/`KEY_SRIGHT`/`KEY_SR`/`KEY_SF`、
+    `KEY_SHOME`/`KEY_SEND`/`KEY_SPREVIOUS`/`KEY_SNEXT` 分支）；
+    `handle_input_key` 移植 `process_a_keystroke` 的软标记逻辑：执行
+    Shift 移动前建立 `softmark`，松开 Shift 后的移动丢弃它。
+    此前 Shift+Up/Down 返回 `SHIFT_UP`/`SHIFT_DOWN` 码点（显示为乱码
+    字符），Shift+Left/Right 只移动光标而不建立标记。
+    证据：`tests/shift_selection.rs`。
 
 ---
 
@@ -578,3 +587,8 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   后显示 "Interrupted"，从管道读入后 `reconnect_and_store_state` 把 stdin
   接回键盘（Unix `/dev/tty`，Windows `CONIN$`）；新增 `files.rs` 的
   `read_stdin_bytes` 单元测试与 Unix 信号测试。
+- 本轮：修复 Shift+方向键选择——`translate_keycode` 把带 Shift 的
+  方向/Home/End/PgUp/PgDn 解析为普通 KEY_* 并置 `shift_held`，
+  `handle_input_key` 按 `process_a_keystroke` 建立/丢弃软标记；此前
+  Shift+Up/Down 会插入 `SHIFT_UP`/`SHIFT_DOWN` 码点（显示为乱码）。
+  新增 `tests/shift_selection.rs`。

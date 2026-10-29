@@ -500,6 +500,20 @@ fn ctrl_char_code(c: char) -> i32 {
 
 /// 将 crossterm KeyEvent 转换为 nano 键码。
 pub fn translate_keycode(key: KeyEvent) -> i32 {
+    /* 对应 C 版 parse_kbinput 开头：每次解析前清 Shift 标志。 */
+    with_global_mut(|g| g.shift_held = false);
+
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    /* 带 Shift 的移动键在 C 版返回普通 KEY_*，另置 shift_held，
+     * 由主循环建立软标记（process_a_keystroke）。 */
+    let mark_shift = |held: bool| {
+        if held {
+            with_global_mut(|g| g.shift_held = true);
+        }
+    };
+
     match key.code {
         KeyCode::Char(c) => {
             if key.modifiers == KeyModifiers::CONTROL {
@@ -542,67 +556,101 @@ pub fn translate_keycode(key: KeyEvent) -> i32 {
             }
         }
         KeyCode::Home => {
-            if key.modifiers == KeyModifiers::CONTROL {
+            if ctrl {
+                mark_shift(shift);
                 CONTROL_HOME
-            } else if key.modifiers == KeyModifiers::SHIFT {
-                SHIFT_HOME
+            } else if alt {
+                ALT_HOME
+            } else if shift {
+                mark_shift(true);
+                KEY_HOME
             } else {
                 KEY_HOME
             }
         }
         KeyCode::End => {
-            if key.modifiers == KeyModifiers::CONTROL {
+            if ctrl {
+                mark_shift(shift);
                 CONTROL_END
-            } else if key.modifiers == KeyModifiers::SHIFT {
-                SHIFT_END
+            } else if alt {
+                ALT_END
+            } else if shift {
+                mark_shift(true);
+                KEY_END
             } else {
                 KEY_END
             }
         }
         KeyCode::PageUp => {
-            if key.modifiers == KeyModifiers::SHIFT {
-                SHIFT_PAGEUP
-            } else {
-                KEY_PPAGE
-            }
+            mark_shift(shift);
+            KEY_PPAGE
         }
         KeyCode::PageDown => {
-            if key.modifiers == KeyModifiers::SHIFT {
-                SHIFT_PAGEDOWN
-            } else {
-                KEY_NPAGE
-            }
+            mark_shift(shift);
+            KEY_NPAGE
         }
         KeyCode::Left => {
-            match key.modifiers {
-                KeyModifiers::CONTROL => CONTROL_LEFT,
-                KeyModifiers::ALT => ALT_LEFT,
-                KeyModifiers::SHIFT => KEY_LEFT,
-                _ => KEY_LEFT,
+            if ctrl {
+                mark_shift(shift);
+                CONTROL_LEFT
+            } else if shift && alt {
+                mark_shift(true);
+                KEY_HOME
+            } else if alt {
+                ALT_LEFT
+            } else if shift {
+                mark_shift(true);
+                KEY_LEFT
+            } else {
+                KEY_LEFT
             }
         }
         KeyCode::Right => {
-            match key.modifiers {
-                KeyModifiers::CONTROL => CONTROL_RIGHT,
-                KeyModifiers::ALT => ALT_RIGHT,
-                KeyModifiers::SHIFT => KEY_RIGHT,
-                _ => KEY_RIGHT,
+            if ctrl {
+                mark_shift(shift);
+                CONTROL_RIGHT
+            } else if shift && alt {
+                mark_shift(true);
+                KEY_END
+            } else if alt {
+                ALT_RIGHT
+            } else if shift {
+                mark_shift(true);
+                KEY_RIGHT
+            } else {
+                KEY_RIGHT
             }
         }
         KeyCode::Up => {
-            match key.modifiers {
-                KeyModifiers::CONTROL => CONTROL_UP,
-                KeyModifiers::ALT => ALT_UP,
-                KeyModifiers::SHIFT => SHIFT_UP,
-                _ => KEY_UP,
+            if ctrl {
+                mark_shift(shift);
+                CONTROL_UP
+            } else if shift && alt {
+                mark_shift(true);
+                KEY_PPAGE
+            } else if alt {
+                ALT_UP
+            } else if shift {
+                mark_shift(true);
+                KEY_UP
+            } else {
+                KEY_UP
             }
         }
         KeyCode::Down => {
-            match key.modifiers {
-                KeyModifiers::CONTROL => CONTROL_DOWN,
-                KeyModifiers::ALT => ALT_DOWN,
-                KeyModifiers::SHIFT => SHIFT_DOWN,
-                _ => KEY_DOWN,
+            if ctrl {
+                mark_shift(shift);
+                CONTROL_DOWN
+            } else if shift && alt {
+                mark_shift(true);
+                KEY_NPAGE
+            } else if alt {
+                ALT_DOWN
+            } else if shift {
+                mark_shift(true);
+                KEY_DOWN
+            } else {
+                KEY_DOWN
             }
         }
         KeyCode::F(n) => KEY_F0 + n as i32,
@@ -3268,6 +3316,28 @@ pub fn show_welcome_message() -> bool {
     show
 }
 
+/// 键码对应的功能是否属于 Shift 选择可用的移动
+/// （对应 C 版 `wanted_to_move` 的函数列表）。
+fn wanted_to_move_key(key: i32) -> bool {
+    matches!(
+        key,
+        KEY_LEFT
+            | KEY_RIGHT
+            | KEY_UP
+            | KEY_DOWN
+            | KEY_HOME
+            | KEY_END
+            | KEY_PPAGE
+            | KEY_NPAGE
+            | CONTROL_LEFT
+            | CONTROL_RIGHT
+            | CONTROL_HOME
+            | CONTROL_END
+            | ALT_LEFT
+            | ALT_RIGHT
+    )
+}
+
 /// 处理单个按键：执行快捷键或作为普通字符输入。
 /// 返回 TRUE 表示已处理。
 pub fn handle_input_key(key: i32) -> bool {
@@ -3276,7 +3346,54 @@ pub fn handle_input_key(key: i32) -> bool {
         with_global_mut(|g| g.macro_buffer.push(key));
     }
     let menu = with_global(|g| g.currmenu);
+
+    /* 对应 C 的 process_a_keystroke：Shift 移动前先建立软标记。 */
+    let (was_current, was_x, was_mark) = with_global(|g| match &g.openfile {
+        Some(of) => {
+            let r = of.borrow();
+            (r.current.clone(), r.current_x, r.mark.is_some())
+        }
+        None => (None, 0, false),
+    });
+    if with_global(|g| g.shift_held) {
+        if let Some(of) = with_global(|g| g.openfile.clone()) {
+            let mut r = of.borrow_mut();
+            if r.mark.is_none() {
+                r.mark = r.current.clone();
+                r.mark_x = r.current_x;
+                r.softmark = true;
+            }
+        }
+    }
+
     let handled = execute_function(key, menu);
+
+    /* 对应 C 的 process_a_keystroke 后半段：Shift 松开后的移动丢弃软标记。 */
+    let (now_current, now_x, now_mark, softmark) = with_global(|g| match &g.openfile {
+        Some(of) => {
+            let r = of.borrow();
+            (r.current.clone(), r.current_x, r.mark.is_some(), r.softmark)
+        }
+        None => (None, 0, false, false),
+    });
+    let shift_held = with_global(|g| g.shift_held);
+    let moved = match (&was_current, &now_current) {
+        (Some(a), Some(b)) => !Rc::ptr_eq(a, b),
+        _ => false,
+    };
+    if now_mark && softmark && !shift_held && (moved || now_x != was_x || wanted_to_move_key(key)) {
+        with_global_mut(|g| {
+            if let Some(of) = &g.openfile {
+                of.borrow_mut().mark = None;
+            }
+            g.refresh_needed = true;
+        });
+    } else if moved {
+        with_global_mut(|g| g.also_the_last = false);
+    }
+    if ISSET(STATEFLAGS) && now_mark != was_mark {
+        titlebar(None);
+    }
 
     if !handled {
         // 处理普通字符输入。键码可以是任意 Unicode 码点（中文等 > 255），
