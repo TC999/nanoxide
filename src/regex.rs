@@ -33,8 +33,12 @@ enum Node {
     Bol,
     /// 行尾锚点 `$`。
     Eol,
-    /// 词边界 `\<`、`\>`、`\b`。
+    /// 词边界：`\b` 任意边界，`\<` 词首，`\>` 词尾。
     WordBoundary,
+    /// 词首 `\<`（前一字符非单词、当前是单词字符）。
+    WordStart,
+    /// 词尾 `\>`（前一字符是单词、当前非单词或行尾）。
+    WordEnd,
     /// 顺序连接。
     Seq(Vec<Node>),
     /// 交替 `|`（优先左侧）。
@@ -157,6 +161,24 @@ fn match_node(node: &Node, text: &[u8], pos: usize, bol_pos: usize, end: usize, 
             let before = if pos > 0 { is_word_char(text[pos - 1]) } else { false };
             let after = if pos < end { is_word_char(text[pos]) } else { false };
             if before != after {
+                k(pos)
+            } else {
+                None
+            }
+        }
+        Node::WordStart => {
+            let before = if pos > 0 { is_word_char(text[pos - 1]) } else { false };
+            let after = if pos < end { is_word_char(text[pos]) } else { false };
+            if !before && after {
+                k(pos)
+            } else {
+                None
+            }
+        }
+        Node::WordEnd => {
+            let before = if pos > 0 { is_word_char(text[pos - 1]) } else { false };
+            let after = if pos < end { is_word_char(text[pos]) } else { false };
+            if before && !after {
                 k(pos)
             } else {
                 None
@@ -423,7 +445,9 @@ impl<'a> Parser<'a> {
     fn parse_escape(&mut self) -> Result<Node, String> {
         let c = self.eat().ok_or("dangling '\\'")?;
         match c {
-            b'<' | b'>' | b'b' => Ok(Node::WordBoundary),
+            b'<' => Ok(Node::WordStart),
+            b'>' => Ok(Node::WordEnd),
+            b'b' => Ok(Node::WordBoundary),
             /* GNU 扩展字符类。 */
             b's' => Ok(Node::Class(vec![(b'\t', b'\r'), (b' ', b' ')], false)),
             b'S' => Ok(Node::Class(vec![(b'\t', b'\r'), (b' ', b' ')], true)),
@@ -591,6 +615,19 @@ mod tests {
     }
 
     #[test]
+    fn word_start_and_end_differ() {
+        /* `<` 只在词首匹配（在 xword 中不匹配，在后面的 word 匹配）。 */
+        assert_eq!(find(r"\<word", "xword word"), Some((6, 10)));
+        assert_eq!(find(r"\<word", "xword"), None);
+        /* `>` 只在词尾匹配（在 wordy 中不匹配，在后面的 word 匹配）。 */
+        assert_eq!(find(r"word\>", "wordy word"), Some((6, 10)));
+        assert_eq!(find(r"word\>", "wordy"), None);
+        /* `\b` 仍是任意边界。 */
+        assert_eq!(find(r"\bword", "wordy"), Some((0, 4)));
+        assert_eq!(find(r"word\b", "wordy"), None);
+    }
+
+    #[test]
     fn notbol_and_offset() {
         let re = Regex::compile("^abc", false).unwrap();
         assert_eq!(re.find("zzabc", 0, false), None);
@@ -677,7 +714,10 @@ mod tests {
         assert_eq!(find("a)b", "a)b"), Some((0, 3)));
         // 分组括号与多余右括号字面共存
         assert_eq!(find("@(x)|y)\\>", "@x"), Some((0, 2)));
-        assert_eq!(find("@(x)|y)\\>", "y)a"), Some((0, 2)), "\\> 零宽，终点在 ) 后");
+        /* `\>` 是词尾：要求前一字符是词字符。"y)" 的 ')' 之前是 'y'，
+         * 但 ')' 之后（文本尾）不是词尾，因此两种文本都不匹配。 */
+        assert_eq!(find("@(x)|y)\\>", "y)"), None);
+        assert_eq!(find("@(x)|y)\\>", "y)a"), None);
         assert_eq!(find("a|b)", "b)"), Some((0, 2)));
     }
 }
