@@ -19,19 +19,25 @@ fn openfile_ref() -> OpenFileRef {
     with_global(|g| g.openfile.as_ref().expect("no open file").clone())
 }
 
-/// 初始化正则表达式（模式匹配）。
+/// 初始化正则表达式（模式匹配；对应 C 的 `regexp_init`，按 ERE 编译）。
 pub fn regexp_init(pattern: &str) -> bool {
-    with_global_mut(|g| {
-        let _case_sensitive = ISSET(CASE_SENSITIVE);
-        let pat = if pattern.contains('*') || pattern.contains('?') {
-            MatchPattern::from_glob(pattern)
-        } else {
-            MatchPattern::from_literal(pattern)
-        };
-        g.search_regexp = Some(pat);
-        g.regexp_nsub = 0;
-    });
-    true
+    let icase = !ISSET(CASE_SENSITIVE);
+    match MatchPattern::from_regex(pattern, icase) {
+        Ok(pat) => {
+            with_global_mut(|g| {
+                g.search_regexp = Some(pat);
+                g.regexp_nsub = 0;
+            });
+            true
+        }
+        Err(err) => {
+            winio::statusline(
+                MessageType::Ahem,
+                &crate::t!("search-bad_regex", regexp = pattern, err = err),
+            );
+            false
+        }
+    }
 }
 
 /// 释放正则表达式。
@@ -335,24 +341,23 @@ pub fn goto_line_posx(linenumber: isize, pos_x: usize) {
 
 // ======================== 搜索核心（对应 search.c） ========================
 
-/// 编译给定正则（对应 `regexp_init`；用 MatchPattern 替代）。
+/// 编译给定正则（对应 C 的 `regexp_init`，按 ERE 编译）。
 /// 返回 TRUE 当表达式有效。
 pub fn regexp_init_real(regexp: &str) -> bool {
-    let valid = if regexp.contains('*') || regexp.contains('?') {
-        Some(MatchPattern::from_glob(regexp))
-    } else {
-        Some(MatchPattern::from_literal(regexp))
-    };
-    match valid {
-        Some(pat) => {
+    let icase = !ISSET(CASE_SENSITIVE);
+    match MatchPattern::from_regex(regexp, icase) {
+        Ok(pat) => {
             with_global_mut(|g| {
                 g.search_regexp = Some(pat);
                 g.regexp_compiled = true;
             });
             true
         }
-        None => {
-            winio::statusline(MessageType::Ahem, &crate::t!("search-bad_regex", regexp = regexp));
+        Err(err) => {
+            winio::statusline(
+                MessageType::Ahem,
+                &crate::t!("search-bad_regex", regexp = regexp, err = err),
+            );
             false
         }
     }
@@ -472,9 +477,22 @@ pub fn search_init(replacing: bool, retain_answer: bool) {
     }
 }
 
+/// 返回正则匹配的真实长度（对应 C 的 `regmatches[0].rm_eo - rm_so`）：
+/// 非正则、正则未编译或未在 from 处匹配时退化为 needle 长度。
+pub fn regexp_match_len(text: &[u8], from: usize, needle_len: usize) -> usize {
+    if !ISSET(USE_REGEXP) {
+        return needle_len;
+    }
+    let re = with_global(|g| g.search_regexp.clone());
+    match re.and_then(|re| re.find_from(text, from, true)) {
+        Some((so, eo)) if so == from => eo - so,
+        _ => needle_len,
+    }
+}
+
 /// 从当前行开始查找 needle（对应 `findnextstr`）。
 /// 返回 1 找到、0 未找到、-2 取消。
-pub fn findnextstr(
+fn findnextstr(
     needle: &str,
     whole_word_only: bool,
     modus: i32,
@@ -620,7 +638,7 @@ pub fn findnextstr(
         of_ref.current_x = found_x;
     }
 
-    *match_len = found_len;
+    *match_len = regexp_match_len(data.as_bytes(), found_x, found_len);
 
     if modus == JUSTFIND {
         let marked = with_global(|g| g.openfile.as_ref().map(|of| of.borrow().mark.is_some()).unwrap_or(false));
@@ -865,11 +883,15 @@ fn replace_line(needle: &str) -> String {
         )
     };
 
-    let match_len = needle.len();
+    /* 正则时用实际匹配长度，否则用 needle 长度（对应 C 的 replace_line）。 */
+    let match_len = regexp_match_len(data.as_bytes(), current_x, needle.len());
+
     let mut copy = String::new();
-    copy.push_str(&data[..current_x]);
+    let head_end = current_x.min(data.len());
+    copy.push_str(&data[..head_end]);
     copy.push_str(&answer);
-    copy.push_str(&data[current_x + match_len..]);
+    let tail_start = (current_x + match_len).min(data.len());
+    copy.push_str(&data[tail_start..]);
     copy
 }
 
