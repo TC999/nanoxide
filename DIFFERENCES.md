@@ -357,7 +357,11 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ `--listsyntaxes`（`list_syntax_names`）；`-h` 的选项表已按 9.2 的 `usage()` 重写
 - ✅ BOM 提示：光标停在 UTF-8 BOM 上时显示 "Byte Order Mark"，倒计时 1
   （`winio::cursor_is_on_bom` / `set_blankdelay_to_one`，`tests/bom_notice.rs`）
-- ❌ `ZERO` 模式的特殊重绘
+- ✅ `ZERO` 模式的布局与重绘：无标题栏、编辑区延伸到状态行
+  （`compute_editwinrows`/`toprows_for`/`bottomrows_for`），状态行位置随
+  底部栏行数变化；主循环在有消息时重绘整屏、次要消息时重绘编辑区
+  （`tests/zero_mode.rs`）。简化：C 只重画状态行/最后一行，这里用整屏
+  重绘代替（结果相同，多画几行）。
 - ❓ `-h` 输出与 C 版 `usage()` 的逐字对齐（受限于未接入的 gettext 文案）
 
 ### 8. 覆盖较完整的模块
@@ -526,3 +530,7 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   长度；`search-bad_regex` 补错误原因；新增 `tests/regex_replace.rs`。
 - 本轮：主循环补 BOM 提示（光标在行首且该行以 EF BB BF 开头、UTF-8 模式
   显示 "Byte Order Mark"，倒计时 1）；新增 `tests/bom_notice.rs`。
+- 本轮：ZERO 模式布局——`compute_editwinrows`/`toprows_for`/`bottomrows_for`
+  按 C 的 `window_init` 规则计算（无标题、编辑区延伸、NO_HELP 缩底部），
+  状态行位置与编辑区起点随之调整，主循环补 ZERO 消息重绘；新增
+  `tests/zero_mode.rs`。
