@@ -1605,6 +1605,58 @@ fn shortcut_entries(menu: i32) -> Vec<(String, String, FunctionId, i32)> {
     entries
 }
 
+/// 把滚动条点击的编辑区行号换算成目标文件行号（对应 C 版
+/// `get_mouseinput` 的 sidebar 分支：`filebot->lineno * mouse_y /
+/// editwinrows + 1`）。
+///
+/// `edit_row` 是编辑窗口内从 0 开始的行号。C 版对非零行再加一，
+/// 使点击最右列任意位置都落在 1..=filebot+1 的范围（越界由
+/// `goto_line_and_column` 钳到文件末行）。
+pub fn scrollbar_line_for_click(edit_row: usize, editwinrows: i32, filebot_lineno: isize) -> isize {
+    let row = if edit_row > 0 {
+        edit_row as isize + 1
+    } else {
+        0
+    };
+    filebot_lineno.saturating_mul(row) / editwinrows.max(1) as isize + 1
+}
+
+/// 点击编辑区最右侧的滚动条，跳到大致对应的行（对应 C 版
+/// `get_mouseinput` 的 sidebar 分支）。返回是否已处理。
+///
+/// `screen_column` 为 crossterm 的 0 起列，`screen_row` 为 1 起行。
+/// 只处理主菜单下、`-q`/`--indicator` 开启时最右列的左键点击；
+/// 处理完只置 `refresh_needed`，由主循环重绘（与 C 一致）。
+pub fn handle_scrollbar_click(screen_column: u16, screen_row: u16) -> bool {
+    let (cols, lines, menu, sidebar, editwinrows) =
+        with_global(|g| (g.COLS, g.LINES, g.currmenu, g.sidebar, g.editwinrows));
+
+    if !sidebar || menu != MMAIN || cols == 0 || screen_column as usize != cols - 1 {
+        return false;
+    }
+
+    /* wmouse_trafo(midwin, ...) 把屏幕行换成编辑窗口内行号（midwin
+     * 从 toprows 开始）；crossterm 的行从 1 起。 */
+    let edit_row = screen_row as i32 - 1 - toprows_for(lines) as i32;
+    if edit_row < 0 || edit_row >= editwinrows {
+        return false;
+    }
+
+    let (filebot_lineno, placewewant) = with_global(|g| {
+        let of = g.openfile.as_ref();
+        let filebot = of
+            .and_then(|o| o.borrow().filebot.as_ref().map(|b| b.borrow().lineno))
+            .unwrap_or(1);
+        let want = of.map(|o| o.borrow().placewewant).unwrap_or(0);
+        (filebot, want)
+    });
+
+    let line = scrollbar_line_for_click(edit_row as usize, editwinrows, filebot_lineno);
+    crate::search::goto_line_and_column(line, placewewant as isize + 1, true);
+    with_global_mut(|g| g.refresh_needed = true);
+    true
+}
+
 /// 根据底部栏点击位置计算快捷键下标（1 起；None 表示点空）。
 /// `footer_row` 是 footwin 内的行号（bottombars 画在第 1、2 行）。
 /// 对应 C 的 get_mouseinput 中 footer 分支：`width` 由条目数决定，
@@ -1649,7 +1701,10 @@ fn handle_footer_click(column: u16, footer_row: usize) -> i32 {
     } else {
         execute_by_id(func);
     }
-    1
+    /* 功能已经直接执行，返回"已处理"让主循环跳过（C 版把快捷键
+     * put_back 后返回 1，由 get_kbinput 再取；这里没有键盘缓冲，
+     * 不能返回 1，否则会被当作 Ctrl-A 执行）。 */
+    FOREIGN_SEQUENCE
 }
 
 /// 处理鼠标事件：左键点击（标题栏/编辑区/底部栏）与滚轮
@@ -1659,7 +1714,13 @@ fn handle_mouse_event(mouse: MouseEvent) -> i32 {
         with_global(|g| (g.LINES, bottomrows_for(g.LINES), ISSET(NO_HELP)));
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            let row = mouse.row as usize; // crossterm 行从 1 起
+            /* crossterm 的行从 1 起。 */
+            let row = mouse.row as usize;
+            /* 点击编辑区最右列的滚动条：跳到大致对应的行（对应 C 的
+             * get_mouseinput sidebar 分支，处理完返回"忽略"）。 */
+            if handle_scrollbar_click(mouse.column, mouse.row) {
+                return FOREIGN_SEQUENCE;
+            }
             /* 底部栏（屏幕最后两行；点状态行不处理，对应 C 的
              * `if (*mouse_y == (LINES - 3)) return 0;`）。footer_row 为
              * footwin 内的 1/2（bottombars 画在第 1、2 行）。 */
@@ -1689,7 +1750,10 @@ fn handle_mouse_event(mouse: MouseEvent) -> i32 {
                     }
                 }
                 edit_refresh();
-                return 1;
+                /* 已直接滚动两行，返回"已处理"；C 版 put_back 两个
+                 * ALT_UP/ALT_DOWN 后返回 1，这里不能返回 1（会变成
+                 * Ctrl-A）。 */
+                return FOREIGN_SEQUENCE;
             }
             ERR
         }

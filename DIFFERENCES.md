@@ -205,7 +205,12 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   （`handle_mouse_click`）、底部栏点击执行快捷键（`footer_index` /
   `shortcut_entries`，对应 C 的 `get_mouseinput` footer 分支）、滚轮上下
   滚动两行；`tests/mouse_support.rs`、`tests/mouse_footer.rs` 覆盖。
-  ⚠️ 未实现：`-q` 侧边滚动条点击跳行（C 的 sidebar 分支）。
+  ✅ `-q` 侧边滚动条点击跳行（C 的 sidebar 分支）：主菜单下点击编辑区
+  最右列，按 `filebot->lineno * mouse_y / editwinrows + 1` 换算目标行，
+  再 `goto_line_and_column(..., TRUE)`；`tests/mouse_scrollbar.rs` 覆盖
+  顶部、中部、底部与越界钳制。
+  另修正鼠标事件处理后的返回值：已直接执行的动作返回
+  `FOREIGN_SEQUENCE`，不再返回 `1`（否则主循环会把它当作 `^A`）。
 
 ### 2. 文件（`files.rs`）
 
@@ -546,3 +551,8 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：鼠标补底部栏点击（`footer_index`/`shortcut_entries`，快捷键执行）
   与滚轮滚动两行（`handle_mouse_event`）；底部栏绘制复用同一份条目收集；
   新增 `tests/mouse_footer.rs`。
+- 本轮：`-q` 侧边滚动条点击跳行已接线（对应 `get_mouseinput` 的 sidebar
+  分支：主菜单下点击编辑区最右列，按 `filebot->lineno * mouse_y /
+  editwinrows + 1` 换算并 `goto_line_and_column(..., TRUE)`）；同时把鼠标
+  点击底部栏、滚轮处理后返回的 `1` 改为 `FOREIGN_SEQUENCE`，避免主循环
+  把它当成 `^A` 再执行一次；新增 `tests/mouse_scrollbar.rs`。
