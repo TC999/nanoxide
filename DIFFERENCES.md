@@ -592,3 +592,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   `handle_input_key` 按 `process_a_keystroke` 建立/丢弃软标记；此前
   Shift+Up/Down 会插入 `SHIFT_UP`/`SHIFT_DOWN` 码点（显示为乱码）。
   新增 `tests/shift_selection.rs`。
+- 本轮：标题栏超长文件名截断改按 UTF-8 字符边界，避免中文路径触发
+  `byte index ... is not a char boundary` 崩溃；`tests/titlebar_ranking.rs`
+  增加回归测试。

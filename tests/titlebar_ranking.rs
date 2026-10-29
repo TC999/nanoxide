@@ -53,3 +53,16 @@ fn ranking_is_kept_after_closing_back_to_one_buffer() {
     );
     assert_eq!(nanoxide::winio::titlebar_left_text(), " [1/1] ");
 }
+
+/// 超长中文文件名按字符边界截断，不能 panic
+/// （回归：标题栏的字节下标落在多字节字符内部）。
+#[test]
+fn long_utf8_filename_is_truncated_on_char_boundary() {
+    setup();
+    let long_name = "这是一个很长很长的中文文件名用于测试标题栏截断行为.txt";
+    with_global_mut(|g| {
+        g.COLS = 20;
+        g.openfile.as_ref().unwrap().borrow_mut().filename = Some(long_name.to_string());
+    });
+    nanoxide::winio::titlebar(None);
+}

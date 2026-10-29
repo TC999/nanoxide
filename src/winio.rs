@@ -1418,7 +1418,13 @@ fn draw_titlebar_line(stdout: &mut io::Stdout, cols: usize) {
 
     // 文件名居中或左对齐
     let path_display = if filename.len() > path_max {
-        format!("...{}", &filename[filename.len().saturating_sub(path_max.saturating_sub(3))..])
+        /* 保留尾部；从字符边界开始，避免把中文等多字节字符切成两半
+         * （C 版按字节 strnlen，但 Rust 的 String 切片要求 UTF-8 边界）。 */
+        let mut start = filename.len().saturating_sub(path_max.saturating_sub(3));
+        while start > 0 && !filename.is_char_boundary(start) {
+            start -= 1;
+        }
+        format!("...{}", &filename[start..])
     } else {
         filename.clone()
     };
