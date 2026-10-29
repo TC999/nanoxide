@@ -201,9 +201,11 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ SIGHUP / SIGTERM 紧急保存退出；SIGWINCH 重绘；SIGTSTP / SIGCONT 挂起与恢复
 - ✅ `install_handler_for_Ctrl_C` / `restore_handler_for_Ctrl_C`
 - ❌ `make_a_note` / `reconnect_and_store_state` / `handle_crash`
-- ⚠️ 鼠标：`mouse_init`（启停 crossterm 捕获）与编辑区左键点击（`handle_mouse_click`）
-  已实现，`tests/mouse_support.rs` 覆盖；原版 `get_mouseinput`（浏览器/帮助区的
-  点击定位）未移植。
+- ✅ 鼠标：`mouse_init`（启停 crossterm 捕获）、编辑区左键点击定位
+  （`handle_mouse_click`）、底部栏点击执行快捷键（`footer_index` /
+  `shortcut_entries`，对应 C 的 `get_mouseinput` footer 分支）、滚轮上下
+  滚动两行；`tests/mouse_support.rs`、`tests/mouse_footer.rs` 覆盖。
+  ⚠️ 未实现：`-q` 侧边滚动条点击跳行（C 的 sidebar 分支）。
 
 ### 2. 文件（`files.rs`）
 
@@ -333,7 +335,8 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   差异：版本行显示本程序版本（非 C 版编译期写死的 9.2）；滚动用等高的
   虚拟窗口重绘模拟 `wscrl`；`window_init` 的 ncurses 窗口重建省略。
   ⚠️ 动画本身依赖真实终端，仅静态核对与数据表测试
-- ❌ `get_mouseinput`（编辑器点击路径见 `handle_mouse_click`）
+- ⚠️ `get_mouseinput`：编辑区点击、底部栏点击与滚轮已实现
+  （`handle_mouse_event`）；`-q` 滚动条点击跳行未实现
 - ✅ minibar 的行数提示与多缓冲区 `[x/n]` 计数：`report_size` 在读取/保存后
   置位、绘制后被消费；`tallywidth` 参与状态字符的空间判断；`buffer_number`
   从第一个缓冲区计数（`tests/minibar_tally.rs`）。
@@ -540,3 +543,6 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：regex 引擎把 `\<`/`\>`/`\b` 拆成词首/词尾/任意边界三种节点
   （此前三者等价），并用 GNU grep 交叉验证；修正依赖旧行为的
   `trailing_paren_is_literal` 断言。
+- 本轮：鼠标补底部栏点击（`footer_index`/`shortcut_entries`，快捷键执行）
+  与滚轮滚动两行（`handle_mouse_event`）；底部栏绘制复用同一份条目收集；
+  新增 `tests/mouse_footer.rs`。
