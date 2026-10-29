@@ -199,6 +199,10 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
     Shift 移动前建立 `softmark`，松开 Shift 后的移动丢弃它。
     此前 Shift+Up/Down 返回 `SHIFT_UP`/`SHIFT_DOWN` 码点（显示为乱码
     字符），Shift+Left/Right 只移动光标而不建立标记。
+    选中区域由 `draw_row` 末尾的 `paint_selection` 按
+    `interface_color_pair[SELECTED_TEXT]` 覆盖绘制（默认反显），
+    `selection_paint_range` 把标记区域与当前可视块（含水平滚动/软换行）
+    求交；`hilite_attribute` 默认值改为 C 版的 `A_REVERSE`。
     证据：`tests/shift_selection.rs`。
 
 ---
@@ -595,3 +599,8 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 - 本轮：标题栏超长文件名截断改按 UTF-8 字符边界，避免中文路径触发
   `byte index ... is not a char boundary` 崩溃；`tests/titlebar_ranking.rs`
   增加回归测试。
+- 本轮：选中文本高亮——`draw_row` 末尾按 C 版重绘
+  `interface_color_pair[SELECTED_TEXT]` 覆盖标记区域，
+  `selection_paint_range` 处理跨行/水平滚动/软换行求交；
+  `hilite_attribute` 默认改为 `A_REVERSE`（C 的 global.c 默认），
+  `--boldtext` 仍为 `A_BOLD`。新增 `selection_paint_range` 用例。

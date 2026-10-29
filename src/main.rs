@@ -140,12 +140,17 @@ fn main() {
         SET(NO_HELP);
     }
 
-    /* --boldtext：高亮文字改用粗体而不是反显（对应 C 版 main 的
-     * `if (ISSET(BOLD_TEXT)) hilite_attribute = A_BOLD;`）。须在
-     * set_interface_colorpairs 之前设置。 */
-    if ISSET(BOLD_TEXT) {
-        with_global_mut(|g| g.hilite_attribute = color::A_BOLD);
-    }
+    /* 高亮文字默认反显；--boldtext 改用粗体（对应 C 版 global.c 的
+     * `hilite_attribute = A_REVERSE` 与 main 的 `if (ISSET(BOLD_TEXT))
+     * hilite_attribute = A_BOLD;`）。须在 set_interface_colorpairs 之前设置。 */
+    let bold_highlight = ISSET(BOLD_TEXT);
+    with_global_mut(|g| {
+        g.hilite_attribute = if bold_highlight {
+            color::A_BOLD
+        } else {
+            color::A_REVERSE
+        };
+    });
 
     // 6d. 按 rcfile 与终端宽度决定是否显示 -q 滚动条，再计算 wrap_at
     //     （对应 C 版 window_init 中的 sidebar / wrap_at 计算）。

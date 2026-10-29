@@ -2757,8 +2757,116 @@ fn draw_row(
             paint_syntax_rules(stdout, row, converted, line, from_col, till_x, &sntx, margin);
         }
     }
+    /* 选中（标记）区域：覆盖绘制在语法高亮之上（对应 C 版 draw_row
+     * 末尾的 `openfile->mark` 分支）。 */
+    paint_selection(stdout, row, converted, line, from_col, margin);
     /* 聚光高亮由调用方 update_line / update_softwrapped_line 在处理完
      * 各自的行（或全部软换行块）后调用 spotlight_line 绘制。 */
+}
+
+/// 计算本行被选中部分在 `converted` 中的 (起始字节, 字节数)。
+/// 对应 C 版 `draw_row` 中 `openfile->mark` 分支的坐标换算：
+/// 把标记区域的字节范围与当前可视块（`from_col` 起）求交，再换算成
+/// `converted` 的显示列/字节位置。返回 None 表示本行没有可见的选中部分。
+///
+/// `line_lineno`/`top_lineno`/`bot_lineno` 从 1 开始；`top_x`/`bot_x`
+/// 是行内字节偏移（`get_region` 已按文档顺序排好）。
+#[allow(clippy::too_many_arguments)]
+pub fn selection_paint_range(
+    data: &[u8],
+    converted: &[u8],
+    from_col: usize,
+    line_lineno: isize,
+    top_lineno: isize,
+    top_x: usize,
+    bot_lineno: isize,
+    bot_x: usize,
+) -> Option<(usize, usize)> {
+    if line_lineno < top_lineno || line_lineno > bot_lineno {
+        return None;
+    }
+
+    /* 当前块在原始行数据中的字节范围。 */
+    let width = crate::utils::wideness(converted, converted.len());
+    let from_x = crate::utils::actual_x(data, from_col);
+    let till_x = crate::utils::actual_x(data, from_col + width);
+
+    /* 与标记区域求交；首/末行只取本行内的部分
+     * （对应 C 版 draw_row 中对 top_x/bot_x 的钳制）。 */
+    let mut start_x = top_x;
+    let mut end_x = bot_x;
+    if top_lineno < line_lineno || top_x < from_x {
+        start_x = from_x;
+    }
+    if bot_lineno > line_lineno || bot_x > till_x {
+        end_x = till_x;
+    }
+    if start_x >= till_x || end_x <= from_x {
+        return None;
+    }
+
+    let start_col = crate::utils::wideness(data, start_x).saturating_sub(from_col);
+    let start_byte = crate::utils::actual_x(converted, start_col).min(converted.len());
+    let paint_len = if end_x < till_x {
+        let end_col = crate::utils::wideness(data, end_x).saturating_sub(from_col);
+        crate::utils::actual_x(&converted[start_byte..], end_col.saturating_sub(start_col))
+    } else {
+        converted.len() - start_byte
+    };
+
+    if paint_len == 0 {
+        None
+    } else {
+        Some((start_byte, paint_len))
+    }
+}
+
+/// 重绘本行的选中部分（对应 C 版 `draw_row` 的 mark 高亮）。
+fn paint_selection(
+    stdout: &mut io::Stdout,
+    row: u16,
+    converted: &[u8],
+    line: &LineRef,
+    from_col: usize,
+    margin: usize,
+) {
+    let has_mark = with_global(|g| {
+        g.openfile
+            .as_ref()
+            .map(|of| of.borrow().mark.is_some())
+            .unwrap_or(false)
+    });
+    if !has_mark {
+        return;
+    }
+
+    let (top, top_x, bot, bot_x) = utils::get_region();
+    let line_lineno = line.borrow().lineno;
+    let data = line.borrow().data.clone();
+
+    let Some((start_byte, paint_len)) = selection_paint_range(
+        data.as_bytes(),
+        converted,
+        from_col,
+        line_lineno,
+        top.borrow().lineno,
+        top_x,
+        bot.borrow().lineno,
+        bot_x,
+    ) else {
+        return;
+    };
+
+    let color = with_global(|g| {
+        *g.interface_color_pair.get(SELECTED_TEXT).unwrap_or(&0)
+    });
+    /* start_byte 对应的显示列 = converted 中该字节之前的宽度。 */
+    let start_col = crate::utils::wideness(converted, start_byte);
+    let _ = execute!(stdout, cursor::MoveTo((margin + start_col) as u16, row));
+    apply_attributes(stdout, color);
+    let end = (start_byte + paint_len).min(converted.len());
+    let _ = write!(stdout, "{}", String::from_utf8_lossy(&converted[start_byte..end]));
+    reset_attributes(stdout);
 }
 
 /// 应用当前语法的全部颜色规则到一行（对应 C 的 draw_row 中 ENABLE_COLOR 部分）。

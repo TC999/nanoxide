@@ -172,3 +172,62 @@ fn shift_down_selects_without_inserting_text() {
         "two"
     );
 }
+
+/// 选中区域与可视块求交（对应 C 版 draw_row 的 mark 分支）：
+/// 单行中间、行首、跨行整行、范围外以及水平滚动。
+#[test]
+fn selection_paint_range_covers_marked_part() {
+    let data = b"hello world";
+
+    /* 单行中间 5 个字符。 */
+    assert_eq!(
+        nanoxide::winio::selection_paint_range(data, data, 0, 1, 1, 6, 1, 11),
+        Some((6, 5))
+    );
+
+    /* 从行首到行中。 */
+    assert_eq!(
+        nanoxide::winio::selection_paint_range(data, data, 0, 1, 1, 0, 1, 5),
+        Some((0, 5))
+    );
+
+    /* 跨行时中间行整行选中。 */
+    assert_eq!(
+        nanoxide::winio::selection_paint_range(data, data, 0, 2, 1, 6, 3, 2),
+        Some((0, data.len()))
+    );
+
+    /* 当前行不在标记区域。 */
+    assert_eq!(
+        nanoxide::winio::selection_paint_range(data, data, 0, 2, 1, 0, 1, 5),
+        None
+    );
+
+    /* 终点越过行尾时画到 converted 末尾。 */
+    assert_eq!(
+        nanoxide::winio::selection_paint_range(data, data, 0, 1, 1, 6, 1, 100),
+        Some((6, 5))
+    );
+
+    /* 非软换行水平滚动：from_col=6 时本块是 "world"。 */
+    assert_eq!(
+        nanoxide::winio::selection_paint_range(data, b"world", 6, 1, 1, 0, 1, 11),
+        Some((0, 5))
+    );
+}
+
+/// SELECTED_TEXT 默认取 hilite_attribute（C 的 A_REVERSE），
+/// 确保选中区域有可见属性。
+#[test]
+fn selected_text_defaults_to_reverse() {
+    setup();
+    with_global_mut(|g| g.hilite_attribute = nanoxide::color::A_REVERSE);
+    nanoxide::color::set_interface_colorpairs();
+
+    let attrs = with_global(|g| g.interface_color_pair[SELECTED_TEXT]);
+    assert_ne!(
+        attrs & nanoxide::color::A_REVERSE,
+        0,
+        "SELECTED_TEXT 默认应反显"
+    );
+}
