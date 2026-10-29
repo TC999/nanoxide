@@ -201,7 +201,14 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 - ✅ `set_up_signal_handlers` / `set_up_sigwinch_handler` / `block_sigwinch`（Unix；handler 只置原子标志，主循环消费）
 - ✅ SIGHUP / SIGTERM 紧急保存退出；SIGWINCH 重绘；SIGTSTP / SIGCONT 挂起与恢复
 - ✅ `install_handler_for_Ctrl_C` / `restore_handler_for_Ctrl_C`
-- ❌ `make_a_note` / `reconnect_and_store_state` / `handle_crash`
+- ✅ `make_a_note`：Ctrl+C 读取期间只置原子标志（不请求退出），由读取
+  循环通过 `take_ctrl_c_pressed` 消费。
+- ✅ `reconnect_and_store_state`：Unix 打开 `/dev/tty` 并 `dup2` 到
+  `STDIN_FILENO`；Windows 用 `CONIN$` + `SetStdHandle`（⚠️ 未在 Windows
+  实机验证“管道读入后回到键盘”的完整交互）。
+- ✅ `handle_crash`：SIGSEGV/SIGABRT 处理器先恢复默认动作，再置崩溃码与
+  终止标志；主循环执行 `emergency_save_all`、删除锁文件并退出
+  （对应 C 的 `die` 路径）。
 - ✅ 鼠标：`mouse_init`（启停 crossterm 捕获）、编辑区左键点击定位
   （`handle_mouse_click`）、底部栏点击执行快捷键（`footer_index` /
   `shortcut_entries`，对应 C 的 `get_mouseinput` footer 分支）、滚轮上下
@@ -260,7 +267,10 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   ERROR_DISK_FULL）时额外警告文件可能已被截断并提示恢复步骤，同时刷新
   statinfo（`tests/write_methods.rs`）。
 - ✅ `write_region_to_file`（写选区，`tests/write_region.rs`；区域也可追加/前置）、`do_savefile`
-- ✅ `scoop_stdin`（命令行 `-`，`tests/stdin_args.rs`）
+- ✅ `scoop_stdin`（命令行 `-`，`tests/stdin_args.rs`）：读取前恢复终端；
+  stdin 是终端时提示用 ^D 结束；读取期间 ^C 只中止读取，结束后显示
+  "Interrupted"（`read_stdin_bytes` 有单元测试）；从管道读入后用
+  `reconnect_and_store_state` 把 stdin 接回键盘。
 - ✅ `diralphasort`、`init_backup_dir`（`tests/file_tools.rs`）
 - ✅ `outside_of_confinement` / `init_operating_dir`（`--operatingdir`：
   启动 chdir、打开/保存/插入与文件浏览器的越界检查；`tests/operating_dir.rs`）
@@ -563,3 +573,8 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   （`nsub`、`find_bytes_captures`），`regexp_match_len` 填写 `regmatches`，
   `replace_line` 展开替换文本；组号越界或组未参与匹配时保留字面量。
   新增 `tests/regex_replace.rs` 用例与 `regex.rs` 的捕获组单元测试。
+- 本轮：补齐 stdin 读取的 Ctrl+C/终端处理——`make_a_note` 只置中断标志，
+  `scoop_stdin` 读取前 `restore_terminal`、读取期间可被 ^C 中止并在结束
+  后显示 "Interrupted"，从管道读入后 `reconnect_and_store_state` 把 stdin
+  接回键盘（Unix `/dev/tty`，Windows `CONIN$`）；新增 `files.rs` 的
+  `read_stdin_bytes` 单元测试与 Unix 信号测试。

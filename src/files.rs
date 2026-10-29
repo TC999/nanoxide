@@ -68,19 +68,166 @@ pub fn open_another_buffer(filename: &str) -> OpenBufferResult {
     result
 }
 
+/// 对应 C 版 nano.c 的 `die()`：向 stderr 报告、紧急保存所有已修改缓冲区、
+/// 删除锁文件、恢复终端后以状态码 1 退出。
+pub fn die(message: &str) -> ! {
+    eprintln!("{}", message);
+    emergency_save_all();
+    delete_all_lockfiles();
+    crate::winio::terminal_restore();
+    std::process::exit(1);
+}
+
+/// 从 reader 读取直到 EOF 或 Ctrl+C（对应 C 版 `read_file` 的 fgets 循环）：
+/// 返回 (已读数据, 是否被 ^C 中断)。
+///
+/// 非 ^C 引起的 `EINTR` 继续读取；其他 I/O 错误原样返回。`interrupted`
+/// 在每次 `EINTR` 和读到 EOF 时调用（会消费 Ctrl+C 标志）。
+fn read_stdin_bytes<R: std::io::Read>(
+    reader: &mut R,
+    interrupted: &dyn Fn() -> bool,
+) -> std::io::Result<(Vec<u8>, bool)> {
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => return Ok((bytes, interrupted())),
+            Ok(n) => bytes.extend_from_slice(&buf[..n]),
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {
+                if interrupted() {
+                    return Ok((bytes, true));
+                }
+                /* 不是 ^C 引起的 EINTR：继续读取。 */
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
+/// 把标准输入重新接到控制终端（对应 C 版 nano.c 的
+/// `reconnect_and_store_state`）。
+///
+/// 从管道/文件读入后，curses 需要键盘才能继续交互；C 版打开 `/dev/tty`
+/// 并 `dup2` 到 `STDIN_FILENO`。Rust 版由 crossterm 管理 raw mode，
+/// 因此省略 C 版保存 termios 的部分。返回是否成功，由调用方提示。
+#[cfg(unix)]
+pub fn reconnect_and_store_state() -> bool {
+    unsafe {
+        let tty = libc::open(
+            b"/dev/tty\0".as_ptr() as *const libc::c_char,
+            libc::O_RDONLY,
+        );
+        if tty < 0 {
+            return false;
+        }
+        let ok = libc::dup2(tty, libc::STDIN_FILENO) >= 0;
+        libc::close(tty);
+        ok
+    }
+}
+
+/// Windows：没有 `/dev/tty`；用 `CONIN$` 打开控制台输入并设为 stdin。
+///
+/// 只能在本进程附着控制台时成功。⚠️ 未在 Windows 实机验证“管道读入后
+/// 回到键盘”的完整交互（当前开发环境无法模拟真实控制台输入）。
+#[cfg(not(unix))]
+pub fn reconnect_and_store_state() -> bool {
+    use std::ffi::c_void;
+
+    type Handle = *mut c_void;
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
+    const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+    const OPEN_EXISTING: u32 = 3;
+    /* STD_INPUT_HANDLE = (DWORD)-10 */
+    const STD_INPUT_HANDLE: u32 = -10i32 as u32;
+    const INVALID_HANDLE_VALUE: isize = -1;
+
+    extern "system" {
+        fn CreateFileW(
+            file_name: *const u16,
+            desired_access: u32,
+            share_mode: u32,
+            security_attributes: *mut c_void,
+            creation_disposition: u32,
+            flags_and_attributes: u32,
+            template_file: Handle,
+        ) -> Handle;
+        fn SetStdHandle(std_handle: u32, handle: Handle) -> i32;
+        fn CloseHandle(object: Handle) -> i32;
+    }
+
+    let name: Vec<u16> = "CONIN$\0".encode_utf16().collect();
+    unsafe {
+        let handle = CreateFileW(
+            name.as_ptr(),
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            std::ptr::null_mut(),
+            OPEN_EXISTING,
+            0,
+            std::ptr::null_mut(),
+        );
+        if handle.is_null() || handle as isize == INVALID_HANDLE_VALUE {
+            return false;
+        }
+        if SetStdHandle(STD_INPUT_HANDLE, handle) == 0 {
+            CloseHandle(handle);
+            return false;
+        }
+        /* 句柄已交给 stdin 使用，不能在这里关闭。 */
+        true
+    }
+}
+
 /// 从标准输入读取数据到新缓冲区（对应 `scoop_stdin`，命令行文件名为
 /// "-" 时由 main 调用）。整份 stdin 作为缓冲区内容；内容非空且非只读
 /// 模式时置修改标记（对应 C 版 !VIEW_MODE && totsize > 0 的 set_modified）。
 /// 读取失败返回 FALSE（状态栏已提示）。
 pub fn scoop_stdin() -> bool {
-    let mut bytes: Vec<u8> = Vec::new();
-    if std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut bytes).is_err() {
-        winio::statusline(
-            MessageType::Alert,
-            &crate::t!("files-failed_to_open_stdin"),
-        );
-        return false;
+    use std::io::IsTerminal;
+
+    /* 读取前恢复终端（对应 C 版 restore_terminal），让键盘输入回显。 */
+    winio::terminal_restore();
+
+    /* stdin 是终端时给出提示（对应 C 版 isatty(STDIN_FILENO) 分支）。 */
+    let from_keyboard = std::io::stdin().is_terminal();
+    if from_keyboard {
+        eprintln!("{}", crate::t!("files-reading_from_keyboard"));
     }
+
+    /* 读取期间 ^C 只中止读取，不退出进程（对应 C 版
+     * install_handler_for_Ctrl_C / restore_handler_for_Ctrl_C）。 */
+    crate::signals::install_handler_for_Ctrl_C();
+    let read_result = {
+        let mut stdin = std::io::stdin().lock();
+        read_stdin_bytes(&mut stdin, &|| crate::signals::take_ctrl_c_pressed())
+    };
+    crate::signals::restore_handler_for_Ctrl_C();
+
+    /* 从管道读入后把 stdin 重新接到键盘，再回到 curses 屏幕
+     * （对应 C 版 read_file 末尾的 reconnect_and_store_state +
+     * terminal_init + doupdate）。 */
+    let reconnected = from_keyboard || reconnect_and_store_state();
+    winio::initscr();
+
+    if !reconnected {
+        /* C 版这里直接 die；Rust 同样保存后退出，避免 stdin 仍是 EOF
+         * 的管道时主循环空转。 */
+        die(&crate::t!("files-could_not_reconnect_stdin"));
+    }
+
+    let (bytes, interrupted) = match read_result {
+        Ok(result) => result,
+        Err(err) => {
+            winio::statusline(
+                MessageType::Alert,
+                &crate::t!("files-error_reading_stdin", err = err.to_string()),
+            );
+            return false;
+        }
+    };
 
     /* 与 read_file 一致：按 -N/-u 处理 stdin 的行尾并检测 DOS 格式。 */
     let (stdin_lines, dos_format, _num_lines) = split_file_lines(&bytes);
@@ -145,6 +292,13 @@ pub fn scoop_stdin() -> bool {
         install_buffer(g, new_file, true);
     });
     crate::color::find_and_prime_applicable_syntax();
+
+    if interrupted {
+        winio::statusline(
+            MessageType::Alert,
+            &crate::t!("files-interrupted"),
+        );
+    }
 
     if !ISSET(VIEW_MODE) && total_size > 0 {
         set_modified();
@@ -3186,5 +3340,87 @@ pub fn do_savefile() {
     if result == 2 {
         /* C 版：write_it_out 返回 2 表示关闭并退出；此处关闭当前缓冲区。 */
         close_buffer();
+    }
+}
+
+#[cfg(test)]
+mod stdin_tests {
+    use super::read_stdin_bytes;
+    use std::io::{self, Cursor, Read};
+
+    /// 普通输入读到 EOF。
+    #[test]
+    fn reads_until_eof() {
+        let mut input = Cursor::new(b"hello\nworld".to_vec());
+        let (bytes, interrupted) = read_stdin_bytes(&mut input, &|| false).unwrap();
+        assert_eq!(bytes, b"hello\nworld");
+        assert!(!interrupted);
+    }
+
+    /// ^C 引起的 EINTR 立即中止，并保留已读数据。
+    #[test]
+    fn ctrl_c_stops_reading() {
+        struct EintrReader {
+            first: bool,
+        }
+        impl Read for EintrReader {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                if self.first {
+                    self.first = false;
+                    buf[..3].copy_from_slice(b"abc");
+                    Ok(3)
+                } else {
+                    Err(io::Error::new(io::ErrorKind::Interrupted, "signal"))
+                }
+            }
+        }
+
+        let mut input = EintrReader { first: true };
+        let (bytes, interrupted) = read_stdin_bytes(&mut input, &|| true).unwrap();
+        assert_eq!(bytes, b"abc");
+        assert!(interrupted);
+    }
+
+    /// 非 ^C 的 EINTR 应继续读取，而不是误判为中止。
+    #[test]
+    fn other_eintr_continues() {
+        struct EintrThenData {
+            state: u8,
+        }
+        impl Read for EintrThenData {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                match self.state {
+                    0 => {
+                        self.state = 1;
+                        Err(io::Error::new(io::ErrorKind::Interrupted, "eintr"))
+                    }
+                    1 => {
+                        self.state = 2;
+                        buf[..3].copy_from_slice(b"xyz");
+                        Ok(3)
+                    }
+                    _ => Ok(0),
+                }
+            }
+        }
+
+        let mut input = EintrThenData { state: 0 };
+        let (bytes, interrupted) = read_stdin_bytes(&mut input, &|| false).unwrap();
+        assert_eq!(bytes, b"xyz");
+        assert!(!interrupted);
+    }
+
+    /// 其他 I/O 错误原样返回。
+    #[test]
+    fn read_error_is_returned() {
+        struct Failing;
+        impl Read for Failing {
+            fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::other("boom"))
+            }
+        }
+
+        let mut input = Failing;
+        assert!(read_stdin_bytes(&mut input, &|| false).is_err());
     }
 }

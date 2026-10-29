@@ -20,6 +20,10 @@ static TERMINATE_REQUESTED: AtomicBool = AtomicBool::new(false);
 /// 收到 SIGSEGV 或 SIGABRT：记录崩溃信号码（0 = 无崩溃）。
 static CRASH_CODE: AtomicI32 = AtomicI32::new(0);
 
+/// 收到 SIGINT（Ctrl+C）：长读取期间只置位"被中断"，不请求退出
+/// （对应 C 版 `control_C_was_pressed` 与 `make_a_note`）。
+static CTRL_C_PRESSED: AtomicBool = AtomicBool::new(false);
+
 /// 收到 SIGWINCH：窗口尺寸已变化，需要重新查询终端尺寸并重绘。
 static WINDOW_RESIZED: AtomicBool = AtomicBool::new(false);
 
@@ -37,6 +41,11 @@ pub fn terminate_requested() -> bool {
 /// 消费崩溃信号码：返回收到的 SIGSEGV/SIGABRT 码；无崩溃时为 0。
 pub fn take_crash_code() -> i32 {
     CRASH_CODE.swap(0, Ordering::SeqCst)
+}
+
+/// 消费 Ctrl+C 中断标志（对应 C 版读取循环后的 `control_C_was_pressed`）。
+pub fn take_ctrl_c_pressed() -> bool {
+    CTRL_C_PRESSED.swap(false, Ordering::SeqCst)
 }
 
 /// 消费"窗口已变化"标志。
@@ -72,6 +81,13 @@ extern "C" fn handle_sigstop(_signal: libc::c_int) {
 #[cfg(unix)]
 extern "C" fn handle_sigcont(_signal: libc::c_int) {
     RESUMED.store(true, Ordering::SeqCst);
+}
+
+/// SIGINT 处理器（对应 C 版 `make_a_note`）：只记录 Ctrl+C 被按下，
+/// 让阻塞中的读取返回 EINTR，由读取循环决定是否中止。
+#[cfg(unix)]
+extern "C" fn make_a_note(_signal: libc::c_int) {
+    CTRL_C_PRESSED.store(true, Ordering::SeqCst);
 }
 
 /// SIGSEGV/SIGABRT 处理器（对应 C 版 `handle_crash`）：
@@ -157,14 +173,12 @@ pub fn regenerate_screen() {
 }
 
 /// 安装 Ctrl+C 处理（对应 `install_handler_for_Ctrl_C`）：
-/// 读取文件等长操作期间，把 ^C 标记为"应中止"。
+/// 读取文件等长操作期间，把 ^C 标记为"应中止"，但不退出进程。
 #[cfg(unix)]
 pub fn install_handler_for_Ctrl_C() {
+    CTRL_C_PRESSED.store(false, Ordering::SeqCst);
     unsafe {
-        libc::signal(
-            libc::SIGINT,
-            handle_terminate as libc::sighandler_t,
-        );
+        libc::signal(libc::SIGINT, make_a_note as libc::sighandler_t);
     }
 }
 
@@ -194,5 +208,18 @@ mod tests {
         assert!(!take_window_resized());
         assert!(!take_suspend_requested());
         assert!(!take_resumed());
+    }
+
+    /// Ctrl+C 处理器只置"被中断"标志，不请求退出（对应 C 的 make_a_note）。
+    #[cfg(unix)]
+    #[test]
+    fn ctrl_c_sets_interrupt_flag_without_terminating() {
+        install_handler_for_Ctrl_C();
+        unsafe {
+            libc::raise(libc::SIGINT);
+        }
+        assert!(take_ctrl_c_pressed(), "SIGINT 应置位 Ctrl+C 标志");
+        assert!(!terminate_requested(), "Ctrl+C 不应触发终止请求");
+        restore_handler_for_Ctrl_C();
     }
 }
