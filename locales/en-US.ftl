@@ -21,6 +21,13 @@ winio-function_not_implemented = Function not implemented: {func}
 winio-nameless = (nameless)
 global-byte_order_mark = Byte Order Mark
 global-suspend_hint = To suspend, type ^T^Z
+# 未绑定/不可绑定按键的提示（对应 nano.c unbound_key 与 po 的同名 msgid）
+global-unknown_sequence = Unknown sequence
+global-unbound_key = Unbound key
+global-unbound_key_F = Unbound key: F{number}
+global-unbound_key_name = Unbound key: {name}{letter}
+global-unbindable_M = Unbindable key: M-^{letter}
+global-unbindable_ctrl_bracket = Unbindable key: ^[
 
 # ---------- browser（文件浏览器） ----------
 browser-search = Search

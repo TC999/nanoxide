@@ -500,8 +500,13 @@ fn ctrl_char_code(c: char) -> i32 {
 
 /// 将 crossterm KeyEvent 转换为 nano 键码。
 pub fn translate_keycode(key: KeyEvent) -> i32 {
-    /* 对应 C 版 parse_kbinput 开头：每次解析前清 Shift 标志。 */
-    with_global_mut(|g| g.shift_held = false);
+    /* 对应 C 版 parse_kbinput 开头：每次解析前清 Shift 与 Meta 标志
+     * （`meta_key = FALSE; shift_held = FALSE;`）。meta_key 必须每次重置，
+     * 否则上一个 Alt 组合的标志会残留到后续普通按键。 */
+    with_global_mut(|g| {
+        g.shift_held = false;
+        g.meta_key = false;
+    });
 
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -519,17 +524,19 @@ pub fn translate_keycode(key: KeyEvent) -> i32 {
             if key.modifiers == KeyModifiers::CONTROL {
                 // Ctrl + 字符：按平台各自的编码规则转换为 nano 键码。
                 ctrl_char_code(c)
-            } else if key.modifiers.contains(KeyModifiers::ALT) {
-                // Alt + 字符（含 Alt+Shift 组合）：nano 的 Alt 字母组合按小写
-                // 字母识别，其余字符保持原样；键码统一为 0x200 + 字符。
-                let c = if key.modifiers.contains(KeyModifiers::SHIFT) && c.is_ascii_alphabetic() {
-                    c.to_ascii_lowercase()
+            } else if alt {
+                /* Alt + 字符：置 meta_key（对应 C 的 parse_kbinput 设
+                 * meta_key = TRUE），键码用与绑定表、rc 的 bind 共用的约定
+                 * （见 global::alt_keycode_for）。
+                 * 只对 ASCII 加 0x200 前缀：`0x200 | 非ASCII码点` 会污染
+                 * 码点本身。C 对「ESC + UTF-8 首字节」是吞掉后续续字节并
+                 * 返回 FOREIGN_SEQUENCE（winio.c:1054），即 Alt 搭配多字节
+                 * 字符不构成可用组合，这里同样丢弃。 */
+                with_global_mut(|g| g.meta_key = true);
+                if (c as u32) < 0x80 {
+                    crate::global::runtime_alt_keycode(c)
                 } else {
-                    c
-                };
-                match c {
-                    'h' => KEY_HOME,
-                    _ => c as i32 | 0x200,
+                    FOREIGN_SEQUENCE
                 }
             } else {
                 c as i32
@@ -537,9 +544,15 @@ pub fn translate_keycode(key: KeyEvent) -> i32 {
         }
         KeyCode::Enter => 13, /* 主键盘 Enter 对应 '\r'（与 C 的 wgetch 一致） */
         KeyCode::Backspace => {
-            /* --rebinddelete：VT100 兼容下 Backspace 与 Delete 互换
+            /* Alt + Backspace：C 版 parse_kbinput 对「ESC 后跟
+             * KEY_BACKSPACE / '\b' / DEL_CODE」统一返回
+             * CONTROL_SHIFT_DELETE（winio.c:1049），即 C 里 M-Bsp 就是
+             * Ctrl+Shift+Del（向前删一个词，见 global.c:1352 的绑定）。
+             * 其余情形按 --rebinddelete 决定 Bsp/Del 互换
              * （对应 C 版 winio.c:1334 的 KEY_BACKSPACE 分支）。 */
-            if ISSET(REBIND_DELETE) {
+            if alt {
+                CONTROL_SHIFT_DELETE
+            } else if ISSET(REBIND_DELETE) {
                 KEY_DC
             } else {
                 KEY_BACKSPACE
@@ -549,10 +562,29 @@ pub fn translate_keycode(key: KeyEvent) -> i32 {
         KeyCode::BackTab => SHIFT_TAB,
         KeyCode::Esc => ESC_CODE as i32,
         KeyCode::Delete => {
-            if ISSET(REBIND_DELETE) {
+            /* Alt/Ctrl/Shift + Delete 对应 C 的 `Esc [ 3 ; x ~`
+             * （winio.c parse_escape_sequence：2=Shift、3=Alt、5=Ctrl、
+             * 6=Ctrl+Shift）。--rebinddelete 只换 Bsp/Del 本身。 */
+            if alt && shift && ctrl {
+                CONTROL_SHIFT_DELETE
+            } else if alt {
+                ALT_DELETE
+            } else if ctrl {
+                CONTROL_DELETE
+            } else if shift {
+                SHIFT_DELETE
+            } else if ISSET(REBIND_DELETE) {
                 KEY_BACKSPACE
             } else {
                 KEY_DC
+            }
+        }
+        KeyCode::Insert => {
+            /* 对应 C 的 `Esc [ 2 ; x ~`（3 = Alt-Insert）。 */
+            if alt {
+                ALT_INSERT
+            } else {
+                KEY_IC
             }
         }
         KeyCode::Home => {
@@ -582,12 +614,28 @@ pub fn translate_keycode(key: KeyEvent) -> i32 {
             }
         }
         KeyCode::PageUp => {
-            mark_shift(shift);
-            KEY_PPAGE
+            /* 对应 C 的 `Esc [ 5 ; x ~`：2 = Shift+Alt（shift_held +
+             * KEY_PPAGE，见 winio.c 的 shiftaltup 分支）、3 = Alt。 */
+            if alt && shift {
+                mark_shift(true);
+                KEY_PPAGE
+            } else if alt {
+                ALT_PAGEUP
+            } else {
+                mark_shift(shift);
+                KEY_PPAGE
+            }
         }
         KeyCode::PageDown => {
-            mark_shift(shift);
-            KEY_NPAGE
+            if alt && shift {
+                mark_shift(true);
+                KEY_NPAGE
+            } else if alt {
+                ALT_PAGEDOWN
+            } else {
+                mark_shift(shift);
+                KEY_NPAGE
+            }
         }
         KeyCode::Left => {
             if ctrl {
@@ -654,7 +702,6 @@ pub fn translate_keycode(key: KeyEvent) -> i32 {
             }
         }
         KeyCode::F(n) => KEY_F0 + n as i32,
-        KeyCode::Insert => KEY_IC,
         KeyCode::Null => 0,
         _ => ERR,
     }
@@ -3510,11 +3557,19 @@ pub fn handle_input_key(key: i32) -> bool {
     }
 
     if !handled {
-        // 处理普通字符输入。键码可以是任意 Unicode 码点（中文等 > 255），
-        // 但需排除：控制字符、Alt 组合键（0x200..=0x2FF，未绑定功能时忽略）。
+        /* 未匹配任何绑定：Alt 组合按 C 的 process_a_keystroke 走
+         * `unbound_key(input)`（meta_key 为真时给出 "Unbound key: M-X"
+         * 而不是静默吞掉）；普通可插入字符仍插入。
+         * 用 meta_key 标志而非键码区间判断，避免与落在 0x200..0x2FF 的
+         * 真实 Unicode 码点（如 U+2013 EN DASH）冲突。 */
+        if with_global(|g| g.meta_key) {
+            crate::global::unbound_key(key);
+            return true;
+        }
+        // 处理普通字符输入。键码可以是任意 Unicode 码点（中文等 > 255）。
         if key > 0 && key != ESC_CODE as i32 {
             if let Some(c) = char::from_u32(key as u32) {
-                if !c.is_control() && !(0x200..=0x2FF).contains(&(key as u32)) {
+                if !c.is_control() {
                     if !ISSET(VIEW_MODE) {
                         text::insert_char(c);
                         edit_refresh();

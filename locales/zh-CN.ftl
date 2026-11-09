@@ -26,6 +26,13 @@ winio-function_not_implemented = 功能未实现：{func}
 winio-nameless = (未命名)
 global-byte_order_mark = 字节顺序标记
 global-suspend_hint = 如需挂起，输入 ^T^Z
+# 未绑定/不可绑定按键的提示（对应 nano.c unbound_key 与 po 的同名 msgid）
+global-unknown_sequence = 未知序列
+global-unbound_key = 按键未绑定
+global-unbound_key_F = 按键未绑定：F{number}
+global-unbound_key_name = 按键未绑定：{name}{letter}
+global-unbindable_M = 不可绑定的按键：M-^{letter}
+global-unbindable_ctrl_bracket = 不可绑定的按键：^[
 
 # ---------- browser（文件浏览器） ----------
 browser-search = 搜索

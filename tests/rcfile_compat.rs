@@ -36,8 +36,21 @@ fn verify_bind_unbind() {
     assert_eq!(bound.len(), 3, "应有 3 个绑定，实际 {}", bound.len());
     assert!(bound.iter().any(|b| b.keycode == 11 && b.func == FunctionId::DoSearchForward),
         "^K 应绑到 whereis");
-    assert!(bound.iter().any(|b| b.keycode == 116 && b.func == FunctionId::DoComment),
-        "M-T 应绑到 comment（keycode 116）");
+    /* rc 里 `bind M-T` 解析出的键码必须与输入层实际产出的键码一致，
+     * 否则该绑定永远匹配不到真实按键（此前解析为裸 't' = 116，
+     * 而运行时产出 0x200 + 't'，两者永不相交）。 */
+    let expected_mt = nanoxide::winio::translate_keycode(
+        crossterm::event::KeyEvent::new_with_kind(
+            crossterm::event::KeyCode::Char('t'),
+            crossterm::event::KeyModifiers::ALT,
+            crossterm::event::KeyEventKind::Press,
+        ),
+    );
+    assert!(
+        bound.iter().any(|b| b.keycode == expected_mt && b.func == FunctionId::DoComment),
+        "M-T 应绑到 comment，且键码与运行时一致（期望 0x{:X}）",
+        expected_mt
+    );
     assert!(bound.iter().any(|b| b.func == FunctionId::Implant && b.expansion.as_deref() == Some("hello world")),
         "^Q 应为植入字符串");
 

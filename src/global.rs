@@ -186,11 +186,21 @@ pub fn add_to_funcs(func: FunctionId, menus: i32, tag: String, phrase: &'static 
 }
 
 /// 添加快捷键（尾插法，与 C 版一致）。
+///
+/// 对应 C 的 `sc->keycode = (keycode ? keycode : keycode_from_string(scstring))`：
+/// 未显式给键码（传 0，C 的内置表大量如此书写）时必须按键名解析，否则该
+/// 条目的键码恒为 0，绑定只存在于表里、任何按键都匹配不到（`M-U`/`M-E`/
+/// `M-A`/`M-6` 曾因此完全失效）。
 pub fn add_to_sclist(menus: i32, keystr: &str, keycode: i32, func: FunctionId, toggle: i32) {
+    let resolved = if keycode != 0 {
+        keycode
+    } else {
+        keycode_from_string(keystr)
+    };
     with_global_mut(|g| {
         let new_key = Rc::new(RefCell::new(KeyStruct {
             keystr: keystr.to_string(),
-            keycode,
+            keycode: resolved,
             menus,
             func,
             toggle,
@@ -422,6 +432,49 @@ pub fn shortcut_init() {
     add_to_sclist(MMAIN, "M-PgDn", ALT_PAGEDOWN, FunctionId::ToNextAnchor, 0);
     add_to_sclist(MMAIN, "M-\"", 0x222, FunctionId::PutOrLiftAnchor, 0);
     add_to_sclist(MMAIN, "M-'", 0x227, FunctionId::ToNextAnchor, 0);
+    /* ---- 以下补齐 C 内置表里有、此前 Rust 缺失的 Alt 绑定 ----
+     * 键码统一留 0，由 add_to_sclist 按键名解析（见 alt_keycode_for）。 */
+
+    /* 段落与块移动（对应 global.c:1415-1424）。 */
+    add_to_sclist(MMAIN, "M-9", 0, FunctionId::DoParaBegin, 0);
+    add_to_sclist(MMAIN, "M-(", 0, FunctionId::DoParaBegin, 0);
+    add_to_sclist(MMAIN, "M-0", 0, FunctionId::DoParaEnd, 0);
+    add_to_sclist(MMAIN, "M-)", 0, FunctionId::DoParaEnd, 0);
+    add_to_sclist(MMAIN, "M-7", 0, FunctionId::DoPrevBlock, 0);
+    add_to_sclist(MMAIN, "M-8", 0, FunctionId::DoNextBlock, 0);
+    /* 上一词/下一词（对应 global.c:1398 的 M-Space 与 1366-1367 的 M-Left/Right）。 */
+    add_to_sclist(MMOST, "M-Space", 0, FunctionId::DoPrevWord, 0);
+    /* 跳转行/首末行（对应 global.c:1366-1367 的 MMAIN 部分；MHELP 侧
+     * 已由下面 C 版 global.c:1576-1577 的注册覆盖，不重复登记）。 */
+    add_to_sclist(MMAIN, "M-G", 0, FunctionId::DoGoToLine, 0);
+    add_to_sclist(MMAIN, "M-\\", 0, FunctionId::DoFirstLine, 0);
+    add_to_sclist(MMAIN, "M-/", 0, FunctionId::DoLastLine, 0);
+    /* 复制与剪切到文件尾（对应 global.c:1446、1448）。 */
+    add_to_sclist(MMOST, "M-6", 0, FunctionId::DoCopy, 0);
+    add_to_sclist(MMOST, "M-^", 0, FunctionId::DoCopy, 0);
+    add_to_sclist(MMAIN, "M-T", 0, FunctionId::DoCutToEof, 0);
+    /* 注释切换与列循环（对应 global.c:1463、1426）。 */
+    add_to_sclist(MMAIN, "M-3", 0, FunctionId::DoComment, 0);
+    add_to_sclist(MMAIN, "M-%", 0, FunctionId::DoCycle, 0);
+    /* 宏录制与回放（对应 global.c:1348-1349）。 */
+    add_to_sclist(MMAIN, "M-:", 0, FunctionId::DoRecordMacro, 0);
+    add_to_sclist(MMAIN, "M-;", 0, FunctionId::DoRunMacro, 0);
+
+    /* "Appearance" 开关组（对应 global.c:1468-1483）。 */
+    add_to_sclist(MMAIN, "M-Z", 0, FunctionId::DoToggle, ZERO as i32);
+    add_to_sclist(MMAIN, "M-C", 0, FunctionId::DoToggle, CONSTANT_SHOW as i32);
+    add_to_sclist(MMAIN, "M-S", 0, FunctionId::DoToggle, SOFTWRAP as i32);
+    add_to_sclist(MMAIN, "M-$", 0, FunctionId::DoToggle, SOFTWRAP as i32);
+    add_to_sclist(MMAIN, "M-N", 0, FunctionId::DoToggle, LINE_NUMBERS as i32);
+    add_to_sclist(MMAIN, "M-#", 0, FunctionId::DoToggle, LINE_NUMBERS as i32);
+    add_to_sclist(MMAIN, "M-P", 0, FunctionId::DoToggle, WHITESPACE_DISPLAY as i32);
+    add_to_sclist(MMAIN, "M-Y", 0, FunctionId::DoToggle, NO_SYNTAX as i32);
+    /* "Behavior" 开关组（对应 global.c:1486-1494）。 */
+    add_to_sclist(MMAIN, "M-H", 0, FunctionId::DoToggle, SMART_HOME as i32);
+    add_to_sclist(MMAIN, "M-I", 0, FunctionId::DoToggle, AUTOINDENT as i32);
+    add_to_sclist(MMAIN, "M-K", 0, FunctionId::DoToggle, CUT_FROM_CURSOR as i32);
+    add_to_sclist(MMAIN, "M-L", 0, FunctionId::DoToggle, BREAK_LONG_LINES as i32);
+    add_to_sclist(MMAIN, "M-O", 0, FunctionId::DoToggle, TABS_TO_SPACES as i32);
     /* 功能键（对应 global.c:1574-1595）。MHELP 的 F1 先注册，
      * 保证帮助查看器里 F1 是“退出”而不是“帮助”。 */
     add_to_sclist(MHELP, "F1", KEY_F0 + 1, FunctionId::DoExit, 0);
@@ -595,16 +648,85 @@ pub fn interpret(kbinput: i32) -> Option<FunctionId> {
     find_shortcut(kbinput, currmenu).map(|s| s.borrow().func)
 }
 
-/// 未绑定按键的提示（对应 `unbound_key`）。
-pub fn unbound_key(kbinput: i32) {
-    if kbinput >= 0 {
-        use crate::winio;
-        winio::statusline_centered(
+/// 未绑定按键的提示（对应 nano.c 的 `unbound_key`）。
+///
+/// C 版在按键既不匹配任何绑定、又不是可插入的普通字符时调用它，按
+/// 键码类型给出 `Unbound key: M-X` / `Unbound key: ^X` /
+/// `Unbound key: F5` / `Unknown sequence` 等提示。本项目把 Alt 编成
+/// `0x200 + 字符`，这里先还原出 C 的 meta_key 语义再走相同分支。
+/// 未绑定的按键给出反馈（而非静默吞掉）是 nano 的行为，也是"Alt 键
+/// 是否被识别"最直观的判据。
+pub fn unbound_key(code: i32) {
+    use crate::winio;
+    if code == crate::definitions::FOREIGN_SEQUENCE {
+        /* TRANSLATORS: This refers to a sequence of escape codes
+         * (from the keyboard) that nano does not recognize. */
+        winio::statusline(
             crate::definitions::MessageType::Ahem,
-            &format!("[ {} ]", crate::t!("key-unbound")),
+            &crate::t!("global-unknown_sequence"),
         );
-        winio::beep();
+        return;
     }
+    if code < 0 {
+        return;
+    }
+    /* 未绑定的功能键 F1-F24。 */
+    if code > KEY_F0 && code < KEY_F0 + 25 {
+        /* TRANSLATORS: This refers to an unbound function key. */
+        winio::statusline(
+            crate::definitions::MessageType::Ahem,
+            &crate::t!("global-unbound_key_F", number = (code - KEY_F0).to_string()),
+        );
+        winio::set_blankdelay_to_one();
+        return;
+    }
+    /* Alt 组合。C 的判断顺序是 `code > 0x7F` 在前、`meta_key` 在后，
+     * 因为 C 的 Alt 组合是「meta_key + 裸 ASCII 码」，裸码永远 <= 0x7F，
+     * 两个分支天然不重叠。本项目把 Alt 编成 `0x200 + 字符`，这些值本身
+     * 就 > 0x7F，若照搬 C 的顺序会被前面的 `code > 0x7F` 吞成笼统的
+     * "Unbound key"、丢掉 `M-X` 的具体名字，故这里把 Alt 分支提前。
+     * ALT_* 专用键码（0x421 等，表达 Alt+方向键/Home/End）不属于这一支，
+     * 仍落到下面的 `code > 0x7F`，与 C 的输出一致。 */
+    if with_global(|g| g.meta_key) && (0x200..=0x2FF).contains(&code) {
+        let raw = code - 0x200;
+        let msg = if raw < 0x20 {
+            /* "不可绑定的按键：M-^<字母>"：raw 反推控制字母。 */
+            let letter = ((raw + 0x40) as u8) as char;
+            crate::t!("global-unbindable_M", letter = letter.to_string())
+        } else if with_global(|g| g.shifted_metas) && (0x41..=0x5A).contains(&raw) {
+            let letter = (raw as u8) as char;
+            crate::t!("global-unbound_key_name", name = "Sh-M-", letter = letter.to_string())
+        } else {
+            let letter = (raw as u8).to_ascii_uppercase() as char;
+            crate::t!("global-unbound_key_name", name = "M-", letter = letter.to_string())
+        };
+        winio::statusline(crate::definitions::MessageType::Ahem, &msg);
+        winio::set_blankdelay_to_one();
+        return;
+    }
+    if code > 0x7F {
+        winio::statusline(
+            crate::definitions::MessageType::Ahem,
+            &crate::t!("global-unbound_key"),
+        );
+        winio::set_blankdelay_to_one();
+        return;
+    }
+    let msg = if code == ESC_CODE as i32 {
+        /* C 的 `unbound_key` 对单独的 ESC 给出 `Unbindable key: ^[`。
+         * 主菜单路径目前不会走到这里（execute_function 的兼容分支把
+         * 单独 ESC 直接 return true 吞掉，属既有行为，见 DIFFERENCES.md），
+         * 但文件浏览器与帮助页的按键循环直接调用本函数，那里可达。 */
+        crate::t!("global-unbindable_ctrl_bracket")
+    } else if code < 0x20 {
+        let letter = ((code + 0x40) as u8) as char;
+        crate::t!("global-unbound_key_name", name = "^", letter = letter.to_string())
+    } else {
+        let letter = (code as u8) as char;
+        crate::t!("global-unbound_key_name", name = "", letter = letter.to_string())
+    };
+    winio::statusline(crate::definitions::MessageType::Ahem, &msg);
+    winio::set_blankdelay_to_one();
 }
 
 /// 返回 flag 的简短名称（对应 `epithet_of_flag`）。
@@ -627,7 +749,6 @@ pub fn first_sc_for(menu: i32, func: FunctionId) -> Option<KeyRef> {
     })
 }
 
-const ALT_BACKSPACE: i32 = 0x40A;
 /// Alt+`<` / Alt+`>`：crossterm 把 Alt+字符统一编码为 0x200 + 字符。
 const ALT_LESS: i32 = 0x200 + b'<' as i32;
 const ALT_GREATER: i32 = 0x200 + b'>' as i32;
@@ -670,9 +791,13 @@ pub fn shortcut_init_rest() {
     add_to_sclist(mmi, "End", KEY_END, FunctionId::DoEnd, 0);
     add_to_sclist(mmi, "M-Left", ALT_LEFT, FunctionId::DoPrevWord, 0);
     add_to_sclist(mmi, "M-Right", ALT_RIGHT, FunctionId::DoNextWord, 0);
-    add_to_sclist(mmi, "M-Backspace", ALT_BACKSPACE, FunctionId::DoBackspace, 0);
+    /* Alt+Backspace：C 写作 "M-Bsp"，键码是 CONTROL_SHIFT_DELETE
+     * （global.c:1352 → chop_previous_word），不是某个 ALT_* 常量
+     * （definitions.h 里没有 ALT_BACKSPACE）；此前的 0x40A 永远不会被
+     * 输入层产出，因此是死绑定。 */
+    add_to_sclist(MMAIN, "M-Bsp", CONTROL_SHIFT_DELETE, FunctionId::ChopPrevWord, 0);
     add_to_sclist(mmi, "M-Del", ALT_DELETE, FunctionId::DoCut, 0);
-    add_to_sclist(mmi, "M-V", 0x256, FunctionId::DoVerbatimInput, 0);
+    add_to_sclist(mmi, "M-V", alt_keycode_for('v'), FunctionId::DoVerbatimInput, 0);
     add_to_sclist(mmi, "^K", 11, FunctionId::DoCut, 0);
     add_to_sclist(mmi, "^U", 21, FunctionId::DoPaste, 0);
     add_to_sclist(mmi, "^H", 8, FunctionId::DoBackspace, 0);
@@ -1400,6 +1525,45 @@ fn print_usage() {
 
 // ======================== rcfile 辅助（对应 global.c / rcfile.c） ========================
 
+/// Alt（nano 写作 `M-`）+ 单字符 → 键码（**绑定名解析**路径）。
+///
+/// C 版用「键码 + 全局 `meta_key` 标志」两个信息表达一个 Alt 组合；本项目的
+/// 输入层由 crossterm 事件替代，把 Alt+字符编成 `0x200 + 字符`。本函数是这
+/// 一约定的唯一出处，内置绑定表与 rc 的 `bind` 都经它，否则解析出的键码与
+/// 运行时产出的键码分属两套约定，`bind M-x` 永远匹配不到实际按键（此前
+/// `keycode_from_string` 沿用 C 的 `字符 | 0x20` 老约定，正是这个分叉让所有
+/// Alt 组合看起来"没有响应"）。
+///
+/// 这里**无条件**把字母折叠为小写，对应 C 的 `keycode_from_string`：它对
+/// `M-D` 恒做 `keycode |= 0x20`，不看 `shifted_metas`。`shifted_metas` 只作用
+/// 在运行时，见 [`runtime_alt_keycode`]。
+pub fn alt_keycode_for(c: char) -> i32 {
+    let c = if c.is_ascii_alphabetic() {
+        c.to_ascii_lowercase()
+    } else {
+        c
+    };
+    alt_keycode_raw(c)
+}
+
+/// 直接按 `0x200 + 字符` 编码，不做任何大小写折叠。
+/// `Sh-M-<字母>` 走这里（C 返回大写字母，与折叠后的 `M-<字母>` 区分开）。
+pub fn alt_keycode_raw(c: char) -> i32 {
+    c as i32 | 0x200
+}
+
+/// Alt + 单字符 → 运行时键码（**输入层**路径）。
+///
+/// 与 [`alt_keycode_for`] 的差别只在字母是否折叠取决于 `shifted_metas`，
+/// 对应 C 的 `parse_kbinput`：
+/// `if ('A' <= keycode && keycode <= 'Z' && !shifted_metas) keycode |= 0x20;`
+/// 即一旦 rc 里绑过 `Sh-M-<字母>`，Alt+Shift+字母 不再退化成同一个组合。
+pub fn runtime_alt_keycode(c: char) -> i32 {
+    let fold = !with_global(|g| g.shifted_metas) && c.is_ascii_alphabetic();
+    let c = if fold { c.to_ascii_lowercase() } else { c };
+    c as i32 | 0x200
+}
+
 /// 将键名字符串转换为键码（对应 `keycode_from_string`）。
 /// 失败返回 -1。
 pub fn keycode_from_string(keystring: &str) -> i32 {
@@ -1423,15 +1587,21 @@ pub fn keycode_from_string(keystring: &str) -> i32 {
             return -1;
         }
     } else if bytes.first() == Some(&b'M') {
-        if bytes.len() == 3 && bytes[1] == b'-' {
-            let ch = bytes[2];
-            if (b'A'..=b'Z').contains(&ch) {
-                return (ch | 0x20) as i32;
+        /* 单字符形式（M-A、M-6、M-\）：与运行时约定统一。
+         * 只接受 ASCII：C 的 `keycode_from_string` 要求 "M-x" 恰为 3 字节，
+         * 多字节字符（如 M-é）落到后面的名字表、返回 -1，由 rc 报
+         * "无效键名"；输入层对 Alt+非 ASCII 也只给 FOREIGN_SEQUENCE，
+         * 所以这里若接受多字节只会造出一条永远匹配不到的死绑定。 */
+        if let Some(rest) = keystring.strip_prefix("M-") {
+            let mut it = rest.chars();
+            if let (Some(c), None) = (it.next(), it.next()) {
+                if (c as u32) < 0x80 {
+                    return alt_keycode_for(c);
+                }
             }
-            return ch as i32;
         }
         if keystring.eq_ignore_ascii_case("M-Space") {
-            return b' ' as i32;
+            return alt_keycode_for(' ');
         } else if keystring.eq_ignore_ascii_case("M-Left") {
             return ALT_LEFT;
         } else if keystring.eq_ignore_ascii_case("M-Right") {
@@ -1454,7 +1624,9 @@ pub fn keycode_from_string(keystring: &str) -> i32 {
         let ch = keystring.as_bytes()[5];
         if ch.is_ascii_alphabetic() {
             with_global_mut(|g| g.shifted_metas = true);
-            return (ch & 0x5F) as i32;
+            /* C 返回大写字母（`keycode & 0x5F`），与折叠成小写的 M-<字母>
+             * 区分开；本项目同样不折叠，只叠加 Alt 的 0x200 前缀。 */
+            return alt_keycode_raw((ch & 0x5F) as char);
         }
         return -1;
     } else if bytes.first() == Some(&b'F') {

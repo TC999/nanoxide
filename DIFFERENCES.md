@@ -237,6 +237,82 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
     证据：`tests/overwrite_confirm.rs`（判定函数、问题文本截断、
     mtime 比较）；交互循环需真实终端，未手工验证。
 
+16. ✅ **Alt 键（软件内写作 `M-`）在 Linux 与 Windows 上一律失效已修复**。
+    现象是"按 Alt+任意组合没有任何反应"。根因不在终端层，而是本项目把
+    C 的「键码 + 全局 `meta_key` 标志」二元表达压成一个整数键码时，
+    **绑定表与输入层用了两套互不相交的约定**（因此与平台无关，两个系统
+    同时中招）。具体是下面七处叠加：
+    1. `add_to_sclist` 漏掉 C 的键名回退。C 是
+       `sc->keycode = keycode ? keycode : keycode_from_string(scstring)`
+       （global.c），而内置表沿用 C 的书写习惯大量传 `0`。Rust 直接存 `0`，
+       于是 `M-U`（撤销）、`M-E`（重做）、`M-A`（设标记）、`M-6`（复制）
+       四条成为键码恒为 0 的死绑定，任何按键都匹配不到。已补回退。
+    2. `keycode_from_string` 的 `M-` 分支仍照 C 返回老约定
+       （`'D' | 0x20` = 0x64），而输入层产出 `0x200 + 字符`（0x264）。
+       这使 **nanorc 里任何 `bind M-…` 都永远匹配不到真实按键**。
+       现在新增 `alt_keycode_raw` / `alt_keycode_for` /
+       `runtime_alt_keycode` 作为唯一出处：绑定名解析无条件把字母折成小写
+       （C 的 `keycode_from_string` 不做该判断），输入层按 `shifted_metas`
+       决定是否折叠（C 的 `parse_kbinput`），`Sh-M-<字母>` 保持大写以免与
+       `M-<字母>` 撞码。
+    3. `meta_key` 字段自始至终没有被任何代码置位（只在 `prompt.rs` 被读）。
+       现在 `translate_keycode` 在开头按 C 的 `parse_kbinput` 对称地
+       清 `meta_key`/`shift_held`，Alt 组合置位 `meta_key`。
+       副作用（正向）：提示栏 `absorb_character` 的
+       `input < 0x20 || meta_key` 判断从此生效——此前 Alt+d 的 0x264 会被
+       当成普通码点注入搜索框，实测表现为凭空出现一个 U+0264（`ɤ`）。
+    4. 未命中的 Alt 组合此前被**静默吞掉**，用户得不到任何反馈。已按
+       C 的 `unbound_key`（nano.c:1288）重写 `global::unbound_key`：
+       区分 `Unknown sequence` / `Unbound key: F%i` /
+       `Unbindable key: M-^%c` / `Unbound key: Sh-M-%c` /
+       `Unbound key: M-%c` / `Unbindable key: ^[` / `Unbound key: ^%c`，
+       文案取自 nano 的 `po/`（新增 6 个 `global-*` 键，en/zh 同步），
+       并把消息倒计时设为 1。
+    5. 补齐 C 内置表里存在、此前完全缺失的 Alt 绑定（30 条）：
+       段落/块跳转 `M-9 M-( M-0 M-) M-7 M-8`、`M-Space`（上一词）、
+       `M-G`、`M-\` / `M-/`（首末行）、`M-6` / `M-^`（复制，MMOST）、
+       `M-T`（剪到文件尾）、`M-3`（注释）、`M-%`（列循环）、
+       `M-:` / `M-;`（宏录制/回放），以及外观/行为开关组
+       `M-Z M-C M-S M-$ M-N M-# M-P M-Y M-H M-I M-K M-L M-O`。
+    6. 输入层功能键分支此前丢弃 Alt：`Insert`/`Delete`/`PageUp`/`PageDown`
+       不判断 alt，导致 `M-Ins`/`M-Del`/`M-PgUp`/`M-PgDn` 四条绑定拿不到
+       键码（`M-Home`/`M-End` 因走 `KeyCode::Home/End` 分支而幸免）。
+       现按 C 的 `parse_escape_sequence`（winio.c:647/679/707/731/757）
+       补齐 `ALT_INSERT`/`ALT_DELETE`/`ALT_PAGEUP`/`ALT_PAGEDOWN`，以及
+       Shift+Alt 的翻页变体。
+    7. 修掉两处臆造/死值：`Alt+h` 曾被特判成 `KEY_HOME`（C 无此规则，
+       导致 `M-H` 智能主页开关不可达）；`ALT_BACKSPACE`(0x40A) 是我方
+       自造常量、输入层永不产出，而 C 的 `M-Bsp` 键码其实是
+       `CONTROL_SHIFT_DELETE`（global.c:1352），且 `parse_kbinput` 对
+       「ESC + Backspace」确实返回该值（winio.c:1049），现两处对齐。
+    差异（未实现，非缺陷）：C 的 `M-&`（`show_curses_version`）在
+    `ENABLE_EXTRA && NCURSES_VERSION_PATCH` 下才编译，报告的是 ncurses
+    版本；本项目用 crossterm，无对应物，且没有可忠实转写的取值，
+    故不臆造绑定。另外 C 的 4 条 UTF-8 三角别名
+    （`M-◢◣▴▾`，键码与 `M-Left/Right/Up/Down` 完全相同）未移植。
+    **既有映射偏离（本次只让 Alt 能被识别，未改以下选择）**：
+    - 主菜单里单独按 `Esc`：C 会显示 `Unbindable key: ^[`
+      （`process_a_keystroke` 的 `input < 0x20` → `unbound_key`），
+      而本项目在 `execute_function` 的兼容分支里提前 `return true`
+      静默忽略（winio.rs 的「忽略单独的 Esc」）。重写的 `unbound_key`
+      已含该分支，但要生效需删掉那条硬编码，属行为变更，故仅登记。
+    - `M-Del`：C 绑 `zap_text`（global.c:1355），Rust 绑 `DoCut`
+      （shortcut_init 的 mmi 组）；且 `FunctionId::Zap` 目前没有
+      `execute_by_id` 分发，绑过去也只是无操作。
+    - `M-Left` / `M-Right`：C 在 MMAIN 绑 `switch_to_prev/next_buffer`
+      （global.c:1393-1394），Rust 绑上一词/下一词。注意 C 另有
+      NANO_TINY 分支把 `M-D`/`M-N` 绑到词移动，可能是本项目的取材来源。
+      改这两条会连带影响 `tests/alt_keys.rs` 的期望，需要产品决策。
+    证据：`tests/alt_keys.rs`（18 项：逐键名验证"真实按键产出的键码
+    能命中期望功能"、大小写折叠、`shifted_metas` 区分、rc 解析值与
+    运行时一致、绑定表无 0/负键码、`meta_key` 不残留、未绑定组合的
+    提示文本、端到端 Alt+a/Alt+u 真的改状态、Alt+非 ASCII 不注入）、
+    `tests/alt_in_prompt.rs`（3 项）。
+    **未在真实终端里手工验证**：本环境无可用 TTY，键码链路靠
+    `translate_keycode(真实 KeyEvent)` 驱动，等价于 crossterm 上报给
+    编辑器的字节流，但 ESC 前缀与转义序列的**实际抓包行为**依赖终端，
+    仍需用户在真实终端复核。
+
 ---
 
 ## 五、功能模块状态
@@ -453,6 +529,10 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
    `global.c:1356-1362` 绑定（见第五节搜索条目）。剩余缺口：提示栏的鼠标
    点击定位（C 版 `process_prompt_click`）未移植。
 4. i18n 只有两种语言；单复数已用双键处理。
+5. 按键链路已补齐 Alt（`M-`）：绑定表键名回退、键码约定统一、`meta_key`
+   置位、30 条缺失的 C 内置 Alt 绑定、功能键的 Alt 变体、以及未绑定
+   组合的 `Unbound key: M-X` 反馈（见第四节第 16 条）。仍未在真实终端
+   手工验证。
 
 ## 七、与上一版文档的主要更正
 
@@ -648,6 +728,20 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   新增 5 个 `files-*` 翻译键（en/zh）与 `tests/overwrite_confirm.rs`。
   差异：不比较 `st_dev`/`st_ino`（跨平台取不到），只比 `st_mtime`；
   交互循环本身需真实终端，未手工验证。
+- 本轮：Alt（`M-`）组合键在 Linux 与 Windows 上一律失效已修复（见第四节
+  第 16 条）。`add_to_sclist` 补 C 的键名回退；`alt_keycode_raw` /
+  `alt_keycode_for` / `runtime_alt_keycode` 统一绑定表、rc `bind`、输入层
+  三方的键码约定；`meta_key` 真正置位/清除；未绑定组合改走重写的
+  `unbound_key`（新增 6 个 `global-*` 键，en/zh）；补 30 条 C 内置表里
+  存在而本项目缺失的 Alt 绑定（另修正 `M-V` 的键码与 `M-Bsp` 的写法）；
+  输入层补 Alt+Insert/Delete/PageUp/
+  PageDown 与 Alt+Backspace；移除 `Alt+h → KEY_HOME` 与
+  `ALT_BACKSPACE = 0x40A` 两处臆造。
+  新增 `tests/alt_keys.rs`（18 项）与 `tests/alt_in_prompt.rs`（3 项）；
+  `tests/rcfile_compat.rs` 里"`bind M-T` 键码应为 116"的断言原样固化了
+  上述约定分叉缺陷，改为断言"rc 解析值必须等于输入层实际产出值"。
+  `M-Del`、`M-Left`/`M-Right` 的目标函数与 C 不一致属既有选择，仅登记
+  未改。真实终端下的抓包行为仍需用户复核。
 - 复查：文档统计更新为 `src/*.rs` 约 2.7 万行、`tests/` 51 个文件、
   `rcfile.rs` 约 1611 行；第五节显示部分修掉一条过时描述（`-q` 滚动条
   点击跳行其实已完成），改为记录真正的剩余缺口 `process_prompt_click`；
