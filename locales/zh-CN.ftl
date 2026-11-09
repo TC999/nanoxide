@@ -53,6 +53,12 @@ files-wrote_one_line = 已写入 {count} 行
 files-wrote_lines = 已写入 {count} 行
 files-error_writing = 写入{filename} 出错：{err}
 files-write_to_file = 写入到文件
+# 保存时的覆盖确认（对应 files.c write_it_out 的三个提示）
+files-exists_cannot_overwrite = 文件已存在——无法覆写
+files-save_under_different_name = 以不同的名称保存文件？ 
+files-exists_overwrite = 文件“{name}”已存在；要覆盖吗？ 
+files-disk_changed = 磁盘上的文件已改变
+files-modified_since_open = 在您打开文件后文件已被改变；是否继续保存？
 files-write_selection_to_file = 将选定内容写入文件
 files-cancelled = 已取消
 prompt-save_modified_buffer = 保存已修改的缓冲区？ 

@@ -16,7 +16,7 @@
 
 | 维度 | GNU nano 9.2 | nanoxide |
 |------|--------------|----------|
-| 规模 | `src/*.c` 约 2.0 万行（不含 gnulib） | `src/*.rs` 约 2.3 万行，模块基本一一对应 |
+| 规模 | `src/*.c` 约 2.0 万行（不含 gnulib） | `src/*.rs` 约 2.7 万行，模块基本一一对应 |
 | 构建 | autotools | Cargo + `build.rs`（把 `locales/*.ftl` 复制到 `target/*/locales`） |
 | 依赖 | ncurses、gettext、系统 libc | 仅 `crossterm`、`libc` |
 | 条件编译 | 约 21 个 `ENABLE_*` / `NANO_TINY` 开关 | 无编译开关，所有功能始终编入（无 tiny 构建）；仅在注释中标出对应的 C 开关 |
@@ -25,7 +25,7 @@
 | 终端 | ncurses | crossterm，`color.rs` 里有 `init_pair` / `COLOR_PAIR` / `wattron` 适配层 |
 | 平台 | 类 Unix | Linux 与 Windows；信号相关仅 Unix 生效 |
 | 二进制名 | `nano` | `nax` |
-| 测试 | 无 | `tests/` 下 44 个集成测试文件 |
+| 测试 | 无 | `tests/` 下 51 个集成测试文件 |
 
 ### 正则
 
@@ -205,6 +205,38 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
     求交；`hilite_attribute` 默认值改为 C 版的 `A_REVERSE`。
     证据：`tests/shift_selection.rs`。
 
+15. ✅ **保存时的覆盖/改名/磁盘变更确认**：`do_writeout`（对应 C 版
+    `write_it_out`）此前在 `method == OVERWRITE` 时直接落盘，会静默覆盖已有
+    文件。现按 C 补齐三段检查：
+    - `do_warning`（`needs_name_warning`）：无名缓冲区要写已存在的文件，
+      或已有名字的缓冲区改了名（两侧都能 `get_full_path` 时比较规范路径，
+      否则比较原始字符串）；
+    - `confirm_namechange`：先问 `Save file under DIFFERENT NAME?`，
+      否/取消则回到提示；
+    - 目标已存在：问 `File "<name>" exists; OVERWRITE?`（文件名按
+      `crop_to_fit` 截断到 `COLS`，`overwrite_question`）；
+    - `else if` 分支：名字未变但磁盘更新（`disk_changed_since_open`）时
+      警告 `File on disk has changed` 并问 `File was modified since you
+      opened it; continue saving?`；`-t` 下按 C 就地收尾（是→写、否→返回
+      2 放弃缓冲区、取消→返回 0）。
+    受限模式下只警告 `File exists -- cannot overwrite`（C 直接用该文案，
+    不走 `in_restricted_mode()` 的通用提示）。同时补 `write_file` 收尾的
+    `stat_with_alloc`：常规覆盖保存后刷新 `statinfo`（`annotate` 且
+    `OVERWRITE`），否则磁盘变更检查会拿打开时的旧时间误报。
+    `-t` 且有文件名时也不再询问文件名（C 的
+    `ISSET(SAVE_ON_EXIT) && exiting` 分支），直接进入上述检查。
+    差异：C 还比较 `st_dev` / `st_ino`，Rust 标准库跨平台取不到稳定值，
+    只比较 `st_mtime`（同内容、同时间但被换成另一个文件时检测不到）。
+    另有既有偏差：`^X` → "是" 且缓冲区已有名字时，C 的
+    `write_it_out(TRUE, TRUE)` 仍会显示 "Write to File: <名字>" 让用户确认
+    （`withprompt` 为真、且不满足 `SAVE_ON_EXIT && exiting`），Rust 的
+    `do_exit` 在该情形走 `write_it_out` 直接静默保存、不提示也不做上述
+    覆盖/磁盘检查。要完全对齐需把 `do_exit` 的该分支也改为进入
+    `do_writeout(exiting = true)`，会同时影响 `tests/save_onexit.rs`、
+    `tests/exit_confirm.rs` 的既有预期，本次未动。⚠️
+    证据：`tests/overwrite_confirm.rs`（判定函数、问题文本截断、
+    mtime 比较）；交互循环需真实终端，未手工验证。
+
 ---
 
 ## 五、功能模块状态
@@ -366,8 +398,10 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   差异：版本行显示本程序版本（非 C 版编译期写死的 9.2）；滚动用等高的
   虚拟窗口重绘模拟 `wscrl`；`window_init` 的 ncurses 窗口重建省略。
   ⚠️ 动画本身依赖真实终端，仅静态核对与数据表测试
-- ⚠️ `get_mouseinput`：编辑区点击、底部栏点击与滚轮已实现
-  （`handle_mouse_event`）；`-q` 滚动条点击跳行未实现
+- ⚠️ `get_mouseinput`：编辑区点击、底部栏点击、滚轮与 `-q` 滚动条点击跳行
+  已实现（`handle_mouse_event`，见第五节第 1 部分）；提示栏的点击定位
+  （C 版 prompt.c `process_prompt_click`：按点击列换算 `typing_x`）未移植，
+  提示期间点鼠标不会把编辑位置移到点中的字符处
 - ✅ minibar 的行数提示与多缓冲区 `[x/n]` 计数：`report_size` 在读取/保存后
   置位、绘制后被消费；`tallywidth` 参与状态字符的空间判断；`buffer_number`
   从第一个缓冲区计数（`tests/minibar_tally.rs`）。
@@ -403,7 +437,7 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 
 ### 8. 覆盖较完整的模块
 
-`cut.rs`、`chars.rs`、`movement.rs`、`history.rs`、`help.rs`、`color.rs`、`utils.rs`、`rcfile.rs` 的函数基本对等。`history.rs` 的位置寄存器（`-P`）已接入打开/关闭流程，并修正了 Windows 绝对路径的解析。`rcfile.rs` 当前约 1455 行。`chars.rs` 比原版多 `mbstrcasestr` / `revstrstr`，`movement.rs` 多 `do_first_line` / `do_last_line`。
+`cut.rs`、`chars.rs`、`movement.rs`、`history.rs`、`help.rs`、`color.rs`、`utils.rs`、`rcfile.rs` 的函数基本对等。`history.rs` 的位置寄存器（`-P`）已接入打开/关闭流程，并修正了 Windows 绝对路径的解析。`rcfile.rs` 当前约 1611 行。`chars.rs` 比原版多 `mbstrcasestr` / `revstrstr`，`movement.rs` 多 `do_first_line` / `do_last_line`。
 
 ---
 
@@ -415,8 +449,9 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
 2. `execute_by_id` 已审计：主菜单绑定全部可达；未分发的 rc 占位函数会显示
    “Function not implemented”而不是静默吞键。写文件提示的
    DosFormat/BackItUp/Append/Prepend/Discard 循环已移植。
-3. 显示层基本完成：`do_credits` 的动画未在真实终端里手工验证；锚点键位
-   尚未按 `global.c` 绑定（见第五节搜索条目）。
+3. 显示层基本完成：`do_credits` 的动画未在真实终端里手工验证；锚点键位已按
+   `global.c:1356-1362` 绑定（见第五节搜索条目）。剩余缺口：提示栏的鼠标
+   点击定位（C 版 `process_prompt_click`）未移植。
 4. i18n 只有两种语言；单复数已用双键处理。
 
 ## 七、与上一版文档的主要更正
@@ -604,3 +639,26 @@ nanoxide 已移植 nano 绝大多数编辑功能，且有 Windows 支持。当�
   `selection_paint_range` 处理跨行/水平滚动/软换行求交；
   `hilite_attribute` 默认改为 `A_REVERSE`（C 的 global.c 默认），
   `--boldtext` 仍为 `A_BOLD`。新增 `selection_paint_range` 用例。
+- 本轮：保存的覆盖确认已接线（`do_writeout` 对应 C 版 `write_it_out` 的
+  `method == OVERWRITE` 分支）——`needs_name_warning` 判定改名/无名覆盖、
+  `confirm_namechange` 询问改名、`overwrite_question` 询问覆盖（名字按
+  `crop_to_fit` 截到 COLS）、`disk_changed_since_open` 比对 mtime 决定是否
+  提示"磁盘已改变"；受限模式只警告不允许覆盖/改名；常规覆盖保存后刷新
+  `statinfo`（对应 C 的 `stat_with_alloc`）；`-t` 且有名字时跳过文件名提示。
+  新增 5 个 `files-*` 翻译键（en/zh）与 `tests/overwrite_confirm.rs`。
+  差异：不比较 `st_dev`/`st_ino`（跨平台取不到），只比 `st_mtime`；
+  交互循环本身需真实终端，未手工验证。
+- 复查：文档统计更新为 `src/*.rs` 约 2.7 万行、`tests/` 51 个文件、
+  `rcfile.rs` 约 1611 行；第五节显示部分修掉一条过时描述（`-q` 滚动条
+  点击跳行其实已完成），改为记录真正的剩余缺口 `process_prompt_click`；
+  第六节总结里"锚点键位尚未绑定"也已过时，改为指向已完成的记录。
+
+- 本轮：保存的覆盖确认已接线（`do_writeout` 对应 C 版 `write_it_out` 的
+  `method == OVERWRITE` 分支）——`needs_name_warning` 判定改名/无名覆盖、
+  `confirm_namechange` 询问改名、`overwrite_question` 询问覆盖（名字按
+  `crop_to_fit` 截到 COLS）、`disk_changed_since_open` 比对 mtime 决定是否
+  提示"磁盘已改变"；受限模式只警告不允许覆盖/改名；常规覆盖保存后刷新
+  `statinfo`（对应 C 的 `stat_with_alloc`）；`-t` 且有名字时跳过文件名提示。
+  新增 5 个 `files-*` 翻译键（en/zh）与 `tests/overwrite_confirm.rs`。
+  差异：不比较 `st_dev`/`st_ino`（跨平台取不到），只比 `st_mtime`；
+  交互循环本身需真实终端，未手工验证。

@@ -1366,6 +1366,16 @@ fn finish_save(
                                 write_lockfile(lock, answer, false);
                             }
                         }
+                        /* 刷新 statinfo（对应 C 版 write_file 收尾的
+                         * `stat_with_alloc(realname, &openfile->statinfo)`；
+                         * C 只在 annotate 且 method == OVERWRITE 时做）。
+                         * 覆盖确认里的"磁盘已被改动"检查以此为基线，
+                         * 不刷新则每次保存后都会误报。 */
+                        if method == WritingType::Overwrite && !answer.is_empty() {
+                            if let Ok(meta) = fs::metadata(answer) {
+                                of_ref.statinfo = Some(Box::new(meta));
+                            }
+                        }
                     }
                 });
                 /* 更新标题栏（对应 C 版 write_file 中 titlebar(NULL)）。 */
@@ -1501,6 +1511,64 @@ fn set_did_credits() {
     DID_CREDITS.with(|c| c.set(true));
 }
 
+/// 计算覆盖写之前的 do_warning（对应 files.c `write_it_out` 中
+/// `method == OVERWRITE` 分支的 `do_warning`）：为真表示本次写入要么改了
+/// 文件名、要么（无名缓冲区）会动到一个已存在的文件，需要向用户确认。
+///
+/// - 缓冲区无名：只要目标已存在就要警告；
+/// - 两边都能得到规范路径：比较规范路径；
+/// - 否则退回比较原始字符串。
+///
+/// `full_answer` / `full_filename` 是 `get_full_path` 的结果（None 表示
+/// 该路径无法规范化，对应 C 里 realpath 失败）。
+pub fn needs_name_warning(
+    answer: &str,
+    buffer_filename: &str,
+    name_exists: bool,
+    full_answer: Option<&str>,
+    full_filename: Option<&str>,
+) -> bool {
+    if buffer_filename.is_empty() {
+        name_exists
+    } else if let (Some(a), Some(f)) = (full_answer, full_filename) {
+        a != f
+    } else {
+        answer != buffer_filename
+    }
+}
+
+/// 磁盘上的文件是否已在本缓冲区打开之后被改动（对应 files.c
+/// `write_it_out` 里的 stat 比较：`st_mtime` 变新，或 `st_dev` / `st_ino`
+/// 变了）。
+///
+/// 简化：只比较修改时间（Rust 标准库跨平台取不到稳定的设备号/inode 号，
+/// Windows 上更没有），因此"同内容、同时间但被替换成另一个文件"这种情况
+/// 检测不到。`before` 为 None（打开时文件不存在，即新缓冲区）时不比较。
+///
+/// 参数取 `SystemTime` 而不是 `Metadata`，便于单测；调用方用
+/// `metadata.modified().ok()` 取值。
+pub fn disk_changed_since_open(
+    before: Option<std::time::SystemTime>,
+    now: std::time::SystemTime,
+) -> bool {
+    match before {
+        Some(then) => then < now,
+        None => false,
+    }
+}
+
+/// 覆盖确认的问题文本（对应 C 的 `_("File \"%s\" exists; OVERWRITE? ")`）。
+/// 文件名按 `crop_to_fit` 截断到状态栏放得下（`COLS - 问题宽度 + 1`）。
+/// 问题宽度取"含 `%s` 占位符"的模板，即空 name 的宽度再加 2 列，与 C 的
+/// `breadth(question)` 一致，保证填进去后总宽不超过 COLS。
+pub fn overwrite_question(name: &str, cols: usize) -> String {
+    let template_width =
+        crate::utils::breadth(crate::t!("files-exists_overwrite", name = "").as_bytes()) + 2;
+    let room = cols.saturating_sub(template_width).saturating_add(1);
+    let clipped = crop_to_fit_filename(name, room);
+    crate::t!("files-exists_overwrite", name = clipped)
+}
+
 /// 写入文件（对应 files.c 的 `write_it_out`，`withprompt` 恒为 TRUE）：
 /// 在状态栏显示 "Write to File: <文件名>" 提示，冒号右侧可编辑要保存的
 /// 文件名；运行时不带文件名参数则提示处为空，直接输入新文件名即可。
@@ -1510,7 +1578,12 @@ fn set_did_credits() {
 ///
 /// 提示期间支持 M-D（DOS 格式）、M-B（备份）、M-A/M-P（追加/前置）、
 /// ^Q（放弃写入）与 ^T（浏览文件），对应 C 版 write_it_out 的循环。
-/// 返回写入字节数；-1 失败；2 表示用户放弃。
+/// 覆盖写前还有 C 的三重确认：改名（`confirm_namechange`）、目标已存在
+/// （`File "<name>" exists; OVERWRITE?`）、磁盘已被外部改动
+/// （`File on disk has changed`），见 `needs_name_warning` /
+/// `disk_changed_since_open` / `overwrite_question`。
+/// 返回写入字节数；-1 失败；2 表示用户放弃。磁盘变更分支沿用 C 的状态码
+/// 语义（"否"返回 1、取消返回 0），因为那里并没有真的写出内容。
 ///
 /// `exiting` 为 TRUE 表示本次写入来自 `do_exit`（对应 C 版
 /// `write_it_out(TRUE, TRUE)`），此时忽略标记、整块保存，并可能触发
@@ -1539,6 +1612,9 @@ pub fn do_writeout(exiting: bool) -> i32 {
         filename.clone()
     };
     let mut method = WritingType::Overwrite;
+    /* 缓冲区原来有名字时，改名保存要先向用户确认（对应
+     * `confirm_namechange = (openfile->filename[0] != '\0')`）。 */
+    let mut confirm_namechange = !filename.is_empty();
 
     loop {
         /* 提示文本按 method 与格式/备份状态组合（对应 C 的 msg + formatstr +
@@ -1568,13 +1644,23 @@ pub fn do_writeout(exiting: bool) -> i32 {
             msg.push_str(&crate::t!("files-backup_marker"));
         }
 
-        let response = crate::prompt::do_prompt(
-            MWRITEFILE,
-            &given,
-            None,
-            Some(winio::edit_refresh),
-            &msg,
-        );
+        /* -t（--saveonexit）且退出时缓冲区已有名字：不询问文件名，直接把
+         * 名字当回答（对应 C 的
+         * `if ((!withprompt || (ISSET(SAVE_ON_EXIT) && exiting)) &&
+         *   openfile->filename[0]) answer = openfile->filename;`），
+         * 之后的覆盖/磁盘变更检查照常进行。 */
+        let response = if ISSET(SAVE_ON_EXIT) && exiting && !filename.is_empty() {
+            crate::prompt::set_answer(&given);
+            0
+        } else {
+            crate::prompt::do_prompt(
+                MWRITEFILE,
+                &given,
+                None,
+                Some(winio::edit_refresh),
+                &msg,
+            )
+        };
 
         if response < 0 {
             winio::statusbar(&crate::t!("files-cancelled"));
@@ -1668,6 +1754,87 @@ pub fn do_writeout(exiting: bool) -> i32 {
 
         if given.is_empty() {
             return 0;
+        }
+
+        /* 覆盖写（method 为 OVERWRITE）时按 C 的 do_warning 分支确认
+         * 改名 / 覆盖已存在文件 / 磁盘已被外部改动。追加与前置不改写
+         * 原内容，C 里同样跳过这些检查。 */
+        if method == WritingType::Overwrite {
+            let full_answer = get_full_path(&given);
+            let full_filename = get_full_path(&filename);
+            /* 存在性探测用解析后的路径（对应 C 的
+             * `stat(full_answer == NULL ? answer : full_answer, &fileinfo)`；
+             * fileinfo 也复用于下面的磁盘变更比较）。 */
+            let probed = full_answer.as_deref().unwrap_or(&given);
+            let disk_info = fs::metadata(probed).ok();
+            let name_exists = disk_info.is_some();
+            let do_warning = needs_name_warning(
+                &given,
+                &filename,
+                name_exists,
+                full_answer.as_deref(),
+                full_filename.as_deref(),
+            );
+
+            if do_warning {
+                /* 受限模式不允许覆盖已有文件，也不允许给已有名字的缓冲区改名。
+                 * C 这里直接判 ISSET(RESTRICTED) 并给出自己的文案，不走
+                 * in_restricted_mode() 的通用提示。 */
+                if ISSET(RESTRICTED) {
+                    winio::warn_and_briefly_pause(&crate::t!("files-exists_cannot_overwrite"));
+                    continue;
+                }
+
+                /* C 的守卫 `if (exiting || !openfile->mark)`：写选区到别的
+                 * 文件是常规操作，不需要先确认改名，直接问覆盖。 */
+                if confirm_namechange && (exiting || !selection) {
+                    let choice = crate::prompt::ask_user(false, &crate::t!("files-save_under_different_name"));
+                    if choice != YES {
+                        continue;
+                    }
+                    confirm_namechange = false;
+                }
+
+                if name_exists {
+                    let cols = with_global(|g| g.COLS);
+                    let question = overwrite_question(&given, cols);
+                    let choice = crate::prompt::ask_user(false, &question);
+                    if choice != YES {
+                        continue;
+                    }
+                }
+            }
+            /* C 中与上面的 `if (do_warning)` 构成 else if：只有名字未变（或
+             * 无名）时才查磁盘变更；名字已变时上面的覆盖确认已经足够。 */
+            else if name_exists {
+                let statinfo = with_global(|g| {
+                    g.openfile
+                        .as_ref()
+                        .and_then(|of| of.borrow().statinfo.clone())
+                });
+                if let Some(now) = disk_info.as_ref().and_then(|m| m.modified().ok()) {
+                    let then = statinfo.as_ref().and_then(|m| m.modified().ok());
+                    if disk_changed_since_open(then, now) {
+                        winio::warn_and_briefly_pause(&crate::t!("files-disk_changed"));
+                        let choice = crate::prompt::ask_user(false, &crate::t!("files-modified_since_open"));
+                        winio::wipe_statusbar();
+
+                        /* -t（保存后退出）且带提示时按 C 就地收尾：
+                         * "是"= 覆盖写、"否"= 放弃缓冲区、取消 = 出错返回。 */
+                        if ISSET(SAVE_ON_EXIT) {
+                            return match choice {
+                                YES => save_to_with_method(&given, method),
+                                NO => 2,
+                                _ => 0,
+                            };
+                        } else if choice == CANCEL && exiting {
+                            continue;
+                        } else if choice != YES {
+                            return 1;
+                        }
+                    }
+                }
+            }
         }
 
         return if selection {

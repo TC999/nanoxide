@@ -49,6 +49,12 @@ files-wrote_lines = Wrote {count} lines
 files-error_writing = Error writing {filename}: {err}
 files-write_to_file = Write to File
 files-write_selection_to_file = Write Selection to File
+# 保存时的覆盖确认（对应 files.c write_it_out 的三个提示）
+files-exists_cannot_overwrite = File exists -- cannot overwrite
+files-save_under_different_name = Save file under DIFFERENT NAME? 
+files-exists_overwrite = File "{name}" exists; OVERWRITE? 
+files-disk_changed = File on disk has changed
+files-modified_since_open = File was modified since you opened it; continue saving? 
 files-cancelled = Cancelled
 prompt-save_modified_buffer = Save modified buffer? 
 files-restricted_mode = This function is disabled in restricted mode
