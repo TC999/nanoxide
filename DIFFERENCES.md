@@ -25,7 +25,7 @@
 | 终端 | ncurses | crossterm，`color.rs` 里有 `init_pair` / `COLOR_PAIR` / `wattron` 适配层 |
 | 平台 | 类 Unix | Linux 与 Windows；信号相关仅 Unix 生效 |
 | 二进制名 | `nano` | `nax` |
-| 测试 | 无 | `tests/` 下 51 个集成测试文件 |
+| 测试 | 无 | `tests/` 下 54 个集成测试文件 |
 
 ### 正则
 
@@ -312,6 +312,23 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
     `translate_keycode(真实 KeyEvent)` 驱动，等价于 crossterm 上报给
     编辑器的字节流，但 ESC 前缀与转义序列的**实际抓包行为**依赖终端，
     仍需用户在真实终端复核。
+17. ✅ **`M-6` 复制标记区域会损坏复制内容已修复**：`copy_marked_region`
+    （cut.c:607-639）没有照 C 版临时把首行前移 `top_x`、把末行在 `bot_x`
+    处截断，再对整条链表调用 `copy_buffer`，而是自行拼了一个只含首行片段
+    的单节点：
+    - 单行选区复制成 `"world\0"`，多出一个 NUL 字节；
+    - 跨行选区只复制首行的选区片段（选 `one`/`two`/`three` 的 `ne`..`th`
+      只得到 `ne`）。
+    无标记时 `M-6` 复制整行走的是 `copy_text` 的另一分支，仍然正常，所以
+    用户看到的现象是"选中文本后按 Alt+6 复制不出来"。
+    现逐句按 C 重写：`botline->next = NULL`、
+    `botline->data[bot_x] = '\0'`（Rust 的 `String` 不能只改一个字节，改为记下
+    完整内容后整体恢复，效果等价）、`topline->data += top_x`，
+    `copy_buffer` 之后再恢复原状；`copy_text` 的其余逻辑未改。
+    证据：`tests/copy_text.rs`（当前行、单行选区、跨行选区、复制后粘回原处
+    四项；均通过真实的 Alt+6 `KeyEvent` → `translate_keycode` →
+    `handle_input_key` 分发）。已在 Windows 实机验证修复有效（用户确认）；
+    Linux 终端未实机验证。
 
 ---
 

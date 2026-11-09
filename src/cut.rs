@@ -1000,44 +1000,38 @@ pub fn copy_marked_region() {
         return;
     }
 
-    /* 让被标记的区域看起来像一个独立的缓冲区。 */
-    let afterline = { let r = botline.borrow(); r.next.clone() };
+    /* 让被标记的区域看起来像一个独立的缓冲区：暂时断开末行之后的链表、
+     * 按 C 的做法在 bot_x 处截断末行，并把首行的数据前移 top_x。
+     * copy_buffer 只沿 next 走到末行为止，复制完再逐项恢复。 */
+    let afterline = {
+        let r = botline.borrow();
+        r.next.clone()
+    };
     botline.borrow_mut().next = None;
-    let saved_byte = {
-        let d = botline.borrow().data.clone().into_bytes();
-        d.get(bot_x).copied().unwrap_or(0)
-    };
+
+    /* C 用 `botline->data[bot_x] = '\0'` 截断末行；String 不能只改一个
+     * 字节，这里记下完整内容，复制后整体恢复（效果等价）。 */
+    let saved_botline = botline.borrow().data.clone();
     {
-        let mut d = botline.borrow().data.clone().into_bytes();
-        d.truncate(bot_x);
-        d.push(0);
-        botline.borrow_mut().data = String::from_utf8_lossy(&d).into_owned();
+        let bytes = saved_botline.as_bytes();
+        let cut = bot_x.min(bytes.len());
+        botline.borrow_mut().data = String::from_utf8_lossy(&bytes[..cut]).into_owned();
     }
-    let mut topdata = topline.borrow().data.clone().into_bytes();
-    let cutbuffer = {
-        let shifted = topdata.split_off(top_x);
-        topline.borrow_mut().data = String::from_utf8_lossy(&topdata).into_owned();
-        // 用裁剪后的 top 行构造副本
-        let tmp = make_new_node(None);
-        tmp.borrow_mut().data = String::from_utf8_lossy(&shifted).into_owned();
-        let nodes = vec![tmp];
-        let _n = { let r = nodes[0].borrow(); r.next.clone() };
-        // 无后继（我们只构造单节点）
-        files::copy_buffer(&nodes[0])
-    };
+
+    /* 与 C 一致，此处在末行截断之后才取首行内容并前移，这样首末行是
+     * 同一行时偏移量也是相对已截断的内容计算的。 */
+    let saved_topline = topline.borrow().data.clone();
+    {
+        let bytes = saved_topline.as_bytes();
+        let start = top_x.min(bytes.len());
+        topline.borrow_mut().data = String::from_utf8_lossy(&bytes[start..]).into_owned();
+    }
+
+    let cutbuffer = files::copy_buffer(&topline);
 
     /* 恢复缓冲区的正确状态。 */
-    topline.borrow_mut().data = String::from_utf8_lossy(&topdata).into_owned();
-    {
-        let mut d = botline.borrow().data.clone().into_bytes();
-        if saved_byte != 0 {
-            if d.len() <= bot_x {
-                d.resize(bot_x + 1, 0);
-            }
-            d[bot_x] = saved_byte;
-        }
-        botline.borrow_mut().data = String::from_utf8_lossy(&d).into_owned();
-    }
+    topline.borrow_mut().data = saved_topline;
+    botline.borrow_mut().data = saved_botline;
     botline.borrow_mut().next = afterline;
 
     with_global_mut(|g| g.cutbuffer = Some(cutbuffer));
