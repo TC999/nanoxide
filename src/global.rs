@@ -544,7 +544,10 @@ pub fn shortcut_init() {
     add_to_funcs(FunctionId::DoExit, MHELP, crate::t!("key-close"), "x", false);
     add_to_funcs(FunctionId::DoCancel, (MMOST & !MMAIN) | MYESNO, crate::t!("key-cancel"), "gist-cancel", true);
     add_to_funcs(FunctionId::DoExit, MMAIN, crate::t!("key-exit"), "gist-exit", false);
-    add_to_funcs(FunctionId::DoRefresh, MMAIN | MREPLACE, crate::t!("key-refresh"), "x", false);
+    /* C 版 `global.c` 里 `add_to_funcs(full_refresh, MMAIN|MREPLACE, "Refresh",
+     * "x", 0)` 位于 `#ifndef ENABLE_HELP` 分支（只有不编入帮助时才需要它
+     * 撑住底栏，global.c:781-786）。本移植始终启用帮助，故不登记——否则
+     * 帮助页会多出一条描述为 "x" 的条目，与原版帮助列表不一致。 */
     add_to_funcs(FunctionId::DoWriteOut, MMAIN, crate::t!("key-write_out"), "gist-writeout", false);
     add_to_funcs(FunctionId::DoInsertFile, MMAIN, crate::t!("key-read_file"), "gist-insert", false);
     add_to_funcs(FunctionId::DoJustify, MMAIN, crate::t!("key-justify"), "gist-justify", false);
@@ -616,7 +619,9 @@ pub fn shortcut_init() {
     add_to_funcs(FunctionId::DoCycle, MMAIN, crate::t!("key-cycle"), "gist-cycle", false);
     add_to_funcs(FunctionId::DoSaveFile, MMAIN, crate::t!("key-savefile"), "gist-savefile", false);
     add_to_funcs(FunctionId::DoWordCompletion, MMAIN, crate::t!("key-complete"), "gist-complete", false);
-    add_to_funcs(FunctionId::DoAnchor, MMAIN, crate::t!("key-anchor"), "gist-anchor", false);
+    /* C 版只有 `put_or_lift_anchor`（已在上方登记为 MMAIN 的 Anchor），
+     * 没有第二个 "DoAnchor" 条目；此前多登记一条，帮助页里就多出一行
+     * 重复的 "Place or remove an anchor at the current line"。 */
     add_to_funcs(FunctionId::DoPrevFile, MMAIN, crate::t!("key-prevfile"), "gist-prevbuf", false);
     add_to_funcs(FunctionId::DoNextFile, MMAIN, crate::t!("key-nextfile"), "gist-nextbuf", false);
     add_to_funcs(FunctionId::CaseSensVoid, MWHEREIS | MREPLACE, crate::t!("key-case_sens"), "gist-casesens", false);
@@ -882,13 +887,11 @@ pub fn shortcut_init_rest() {
     add_to_sclist(MMAIN | MHELP, "M-+", 0x22B, FunctionId::DoScrollDown, 0);
     add_to_sclist(MMAIN | MHELP, "M-=", 0x23D, FunctionId::DoScrollDown, 0);
 
-    // 函数列表补充
-    add_to_funcs(FunctionId::GetOlderItem, MMAIN, crate::t!("key-get_older_item"), "gist-older", false);
-    add_to_funcs(FunctionId::GetNewerItem, MMAIN, crate::t!("key-get_newer_item"), "gist-newer", false);
-    add_to_funcs(FunctionId::ToFirstFile, MBROWSER, crate::t!("key-first_file"), "gist-firstfile", false);
-    add_to_funcs(FunctionId::ToLastFile, MBROWSER, crate::t!("key-last_file"), "gist-lastfile", false);
+    /* C 版的 add_to_funcs 对同一菜单只登记每个函数一次，下列条目在上方
+     * 已按原顺序登记过；此前在此重复登记，导致帮助页出现原版没有的重复
+     * 描述行（M-V、M-Ins、First File/Last File 等）。这里只保留 C 里
+     * 确实需要的 GotoDir（MBROWSER），其余去掉。 */
     add_to_funcs(FunctionId::DoGotoDir, MBROWSER, crate::t!("key-go_to_dir"), "gist-gotodir", false);
-    add_to_funcs(FunctionId::DoVerbatimInput, MMAIN, crate::t!("key-verbatim_input"), "gist-verbatim", false);
 }
 
 // ======================== 命令行参数解析（对应 nano.c 的 main） ========================

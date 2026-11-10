@@ -413,6 +413,26 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
     输出确认：帮助页各行均从第 1 列开始（无 `30`/`31` 行号），退出后
     编辑器行号恢复；该临时用例已删除，不是长期测试。Linux 未实机验证。
 
+21. ✅ **帮助列表去掉 C 版没有的条目**。本移植的 `add_to_funcs` 有若干
+    重复登记 / 错置分支，使主帮助页出现原版没有的行：
+    - `add_to_funcs(DoRefresh, MMAIN|MREPLACE, "Refresh", "x", false)`
+      在 C 里位于 `#ifndef ENABLE_HELP` 分支（global.c:781-786）——只有
+      不编入帮助时才需要它撑住底栏。本移植始终启用帮助，故删除；否则
+      帮助页多出一条描述为 "x" 的条目。
+    - `shortcut_init_rest` 末尾重复登记了 `GetOlderItem`/`GetNewerItem`
+      （MMAIN）、`ToFirstFile`/`ToLastFile`（MBROWSER）与
+      `DoVerbatimInput`（MMAIN），这些函数在上方已按 C 的顺序登记过，
+      于是帮助页出现重复的 `M-V`、`First File`/`Last File` 行。只保留
+      C 里确实需要的 `GotoDir`（MBROWSER）。
+    - `DoAnchor` 不是 C 的函数（C 只有 `put_or_lift_anchor`），此前与
+      `PutOrLiftAnchor` 各登记一条，帮助页多出一行重复的
+      "Place or remove an anchor at the current line"。删除 `DoAnchor`
+      条目（`execute_by_id` 里的分发保留，rc 里 `bind ... anchor` 仍走
+      `PutOrLiftAnchor`）。
+    证据：`tests/help_viewer.rs`（`main_help_has_no_placeholder_refresh_entry`、
+    `main_help_has_no_duplicate_entries`）。静态阅读 `global.c:761-1234`
+    逐条比对。未做交互式手工验证。
+
 ---
 
 ## 五、功能模块状态

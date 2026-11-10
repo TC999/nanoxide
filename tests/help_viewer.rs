@@ -4,7 +4,9 @@
 //! - `help_init`：每条描述都要过 gettext（`_(f->phrase)`）、键列按
 //!   "第一列 7 格、第二列 10 格"排版；
 //! - `show_help`：进帮助查看器时 `margin = 0`、退出时恢复，所以帮助页
-//!   不画行号（即使编辑器开着行号）。
+//!   不画行号（即使编辑器开着行号）；
+//! - `add_to_funcs` 对同一菜单只登记每个函数一次，条目集合需与
+//!   `global.c` 的 `shortcut_init` 一致。
 
 use nanoxide::definitions::*;
 
@@ -141,4 +143,37 @@ fn help_viewer_has_no_line_number_margin() {
 
     UNSET(LINE_NUMBERS);
     with_global_mut(|g| g.margin = 0);
+}
+
+/// 主帮助页不应出现 C 版 `#ifndef ENABLE_HELP` 才有的 Refresh（描述为 "x"）条目。
+#[test]
+fn main_help_has_no_placeholder_refresh_entry() {
+    let text = help_text();
+    assert!(
+        !text.lines().any(|line| line.trim_end().ends_with('x')),
+        "不应有描述为 x 的占位条目：\n{text}"
+    );
+}
+
+/// 帮助页每个函数只出现一次（C 的 `add_to_funcs` 对同一菜单不会重复登记）。
+#[test]
+fn main_help_has_no_duplicate_entries() {
+    let text = help_text();
+
+    let descriptions: Vec<&str> = text
+        .lines()
+        .skip_while(|line| !line.contains("Display this help text"))
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    assert!(!descriptions.is_empty(), "应能找到快捷键条目：\n{text}");
+
+    let mut seen = std::collections::HashSet::new();
+    for line in descriptions {
+        /* 取描述部分（快捷键列之后），比对是否重复。 */
+        let desc = line.trim_start_matches(['\t', ' ']);
+        assert!(
+            seen.insert(desc.to_string()),
+            "帮助页出现重复条目：{desc:?}\n{text}"
+        );
+    }
 }
