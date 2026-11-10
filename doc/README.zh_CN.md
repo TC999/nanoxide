@@ -7,6 +7,7 @@ nanoxide 是一个小而简单的终端文本编辑器，使用了 GNU nano 编�
 
 ## 文档目录
 - [安装](#安装)
+- [配置文件](#配置文件)
 - [翻译](#翻译)
 - [编译](#编译)
 
@@ -22,6 +23,17 @@ nanoxide 是一个小而简单的终端文本编辑器，使用了 GNU nano 编�
 ### 翻译
 
 nnanoxide 使用 fluent 库。原始语言文件在`locales/en-US.ftl`。所有的翻译都提取自 nano 的`.po`文件。只需 PR。
+
+### 配置文件
+
+`nax` 按以下顺序读取配置（后面的文件可以覆盖前面的）：
+
+1. `-f <文件>` / `--rcfile=<文件>` 指定的文件（只读该文件）；
+2. 系统级 `nanorc`（`SYSCONFDIR/nanorc`，默认 `/etc/nanorc`）；
+3. `nax` 可执行文件（解析符号链接后）同目录下的 `nanorc`（nanoxide 扩展）；
+4. 用户级 rc：`~/.nanorc`，否则 `$XDG_CONFIG_HOME/nano/nanorc`，否则 `~/.config/nano/nanorc`。
+
+`-I` / `--ignorercfiles` 会禁用以上全部。
 
 ### 编译
 

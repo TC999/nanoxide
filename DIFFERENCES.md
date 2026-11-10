@@ -433,6 +433,28 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
     `main_help_has_no_duplicate_entries`）。静态阅读 `global.c:761-1234`
     逐条比对。未做交互式手工验证。
 
+22. ✅ **新增：读取程序同目录的 nanorc**（nanoxide 扩展，有意偏离原版；
+    对应用户要求）。原版 9.2 的 `do_rcfiles`（rcfile.c:1727-1758）只读
+    系统级 `SYSCONFDIR/nanorc` 与用户级 `~/.nanorc` / XDG。本移植在
+    系统级之后、用户级之前增加一个候选——可执行文件所在目录下的
+    `nanorc`（Windows 下即 `nax.exe` 旁的 `nanorc`）：
+    - 顺序：`-f` 指定 → 系统级 → **程序同目录** → 用户级（三选一）；
+    - 读到后**继续**读用户级，用户配置可覆盖程序目录配置（分层语义）；
+    - `-I` 仍然完全不读任何 rc；`-f` 仍然只读指定文件；
+    - 路径由 `std::env::current_exe()` 的父目录拼接 `nanorc` 得到
+      （rcfile.rs `exe_dir_nanorc`），取不到时静默跳过；Linux 上符号链接
+      已由内核解析为真实可执行文件路径；
+    - 文件合法性沿用 `is_good_file`（可读、非目录/设备），与系统级一致。
+    顺带修复一个移植遗漏：用户级三选一的 `have_nanorc()` 检查之后原本
+    没有调用 `parse_one_nanorc()`（C 版是
+    `if (have_nanorc(...) || ...) parse_one_nanorc();`），导致 `~/.nanorc`
+    只被探测、从未解析。新用例“程序目录 + 用户级都要生效”暴露了它，
+    现已补上，行为与 C 版一致。
+    证据：`tests/exe_nanorc.rs`（把构建出的 nax 复制到临时目录，旁边放
+    `nanorc` 后以 `-z` 运行，断言语法被列出；另覆盖“没有程序目录
+    nanorc 时不误读”和“程序目录之后仍读 `~/.nanorc`”）。已在 Windows
+    实机跑通；Linux 未实机验证。
+
 ---
 
 ## 五、功能模块状态
@@ -633,7 +655,7 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
 
 ### 8. 覆盖较完整的模块
 
-`cut.rs`、`chars.rs`、`movement.rs`、`history.rs`、`help.rs`、`color.rs`、`utils.rs`、`rcfile.rs` 的函数基本对等。`history.rs` 的位置寄存器（`-P`）已接入打开/关闭流程，并修正了 Windows 绝对路径的解析。`rcfile.rs` 当前约 1611 行。`chars.rs` 比原版多 `mbstrcasestr` / `revstrstr`，`movement.rs` 多 `do_first_line` / `do_last_line`。
+`cut.rs`、`chars.rs`、`movement.rs`、`history.rs`、`help.rs`、`color.rs`、`utils.rs`、`rcfile.rs` 的函数基本对等。`history.rs` 的位置寄存器（`-P`）已接入打开/关闭流程，并修正了 Windows 绝对路径的解析。`rcfile.rs` 当前约 1640 行；另新增程序同目录 nanorc 读取（见四.22），并修复了用户级 rc 漏调用 `parse_one_nanorc()` 的移植遗漏。`chars.rs` 比原版多 `mbstrcasestr` / `revstrstr`，`movement.rs` 多 `do_first_line` / `do_last_line`。
 
 ---
 

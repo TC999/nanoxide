@@ -1431,6 +1431,14 @@ fn have_nanorc(path: &str) -> bool {
     is_good_file(path)
 }
 
+/// 程序所在目录下 `nanorc` 的路径（nanoxide 扩展，见 DIFFERENCES.md）。
+/// 取不到可执行文件路径（或它没有父目录）时返回 None，调用方静默跳过。
+fn exe_dir_nanorc() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    Some(dir.join("nanorc").to_string_lossy().into_owned())
+}
+
 /// 验证关键函数（Exit/Cancel）仍有键绑定（对应 `check_vitals_mapped`）。
 fn check_vitals_mapped() {
     const VITALS: [FunctionId; 4] = [
@@ -1483,6 +1491,14 @@ pub fn do_rcfiles() {
             parse_one_nanorc();
         }
 
+        /* 程序同目录的 nanorc（nanoxide 扩展：便携配置，见 DIFFERENCES.md）。
+         * 位于系统级之后、用户级之前，读到后继续读用户级，用户配置可覆盖它。 */
+        if let Some(exe_rc) = exe_dir_nanorc() {
+            if have_nanorc(&exe_rc) {
+                parse_one_nanorc();
+            }
+        }
+
         utils::get_homedir();
         let homedir = with_global(|g| g.homedir.clone());
         let xdgconfdir = std::env::var("XDG_CONFIG_HOME").ok();
@@ -1511,6 +1527,14 @@ pub fn do_rcfiles() {
         }
         if !found && homedir.is_none() && xdgconfdir.is_none() {
             jot_error(&crate::t!("rcfile-no_home"));
+        }
+
+        /* 对应 C 版 `if (have_nanorc(...) || ...) parse_one_nanorc();`：
+         * 三选一命中后才解析。此前这里只设置 found，漏掉了真正的解析调用，
+         * 用户级 rc 从未生效；由 tests/exe_nanorc.rs 的“程序目录 + 用户级”
+         * 用例暴露。 */
+        if found {
+            parse_one_nanorc();
         }
     }
 

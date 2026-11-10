@@ -8,6 +8,7 @@ Mono-licensed under GPL-3.0.
 
 ## Documentation quick links
 - [Installation](#Installation)
+- [Configuration](#Configuration)
 - [Translation](#Translation)
 - [Building](#Building)
 
@@ -23,6 +24,17 @@ The binary name for nanoxide is `nax`. Now you just go to the latest release.
 ### Translation
 
 nanoxide uses fluent lib to i18n. The Original language file is `locales/en-US.ftl`. All the translation extracted from nano's po file. Just PR.
+
+### Configuration
+
+`nax` reads configuration files in this order (a later file can override an earlier one):
+
+1. the file given by `-f <file>` / `--rcfile=<file>` (only that file);
+2. the system-wide `nanorc` (`SYSCONFDIR/nanorc`, `/etc/nanorc` by default);
+3. the `nanorc` file next to the `nax` executable (nanoxide extension; symlinks are resolved, so it is the real executable's directory);
+4. the user rc: `~/.nanorc`, or else `$XDG_CONFIG_HOME/nano/nanorc`, or else `~/.config/nano/nanorc`.
+
+`-I` / `--ignorercfiles` disables all of them.
 
 ### Building
 
