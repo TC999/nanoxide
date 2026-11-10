@@ -314,6 +314,9 @@ pub fn show_help() {
 
     let stash_flags = with_global(|_g| clone_flags());
     let was_tabsize = with_global(|g| g.tabsize);
+    /* 对应 C 版 `help.c` 的 `int was_margin = margin;`：帮助查看器里
+     * 不画行号，退出时恢复调用者的边距。 */
+    let was_margin = with_global(|g| g.margin);
     let no_help_or_zero = ISSET(NO_HELP) || ISSET(ZERO);
     if no_help_or_zero {
         UNSET(NO_HELP);
@@ -329,6 +332,10 @@ pub fn show_help() {
     with_global_mut(|g| {
         g.tabsize = 8;
         set_tabsize_independent(8);
+        /* 对应 C 版 `help.c`: `editwincols = COLS - sidebar; margin = 0;`
+         * ——即使主编辑器开着行号，帮助页也不显示行号边距。 */
+        g.margin = 0;
+        g.editwincols = (g.COLS as i32 - if g.sidebar { 1 } else { 0 }).max(1) as usize;
     });
     winio::curs_set(0);
 
@@ -430,6 +437,11 @@ pub fn show_help() {
         restore_flags(stash_flags);
         g.tabsize = was_tabsize;
         set_tabsize_independent(was_tabsize);
+        /* 对应 C 版 `help.c` 的 `margin = was_margin; editwincols =
+         * COLS - margin - sidebar;`。 */
+        g.margin = was_margin;
+        let sidebar_width = if g.sidebar { 1 } else { 0 };
+        g.editwincols = (g.COLS as i32 - g.margin - sidebar_width).max(1) as usize;
         g.title = None;
         g.inhelp = false;
         g.currmenu = oldmenu;

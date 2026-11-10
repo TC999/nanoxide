@@ -170,7 +170,7 @@ pub fn mouse_init() {
 /// 标题栏、行号边距或编辑区之外的点击不处理（返回 ERR 由主循环跳过）。
 /// 软换行下按"每个显示行移动一块"近似（C 版 go_forward_chunks 语义）。
 fn handle_mouse_click(screen_column: u16, screen_row: u16) -> i32 {
-    let (editwinrows, margin) = with_global(|g| (g.editwinrows, current_margin()));
+    let (editwinrows, margin) = with_global(|g| (g.editwinrows, margin()));
 
     /* crossterm 的列/行均从 1 起；编辑区对应屏幕第 1..=editwinrows 行
      * （第 0 行为标题栏，其下为底栏/状态栏）。 */
@@ -753,7 +753,7 @@ pub fn edit_refresh() {
     refresh_screen();
 }
 
-/// 当前行号边距（对应 C 的 confirm_margin：digits(filebot->lineno) + 1）。
+/// 当前行号边距的"应有值"（对应 C 的 `confirm_margin`：digits(filebot->lineno) + 1）。
 /// 未开启行号或边距超过 COLS-4 时返回 0。
 pub fn current_margin() -> usize {
     if !ISSET(LINE_NUMBERS) {
@@ -775,6 +775,17 @@ pub fn current_margin() -> usize {
             needed
         }
     })
+}
+
+/// 绘制时使用的左边距（对应 C 版全局变量 `margin`）。
+///
+/// 与 [`current_margin`] 的区别：C 里绘制用的是保存下来的全局 `margin`，
+/// 它只在 `confirm_margin()` 与 `show_help()` 中被改写。帮助查看器因此
+/// 能把边距临时置 0（`help.c` 的 `margin = 0;`），让帮助页不画行号，
+/// 退出时再恢复。若每次绘制都按行数重算，这层"临时关掉行号"的语义就
+/// 无从体现（此前正是如此，帮助页会跟着画出 30、31 这样的行号）。
+pub fn margin() -> usize {
+    with_global(|g| g.margin.max(0) as usize)
 }
 
 /// 确认行号边距：当缓冲区最高行号所需的边距变化时更新全局
@@ -1210,7 +1221,6 @@ pub fn minibar_right_positions(
 /// 刷新屏幕（逐行覆盖重绘，避免全屏 Clear 造成的闪烁）。
 pub fn refresh_screen() {
     let mut stdout = io::stdout();
-    let _margin = current_margin();
 
     /* 绘制前隐藏光标，避免绘制过程中光标在屏幕上"乱飞"。
      * 对应 C 版：read_keys_from() 在读取按键后 curs_set(0) 隐藏光标，
@@ -2051,7 +2061,7 @@ pub fn blank_edit() {
 /// `cursor_screen_position`）。
 pub fn place_the_cursor() {
     let editwinrows = with_global(|g| g.editwinrows);
-    let margin = current_margin();
+    let margin = margin();
     let (cur, edittop, current_x, firstcolumn) = with_global(|g| {
         if let Some(of) = &g.openfile {
             let of = of.borrow();
@@ -2780,7 +2790,7 @@ fn draw_row(
     from_col: usize,
     till_x: usize,
 ) {
-    let margin = current_margin();
+    let margin = margin();
 
     let (ln, syntax, linenum_color) = with_global(|g| {
         let of = g.openfile.as_ref();
@@ -3138,7 +3148,7 @@ pub fn update_line(line: &LineRef, index: usize) -> i32 {
     }
 
     let mut stdout = io::stdout();
-    let margin = current_margin();
+    let margin = margin();
     let data = line.borrow().data.clone();
 
     let from_col = crate::utils::get_page_start(crate::utils::wideness(data.as_bytes(), index));
@@ -3237,7 +3247,7 @@ fn update_softwrapped_line(line: &LineRef) -> i32 {
         draw_row(&mut stdout, edit_top_row() + screen_row as u16, converted.as_bytes(), line, from_col, to_col);
         /* 聚光高亮逐块绘制；consume 传 FALSE，避免第一块画完就清掉
          * 标志导致后续块不高亮。 */
-        spotlight_line(&mut stdout, edit_top_row() + screen_row as u16, converted.as_bytes(), line, from_col, current_margin(), false);
+        spotlight_line(&mut stdout, edit_top_row() + screen_row as u16, converted.as_bytes(), line, from_col, margin(), false);
 
         from_col = to_col;
         screen_row += 1;

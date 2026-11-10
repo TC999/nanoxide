@@ -389,6 +389,30 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
     `tests/help_i18n.rs`（zh-CN 下取 po 译文）。静态阅读 + 单元测试，
     未做交互式手工验证。
 
+20. ✅ **帮助页不再画行号**（对应用户报告的症状：编辑器开了行号时，
+    帮助页每行前面出现 `30`、`31` 这样的行号）。对照 `help.c` 的
+    `show_help`：C 版是
+    `was_margin = margin; editwincols = COLS - sidebar; margin = 0;`
+    （help.c:402、437-439），退出时
+    `margin = was_margin; editwincols = COLS - margin - sidebar;`
+    （help.c:544-545）。本移植这两组动作都没实现，`margin` 只由主循环的
+    `confirm_margin()` 改写，于是帮助页沿用了编辑器的行号边距。
+    另有一层原因：绘制时用的是"每次按行数重算"的边距，即使把 `margin`
+    置 0 也不会反映到屏幕上。
+    修法：
+    - `show_help` 补齐上述四行的保存 / 清零 / 恢复（含 `editwincols`
+      同步，否则折行宽度也会跟着带边距）。
+    - 绘制改用保存值：新增 `winio::margin()`（对应 C 的全局 `margin`），
+      `place_the_cursor`、`draw_row`、`update_line`、
+      `update_softwrapped_line`、鼠标点击换算都改读它；
+      `current_margin()` 保留为 `confirm_margin()` 的"应有值"计算，
+      语义与 C 的 `digits(filebot->lineno) + 1` 一致。
+    证据：`tests/help_viewer.rs`（`drawing_margin_follows_saved_value`、
+    `help_viewer_has_no_line_number_margin`）。另在 Windows 上以 `tests/`
+    之外的临时用例直接调用 `show_help()`（注入 `^G` 退出）并抓取终端
+    输出确认：帮助页各行均从第 1 列开始（无 `30`/`31` 行号），退出后
+    编辑器行号恢复；该临时用例已删除，不是长期测试。Linux 未实机验证。
+
 ---
 
 ## 五、功能模块状态
