@@ -241,6 +241,31 @@ pub fn tx(key: &str) -> String {
     t(key, &HashMap::new())
 }
 
+/// 按 gettext 的 `_(msgid)` 语义取译文：**键不存在时返回原文**，而不是
+/// `[[key]]` 占位。
+///
+/// 用于那些"消息本身既可翻译、也可能本就不该翻译"的场合：C 版帮助页对
+/// `f->phrase` 调用 `_()`，未收录的 msgid 原样显示（例如帮助查看器自身
+/// 那两个描述为 "x" 的条目）。本移植的 `FuncStruct::phrase` 存的是 ftl
+/// 键名，因此需要这种回退来保持同样的行为。
+pub fn tx_or_msgid(key: &str) -> String {
+    let lookup = |lang: &str| -> Option<String> {
+        ensure_loaded(lang).ok()?;
+        LOCALE_MAP.with(|m| {
+            m.borrow()
+                .get(lang)
+                .filter(|lib| lib.entries.contains_key(key))
+                .map(|lib| lib.format_message(key, &HashMap::new()))
+        })
+    };
+
+    /* 优先当前语言，其次 en-US；都没有就按 gettext 语义显示 msgid 原文。 */
+    let lang = current_lang();
+    lookup(&lang)
+        .or_else(|| lookup("en-US"))
+        .unwrap_or_else(|| key.to_string())
+}
+
 // ================ 宏 ================
 
 /// 编译期转发的翻译宏。支持两种形式：

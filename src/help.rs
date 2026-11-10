@@ -128,33 +128,43 @@ pub fn help_init() {
             continue;
         }
         let func = f_ref.func;
-        let phrase = f_ref.phrase.to_string();
+        /* C 版这里是 `_(f->phrase)`：快捷键描述也要过一遍 gettext。
+         * 本移植的 phrase 存的是 ftl 键名（`gist-*`），因此按运行时键查表；
+         * 直接拼 phrase 会把键名原样写进帮助文本（此前正是如此）。
+         * 用 tx_or_msgid 而非 tx：帮助查看器自己那两个条目（C 里 phrase
+         * 就是 "x"，本不该翻译）要按 gettext 语义原样显示，而不是
+         * `[[x]]` 占位。 */
+        let phrase = crate::i18n::tx_or_msgid(f_ref.phrase);
         let blank_after = f_ref.blank_after;
         drop(f_ref);
 
         let mut tally = 0;
-        let mut first_keys = String::new();
+        let mut first_key = String::new();
+        let mut second_key = String::new();
         let shortcuts = global::iter_shortcuts();
         for s in &shortcuts {
             let s_ref = s.borrow();
             if (s_ref.menus & currmenu) != 0 && s_ref.func == func && !s_ref.keystr.is_empty() {
                 if tally == 0 {
-                    first_keys = format!("{:<16}", s_ref.keystr);
+                    first_key = s_ref.keystr.clone();
                     tally = 1;
                 } else {
-                    first_keys = format!("{}({})", first_keys, s_ref.keystr);
+                    second_key = s_ref.keystr.clone();
                     tally = 2;
                     break;
                 }
             }
         }
 
+        /* 对应 C 版 `help_init` 的列宽："Make the first column 7 cells wide
+         * and the second 10."——两列合计 17 单元格，描述一律从第 17 列开始；
+         * 只有一个键时 C 是先 `ptr += 7` 再 `ptr += 10`，效果相同。 */
         if tally == 0 {
             help_text.push_str("\t\t ");
         } else if tally == 1 {
-            help_text.push_str(&format!("{:<10}", first_keys));
+            help_text.push_str(&format!("{:<17}", first_key));
         } else {
-            help_text.push_str(&first_keys);
+            help_text.push_str(&format!("{:<7}{:<10}", first_key, format!("({})", second_key)));
         }
 
         help_text.push_str(&phrase);

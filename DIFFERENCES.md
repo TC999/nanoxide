@@ -360,6 +360,35 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
       （`had_invalid`），行内任何非法字节都会拒绝参数。极端行上错误分类
       可能不同，属实现层保守化。
 
+19. ✅ **帮助页的快捷键描述已翻译**（对应用户报告的症状
+    `^G              (F1)help_gist`）。对照 `help.c` 的 `help_init`：
+    C 版是 `sprintf(ptr, "%s\n", _(f->phrase))`，即每条描述都要过
+    gettext；本移植的 `FuncStruct::phrase` 存的是 ftl 键名
+    （`help_gist` 之类），`help_init` 却直接 `push_str(&phrase)`，于是
+    键名原样上了屏幕。同时 `locales/*.ftl` 里**根本没有**这些描述条目，
+    等于没有译文可查。
+    修法：
+    - `help_init` 改用新增的 `i18n::tx_or_msgid(f_ref.phrase)` 查表。
+      该函数按 gettext 语义处理——键不存在时返回 msgid 原文，而不是
+      `[[key]]` 占位；这样帮助查看器自身那两条 `phrase = "x"` 的条目
+      （C 里本就不该翻译）不会显示成 `[[x]]`。
+    - 键名统一改为 `gist-*`，并把 `global.c` 里 104 条 `*_gist` 的 msgid
+      逐条加入 `en-US.ftl`，译文逐条取自 `po/zh_CN.po`（如 `help_gist`
+      → `gist-help` = 「显示帮助」；Rust 侧命名与 C 的对应关系：
+      `casesens`→`case`、`backwards`→`reverse`、`dosformat`→`dos`、
+      `insert`→`readfile`、`location`→`cursorpos`、`complete`→`completion`、
+      `linter`→`lint`、`prevbuf`/`nextbuf`→`prevfile`/`nextfile`、
+      `flip*`→对应被翻转的原 gist、`left`/`right`→`back`/`forward`）。
+      Rust 独有的 `gist-tosearch`（MGOTOLINE 的 To Search）沿用
+      `locales` 里原有的「跳至文字」。
+    - 帮助列表列宽按 C 的注释「Make the first column 7 cells wide and the
+      second 10」重排（此前两键条目用 `{:<16}` 再拼 `(键)`，少一格；
+      单键条目描述提前到第 11 列）。修正后与原版逐字对齐：
+      `^G     (F1)      Display this help text`。
+    证据：`tests/help_viewer.rs`（描述已翻译/无键名泄漏/列宽）、
+    `tests/help_i18n.rs`（zh-CN 下取 po 译文）。静态阅读 + 单元测试，
+    未做交互式手工验证。
+
 ---
 
 ## 五、功能模块状态
