@@ -2209,6 +2209,17 @@ pub fn beep() {
 /// 重绘编辑窗口：必要时调整视口并标记需要刷新
 /// （对应 `edit_redraw`；渲染细节由 `edit_refresh` 完成）。
 pub fn edit_redraw(old_current: &LineRef, manner: UpdateType) {
+    /* 光标移动后，目标列跟随光标的实际列。水平移动（do_left/do_right 等）
+     * 不直接改 placewewant，靠这里同步；否则之后按上/下箭头仍按旧目标列
+     * 定位，光标会落到新行行首（对应 C 版 `edit_redraw` 开头的
+     * `openfile->placewewant = xplustabs();`）。 */
+    let pww = utils::xplustabs();
+    with_global_mut(|g| {
+        if let Some(of) = &g.openfile {
+            of.borrow_mut().placewewant = pww;
+        }
+    });
+
     if manner == UpdateType::Flowing {
         /* 若光标移动，确保当前行可见。 */
         let moved = with_global(|g| {
