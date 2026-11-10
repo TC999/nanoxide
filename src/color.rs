@@ -706,9 +706,11 @@ const HUES: [&str; 34] = [
     "grey", "gray",
 ];
 
-/// 对应每个色名的颜色值（对应 C 的 indices 表）。
+/// 对应每个色名的颜色值（对应 C 的 indices 表，rcfile.c:1041-1047）。
+/// 前 8 项按 ncurses 常量：COLOR_RED=1、COLOR_GREEN=2、COLOR_BLUE=4、
+/// COLOR_YELLOW=3、COLOR_CYAN=6、COLOR_MAGENTA=5、COLOR_WHITE=7、COLOR_BLACK=0。
 const INDICES: [i16; 34] = [
-    1, 2, 3, 4, 6, 5,
+    1, 2, 4, 3, 6, 5,
     7, 0, -1,
     204, 163, 134, 38, 48, 148,
     215, 208, 137, 175, 127, 98,

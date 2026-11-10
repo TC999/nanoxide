@@ -120,6 +120,19 @@ rc 文件方面：9.2 在未启用 libmagic 时的 68 个 `set` 选项名全部�
 magic comment formatter linter tabgives include extendsyntax`）也都有处理。
 ❓ 但只做了字符串比对，**每个选项是否真正生效未逐一验证**。
 
+已修复（2026-11，对照 nano 9.2 rcfile.c 静态核对 + `tests/rcfile_compat.rs`）：
+
+- ✅ `extendsyntax` 存入 augmentations 的 data 此前丢掉命令名
+  （`next_word` 截断后才取值），延迟应用必报 "not understood"；
+  现按 C 版 rcfile.c:1448（`argument = copy_of(ptr)` 在截断前整段复制）
+  存完整命令串，应用时再拆词分发。
+- ✅ `syntax "x`（引号不配对）此前被误判为 "Missing syntax name"；
+  现按 C 版 rcfile.c:646-651 在截词前检查原始行（`"` 后紧跟行尾或
+  `"` 才算空名），`"x` 走 "Unpaired quote" 分支。
+- ✅ `color.rs` 的 `INDICES` 表把 blue/yellow 颜色值写反（3/4 互换），
+  导致 `color blue` 渲染为黄色；现按 C 版 rcfile.c:1041-1047 的
+  ncurses 常量（COLOR_BLUE=4、COLOR_YELLOW=3）修正。
+
 ---
 
 ## 四、行为差异
@@ -329,6 +342,23 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
     四项；均通过真实的 Alt+6 `KeyEvent` → `translate_keycode` →
     `handle_input_key` 分发）。已在 Windows 实机验证修复有效（用户确认）；
     Linux 终端未实机验证。
+18. ⚠️ **rcfile 的语法加载时机与 C 版不同（有意偏离，静态阅读对照）**：
+    - **急切全量加载**：C 版两阶段——启动只做 intro 扫描（rcfile.c
+      `parse_rcfile(..., FALSE, TRUE)`），打开文件命中某语法时才
+      `parse_one_include(sntx->filename, sntx)` 懒加载其颜色规则
+      （color.c:225-228）。Rust 版在 `parse_rcfile` 里 intro 扫描后立即对
+      每个新语法做第二遍完整解析，`filename` 恒置 None（color.rs 注释）。
+      可见影响：语法文件里的非法正则在**启动时全部报错**（C 版只报实际
+      用到的语法）；启动开销随语法文件规模线性增长。
+    - **glob 无匹配/不可读目录静默跳过**：C 版 `glob(GLOB_ERR|GLOB_NOCHECK)`
+      遇不可读目录报 "Error expanding"（rcfile.c:993-1001）；Rust 版
+      `read_dir` 失败即忽略该段（rcfile.rs `expand_glob_dir`），无匹配时
+      GLOB_NOCHECK 语义（返回原模式）已对齐。Windows 目录权限语义不同，
+      静默降级算合理降级，但未对照原版。
+    - **UTF-8 校验范围更宽**：C 版只对 `set` 选项参数做 `mbstowcs` 校验
+      （rcfile.c:1584-1590）；Rust 对整行做 `from_utf8` 预检
+      （`had_invalid`），行内任何非法字节都会拒绝参数。极端行上错误分类
+      可能不同，属实现层保守化。
 
 ---
 

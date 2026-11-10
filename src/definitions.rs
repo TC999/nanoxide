@@ -576,6 +576,9 @@ pub struct KeyStruct {
 
 /// rcfile 中 bind/unbind 命令登记的用户绑定（对应 rcfile.c parse_binding
 /// 对 sclist 的修改；供主循环按键分发使用，覆盖内置硬编码键位）。
+/// 注意：C 版没有对应结构——parse_binding 直接改 sclist，分发时也只查
+/// sclist；这里的双登记（shortcuts + bound_keys）是 Rust 分发层的移植机制，
+/// 未对照原版，属实现层扩展。
 #[derive(Debug, Clone)]
 pub struct BoundKey {
     pub keystr: String,
@@ -762,9 +765,10 @@ pub struct GlobalState {
     pub punct: Option<String>,
     pub brackets: Option<String>,
     pub quotestr: Option<String>,
-    /// bind 命令登记的用户绑定（覆盖内置键位）。
+    /// bind 命令登记的用户绑定（覆盖内置键位）。C 版无对应结构，见 BoundKey 注释。
     pub bound_keys: Vec<BoundKey>,
     /// unbind 命令登记的键（keycode, menus 掩码），命中时按键被忽略。
+    /// C 版无对应结构：unbind 直接从 sclist 摘除菜单位。
     pub unbound_keys: Vec<(i32, i32)>,
     /// 是否正在录制宏（对应 C 版 recording）。
     pub recording: bool,

@@ -64,6 +64,28 @@ fn verify_bind_unbind() {
 }
 
 #[test]
+fn verify_syntax_name_error_classification() {
+    /* 对照 C 版 rcfile.c:647-659（parse_next_word 之前的原始行检查）：
+     * 行首直接跟 " 或 "" 是空名（Missing syntax name）；
+     * "x 是引号不配对的名字（Unpaired quote）。
+     * 两种情况都不得创建名为 x 的语法。 */
+    nanoxide::rcfile::parse_rcfile_line("\"", "test", 1);
+    let created1 =
+        with_global(|g| g.syntaxes.as_ref().and_then(|s| s.borrow().name.clone()));
+    assert_ne!(created1.as_deref(), Some("x"), "\" 不应创建语法");
+
+    setup();
+    nanoxide::rcfile::parse_rcfile_line("\"x", "test", 1);
+    let created2 =
+        with_global(|g| g.syntaxes.as_ref().and_then(|s| s.borrow().name.clone()));
+    assert_ne!(
+        created2.as_deref(),
+        Some("x"),
+        "\"x 引号不配对，不得创建语法（修复前会被误判为空名）"
+    );
+}
+
+#[test]
 fn verify_set_options() {
     setup();
     let rc = write_rc(
@@ -116,7 +138,7 @@ fn verify_extendsyntax_and_include() {
     let color = { let r = sntx.borrow(); r.color.clone() };
     assert!(color.is_some(), "c 语法应有颜色规则");
 
-    // extendsyntax 追加的规则应存在
+    // extendsyntax 追加的规则应存在（对应 C 版 rcfile.c:950-962 的应用循环）
     let colors: Vec<ColorRef> = {
         let mut v = Vec::new();
         let mut cur = { let r = sntx.borrow(); r.color.clone() };
@@ -128,6 +150,45 @@ fn verify_extendsyntax_and_include() {
         v
     };
     assert!(colors.len() >= 10, "应有至少 10 条规则，实际 {}", colors.len());
+
+    /* 链表按追加序排列：c.nanorc 自带规则在前，extendsyntax 的规则在最后。
+     * data 必须保留完整命令（对照 C 版 rcfile.c:1448 argument = copy_of(ptr)
+     * 在 parse_next_word 截断前整段复制），否则应用时报 "not understood"。 */
+    let last = colors.last().unwrap();
+    let (last_fg, last_start) = {
+        let r = last.borrow();
+        (r.fg, r.start.as_ref().map(|p| p.pattern_str().to_string()))
+    };
+    assert_eq!(
+        last_start.as_deref(),
+        Some("MYKEYWORD"),
+        "最后一条规则应是 extendsyntax 追加的 brightred \"MYKEYWORD\""
+    );
+    /* brightred → COLOR_RED(1)；若命令名丢失，此规则根本不会生成。 */
+    assert_eq!(last_fg, 1, "brightred 应解析为红色前景");
+}
+
+#[test]
+fn verify_extendsyntax_small_syntax() {
+    setup();
+    /* 小语法 + extendsyntax：精确断言追加规则存在（避免依赖系统语法文件）。 */
+    let rc = write_rc(
+        "syntax extst\n\
+         color red \"aaa\"\n\
+         extendsyntax extst color blue \"bbb\"\n",
+    );
+    nanoxide::rcfile::parse_rcfile(&rc);
+
+    let sntx = with_global(|g| g.syntaxes.clone()).expect("应有语法 extst");
+    let mut fgs: Vec<i16> = Vec::new();
+    let mut cur = { let r = sntx.borrow(); r.color.clone() };
+    while let Some(c) = cur {
+        let (fg, next) = { let r = c.borrow(); (r.fg, r.next.clone()) };
+        fgs.push(fg);
+        cur = next;
+    }
+    /* red=1、blue=4（对应 INDICES 表）；extendsyntax 规则应追加在尾部。 */
+    assert_eq!(fgs, vec![1, 4], "extendsyntax 的 blue 规则应追加在 red 之后");
 }
 
 #[test]

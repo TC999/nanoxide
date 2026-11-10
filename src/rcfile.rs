@@ -399,13 +399,16 @@ fn check_for_nonempty_syntax() {
 
 /// 开始一个新的 syntax 定义（对应 `begin_new_syntax`）。
 fn begin_new_syntax(ptr: &str, filename: &str) {
-    let (nameptr, rest) = next_word(ptr);
-
-    /* 检查语法名不为空。 */
-    if nameptr.is_empty() || (nameptr.starts_with('"') && (nameptr.len() <= 1 || nameptr.len() == 2)) {
+    /* 检查语法名不为空。对应 C 版 rcfile.c:646-651 在 parse_next_word 之前的
+     * 检查：空串，或 `"` 后紧跟行尾/另一个 `"`（即 " 与 "" 开头的词）都算空名；
+     * 注意 "x 之类引号不配对的名字不走此分支，留给下面的配对检查。 */
+    let bytes = ptr.as_bytes();
+    if bytes.is_empty() || (bytes[0] == b'"' && (bytes.len() == 1 || bytes[1] == b'"')) {
         jot_error(&crate::t!("rcfile-missing_syntax_name"));
         return;
     }
+
+    let (nameptr, rest) = next_word(ptr);
 
     /* 检查引号配对。 */
     if nameptr.starts_with('"') != nameptr.ends_with('"') {
@@ -1156,7 +1159,7 @@ fn handle_rcfile_line(line: &str, just_syntax: bool, intros_only: bool, had_inva
             return false;
         };
 
-        let (kw2, argument) = next_word(rest2);
+        let (kw2, rest3) = next_word(rest2);
 
         /* 文件匹配命令立即处理（keyword 改为该命令并落入下方分支）；
          * 其余命令存入 augmentations 供以后应用。 */
@@ -1165,12 +1168,15 @@ fn handle_rcfile_line(line: &str, just_syntax: bool, intros_only: bool, had_inva
             set_open_syntax(true);
             drop_open = true;
             keyword = kw2;
-            rest = argument;
+            rest = rest3;
         } else {
+            /* data 存完整命令串（含命令名），对应 C 版 rcfile.c:1448 的
+             * argument = copy_of(ptr)（在 parse_next_word 截断前整段复制）；
+             * 应用时 apply_augmentations 再拆出命令名分发。 */
             let newitem = Rc::new(RefCell::new(AugmentStruct {
                 filename: get_nanorc(),
                 lineno: get_rcfile_lineno() as isize,
-                data: Some(argument.to_string()),
+                data: Some(rest2.to_string()),
                 next: None,
             }));
             let mut l = sntx.borrow_mut();
