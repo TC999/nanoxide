@@ -325,3 +325,54 @@ fn binary_listsyntaxes_exits_cleanly() {
     assert_eq!(out.status.code(), Some(0));
     assert!(!out.stdout.is_empty(), "-z 应输出一行标题");
 }
+
+/// -h 的说明文本走 i18n（对应 C 版 usage() 的 `_()`）：
+/// 中文环境输出 po 译文，英文环境输出 msgid 原文。
+/// LANG / NANORS_LOCALES 显式固定：并行测试进程可能改过进程级环境变量。
+#[test]
+fn binary_help_is_translated() {
+    let exe = env!("CARGO_BIN_EXE_nax");
+    let locales = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("locales")
+        .into_os_string()
+        .into_string()
+        .unwrap();
+
+    let run = |lang: &str| {
+        Command::new(exe)
+            .arg("-h")
+            .env("LANG", lang)
+            .env("NANORS_LOCALES", &locales)
+            .output()
+            .unwrap()
+    };
+
+    let en = run("en_US.UTF-8");
+    assert_eq!(en.status.code(), Some(0), "-h 应正常退出");
+    let en_text = String::from_utf8_lossy(&en.stdout);
+    assert!(
+        en_text.contains("Usage: nax [OPTIONS] [[+LINE[,COLUMN]] FILE]..."),
+        "英文 usage 头缺失：\n{en_text}"
+    );
+    assert!(
+        en_text.contains("Enable smart home key")
+            && en_text.contains("Use better-known key bindings"),
+        "英文选项描述缺失：\n{en_text}"
+    );
+
+    let zh = run("zh_CN.UTF-8");
+    assert_eq!(zh.status.code(), Some(0));
+    let zh_text = String::from_utf8_lossy(&zh.stdout);
+    assert!(
+        zh_text.contains("用法: nax [选项] [[+行[,列]] 文件名]..."),
+        "中文 usage 头缺失（应取 po 译文）：\n{zh_text}"
+    );
+    assert!(
+        zh_text.contains("启用智能 HOME 键") && zh_text.contains("使用更加知名的按键绑定"),
+        "中文选项描述缺失（应取 po 译文）：\n{zh_text}"
+    );
+    assert!(
+        !zh_text.contains("Enable smart home key"),
+        "中文环境不应残留英文选项描述：\n{zh_text}"
+    );
+}

@@ -57,6 +57,7 @@
 | 复数 | `ngettext` | `_one` / `_many` 双键，由代码按数量选择（`files-wrote_*`、`files-lines_*`、`search-replaced_*`、`winio-minibar_line_*`、`count-{line,word,char}_*`） |
 | 缺失文案 | — | 无（`tests/i18n_keys.rs` 扫描 `src/` 里的 `t!` 字面量键，校验两种语言都有） |
 | 底部栏标签 | `add_to_funcs` 的 tag | 全部走 `t!("key-*")`，文本按 9.2 `global.c` 的 tag 对齐 |
+| `-h` 说明文本 | `usage()` 里的 `_("...")` / `N_("...")` | 全部走 `t!("cmdline-*")`（`cmdline-usage`、`cmdline-opt_*`、带参旗标 `cmdline-short_/long_*`），中文取 `po/zh_CN.po` 的 msgstr |
 
 README 写的是 fluent，但项目并未依赖 fluent crate，格式只是类 ftl。
 
@@ -643,7 +644,12 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   （标志位经 `clone_flags` / `restore_flags` 合并，`-I` 整块跳过 rc）
 - ✅ minibar 刷新、`CONSTANT_SHOW`、`confirm_margin`、信号标志消费
 - ✅ 多命令行文件、`+LINE,COLUMN`、colon-parsing（`file:line:col`）、命令行搜索串
-- ✅ `--listsyntaxes`（`list_syntax_names`）；`-h` 的选项表已按 9.2 的 `usage()` 重写
+- ✅ `--listsyntaxes`（`list_syntax_names`）；`-h` 的选项表已按 9.2 的 `usage()` 重写，
+  且全部说明文本走 `t!("cmdline-*")`：英文取 po 的 msgid，中文逐字取
+  `nano/po/zh_CN.po` 的 msgstr；`print_opt` 的列对齐用 `utils::breadth`
+  （wcwidth 语义，中文旗标如 `-C <目录>` 不再错位），带参数的短/长旗标
+  （`-C <dir>`、`--quotestr=<regex>` 等）在 po 里是独立 msgid，同样走 `t!`
+  （`tests/command_line.rs::binary_help_is_translated`，实际运行验证）
 - ✅ BOM 提示：光标停在 UTF-8 BOM 上时显示 "Byte Order Mark"，倒计时 1
   （`winio::cursor_is_on_bom` / `set_blankdelay_to_one`，`tests/bom_notice.rs`）
 - ✅ `ZERO` 模式的布局与重绘：无标题栏、编辑区延伸到状态行
@@ -651,7 +657,9 @@ magic comment formatter linter tabgives include extendsyntax`）也都有处理�
   底部栏行数变化；主循环在有消息时重绘整屏、次要消息时重绘编辑区
   （`tests/zero_mode.rs`）。简化：C 只重画状态行/最后一行，这里用整屏
   重绘代替（结果相同，多画几行）。
-- ❓ `-h` 输出与 C 版 `usage()` 的逐字对齐（受限于未接入的 gettext 文案）
+- ✅ `-h` 输出与 C 版 `usage()` 的文案对齐：所有 msgid（含带参旗标）已接入
+  i18n；与 C 版的残余差异仅两点——程序名显示为 `nax`（C 显示 `nano`）、
+  无 libmagic 故无 `-!`/`--magic` 行（与未编译 libmagic 的 nano 一致）
 
 ### 8. 覆盖较完整的模块
 

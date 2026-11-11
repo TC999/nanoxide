@@ -248,6 +248,98 @@ rcfile-could_not_find = Could not find syntax "{name}" to extend
 # ---------- command line（对应 nano.c 的 usage / list_syntax_names） ----------
 cmdline-available_syntaxes = Available syntaxes:
 cmdline-type_help = Type '{arg}' -h for a list of available options.
+#
+# -h 说明文本：英文取 nano 9.2 po 的 msgid（nano/src/nano.c usage()），
+# 中文取 nano/po/zh_CN.po 的 msgstr，逐字照抄、不意译。msgid/msgstr 把
+# 程序名写死为 nano；本移植二进制名是 nax，故值里写 nax（与移植版
+# print_usage 既有行为一致）。
+cmdline-usage = Usage: nax [OPTIONS] [[+LINE[,COLUMN]] FILE]...
+cmdline-cursor_hint = To place the cursor on a specific line of a file, put the line number with
+cmdline-cursor_hint_cont = a '+' before the filename.  The column number can be added after a comma.
+cmdline-stdin_hint = When a filename is '-', nax reads data from standard input.
+cmdline-header_short = Option
+cmdline-header_long = Long option
+cmdline-header_meaning = Meaning
+# 带参数的旗标本身也过 gettext（对应 print_opt(_("-C <dir>"), ...)）。
+cmdline-short_backupdir = -C <dir>
+cmdline-long_backupdir = --backupdir=<dir>
+cmdline-short_guidestripe = -J <number>
+cmdline-long_guidestripe = --guidestripe=<number>
+cmdline-short_quotestr = -Q <regex>
+cmdline-long_quotestr = --quotestr=<regex>
+cmdline-short_tabsize = -T <number>
+cmdline-long_tabsize = --tabsize=<number>
+cmdline-short_wordchars = -X <string>
+cmdline-long_wordchars = --wordchars=<string>
+cmdline-short_syntax = -Y <name>
+cmdline-long_syntax = --syntax=<name>
+cmdline-short_rcfile = -f <file>
+cmdline-long_rcfile = --rcfile=<file>
+cmdline-short_operatingdir = -o <dir>
+cmdline-long_operatingdir = --operatingdir=<dir>
+cmdline-short_fill = -r <number>
+cmdline-long_fill = --fill=<number>
+cmdline-short_speller = -s <program>
+cmdline-long_speller = --speller=<program>
+# 选项描述（key 按长选项名命名，可追溯到 C 版 usage() 的调用行）。
+cmdline-opt_smarthome = Enable smart home key
+cmdline-opt_backup = Save backups of existing files
+cmdline-opt_backupdir = Directory for saving unique backup files
+cmdline-opt_boldtext = Use bold instead of reverse video text
+cmdline-opt_tabstospaces = Convert typed tabs to spaces
+cmdline-opt_newbuffer = Read a file into a new buffer by default
+cmdline-opt_locking = Use (vim-style) lock files
+cmdline-opt_historylog = Save & reload old search/replace strings
+cmdline-opt_ignorercfiles = Don't look at nanorc files
+cmdline-opt_guidestripe = Show a guiding bar at this column
+cmdline-opt_rawsequences = Fix numeric keypad key confusion problem
+cmdline-opt_nonewlines = Don't add an automatic newline
+cmdline-opt_trimblanks = Trim tail spaces when hard-wrapping
+cmdline-opt_noconvert = Don't convert files from DOS format
+cmdline-opt_bookstyle = Leading whitespace means new paragraph
+cmdline-opt_positionlog = Save & restore position of the cursor
+cmdline-opt_quotestr = Regular expression to match quoting
+cmdline-opt_restricted = Restrict access to the filesystem
+cmdline-opt_softwrap = Display overlong lines on multiple rows
+cmdline-opt_tabsize = Make a tab this number of columns wide
+cmdline-opt_quickblank = Wipe status bar upon next keystroke
+cmdline-opt_version = Print version information and exit
+cmdline-opt_wordbounds = Detect word boundaries more accurately
+cmdline-opt_wordchars = Which other characters are word parts
+cmdline-opt_syntax = Syntax definition to use for coloring
+cmdline-opt_zap = Let Bsp and Del erase a marked region
+cmdline-opt_atblanks = When soft-wrapping, do it at whitespace
+cmdline-opt_breaklonglines = Automatically hard-wrap overlong lines
+cmdline-opt_constantshow = Constantly show cursor position
+cmdline-opt_rebinddelete = Fix Backspace/Delete confusion problem
+cmdline-opt_emptyline = Keep the line below the title bar empty
+cmdline-opt_rcfile = Use only this file for configuring nax
+cmdline-opt_showcursor = Show cursor in file browser & help text
+cmdline-opt_help = Show this help text and exit
+cmdline-opt_autoindent = Automatically indent new lines
+cmdline-opt_jumpyscrolling = Scroll per half-screen, not per line
+cmdline-opt_cutfromcursor = Cut from cursor to end of line
+cmdline-opt_linenumbers = Show line numbers in front of the text
+cmdline-opt_mouse = Enable the use of the mouse
+cmdline-opt_noread = Do not read the file (only write it)
+cmdline-opt_operatingdir = Set operating directory
+cmdline-opt_preserve = Preserve XON (^Q) and XOFF (^S) keys
+cmdline-opt_indicator = Show a position+portion indicator
+cmdline-opt_fill = Set width for hard-wrap and justify
+cmdline-opt_speller = Use this alternative spell checker
+cmdline-opt_saveonexit = Save changes on exit, don't prompt
+cmdline-opt_unix = Save a file by default in Unix format
+cmdline-opt_view = View mode (read-only)
+cmdline-opt_nowrap = Don't hard-wrap long lines [default]
+cmdline-opt_nohelp = Don't show the two help lines
+cmdline-opt_afterends = Make Ctrl+Right stop at word ends
+cmdline-opt_listsyntaxes = List the names of available syntaxes
+cmdline-opt_colonparsing = Accept 'filename:linenumber' notation
+cmdline-opt_stateflags = Show some states on the title bar
+cmdline-opt_minibar = Show a feedback bar at the bottom
+cmdline-opt_zero = Hide all bars, use whole terminal
+cmdline-opt_solosidescroll = Scroll only the current line sideways
+cmdline-opt_modernbindings = Use better-known key bindings
 
 # ---------- history（历史记录/注册表） ----------
 history-error_reading = Error reading {name}: {err}

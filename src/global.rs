@@ -1441,89 +1441,212 @@ fn print_version() {
     println!("Compiled options: --enable-utf8");
 }
 
+/// 打印一行“短选项 长选项 说明”（对应 C 版 nano.c 的 `print_opt`）。
+///
+/// C 版先算 `breadth(shortflag)` / `breadth(longflag)` 再补空格，对齐用的是
+/// **显示宽度**（wcwidth 语义）而非字节数——中文译文里的 `-C <目录>` 等旗标
+/// 若按字节算会多补空格导致错位，故这里用 `utils::breadth`。列宽 14/24 与
+/// C 版一致。说明文本由调用方先经 `t!` 翻译；带参数的短/长旗标本身在
+/// po 里也是独立 msgid（如 `"-C <dir>"`），同样走 `t!`。
+fn print_opt(short: &str, long: &str, description: &str) {
+    let firstwidth = crate::utils::breadth(short.as_bytes());
+    let secondwidth = crate::utils::breadth(long.as_bytes());
+
+    print!(" {}", short);
+    if firstwidth < 14 {
+        print!("{}", " ".repeat(14 - firstwidth));
+    }
+
+    print!(" {}", long);
+    if secondwidth < 24 {
+        print!("{}", " ".repeat(24 - secondwidth));
+    }
+
+    println!("{}", description);
+}
+
 /// 打印使用说明（对应 C 版 nano.c 的 usage()）。
+///
+/// 所有面向用户的文本都走 `t!`：英文键值取 nano 9.2 po 的 msgid，中文取
+/// `nano/po/zh_CN.po` 的 msgstr（见 locales/*.ftl 的 command line 区块）。
+/// 结构与 C 版逐行对应：`Usage:` 头、`+行,列` 提示、stdin 提示、表头、
+/// 选项表（RESTRICTED 下隐藏 -B/-C/-F/-H/-P/-R/-s，对应 C 版的
+/// `if (!ISSET(RESTRICTED))` 分支）。无 libmagic 故没有 `-!` / `--magic`
+/// 行，与未编译 libmagic 的 nano 一致。
 fn print_usage() {
-    let print_opt = |short: &str, long: &str, description: &str| {
-        println!(" {:<14} {:<24}{}", short, long, description);
+    let opt = |short: &str, long: &str, description: String| {
+        print_opt(short, long, &description);
     };
 
-    println!("Usage: nax [OPTIONS] [[+LINE[,COLUMN]] FILE]...");
+    println!("{}", crate::t!("cmdline-usage"));
     println!();
-    println!("To place the cursor on a specific line of a file, put the line number with");
-    println!("a '+' before the filename.  The column number can be added after a comma.");
-    println!("When a filename is '-', nax reads data from standard input.");
+    println!("{}", crate::t!("cmdline-cursor_hint"));
+    println!("{}", crate::t!("cmdline-cursor_hint_cont"));
+    println!("{}", crate::t!("cmdline-stdin_hint"));
     println!();
-    print_opt("Option", "Long option", "Meaning");
-    print_opt("-A", "--smarthome", "Enable smart home key");
+    opt(
+        &crate::t!("cmdline-header_short"),
+        &crate::t!("cmdline-header_long"),
+        crate::t!("cmdline-header_meaning"),
+    );
+    opt("-A", "--smarthome", crate::t!("cmdline-opt_smarthome"));
     if !ISSET(RESTRICTED) {
-        print_opt("-B", "--backup", "Save backups of existing files");
-        print_opt("-C <dir>", "--backupdir=<dir>", "Directory for saving unique backup files");
+        opt("-B", "--backup", crate::t!("cmdline-opt_backup"));
+        opt(
+            &crate::t!("cmdline-short_backupdir"),
+            &crate::t!("cmdline-long_backupdir"),
+            crate::t!("cmdline-opt_backupdir"),
+        );
     }
-    print_opt("-D", "--boldtext", "Use bold instead of reverse video text");
-    print_opt("-E", "--tabstospaces", "Convert typed tabs to spaces");
+    opt("-D", "--boldtext", crate::t!("cmdline-opt_boldtext"));
+    opt(
+        "-E",
+        "--tabstospaces",
+        crate::t!("cmdline-opt_tabstospaces"),
+    );
     if !ISSET(RESTRICTED) {
-        print_opt("-F", "--newbuffer", "Read a file into a new buffer by default");
+        opt("-F", "--newbuffer", crate::t!("cmdline-opt_newbuffer"));
     }
-    print_opt("-G", "--locking", "Use (vim-style) lock files");
+    opt("-G", "--locking", crate::t!("cmdline-opt_locking"));
     if !ISSET(RESTRICTED) {
-        print_opt("-H", "--historylog", "Save & reload old search/replace strings");
+        opt("-H", "--historylog", crate::t!("cmdline-opt_historylog"));
     }
-    print_opt("-I", "--ignorercfiles", "Don't look at nanorc files");
-    print_opt("-J <number>", "--guidestripe=<number>", "Show a guiding bar at this column");
-    print_opt("-K", "--rawsequences", "Fix numeric keypad key confusion problem");
-    print_opt("-L", "--nonewlines", "Don't add an automatic newline");
-    print_opt("-M", "--trimblanks", "Trim tail spaces when hard-wrapping");
-    print_opt("-N", "--noconvert", "Don't convert files from DOS format");
-    print_opt("-O", "--bookstyle", "Leading whitespace means new paragraph");
+    opt(
+        "-I",
+        "--ignorercfiles",
+        crate::t!("cmdline-opt_ignorercfiles"),
+    );
+    opt(
+        &crate::t!("cmdline-short_guidestripe"),
+        &crate::t!("cmdline-long_guidestripe"),
+        crate::t!("cmdline-opt_guidestripe"),
+    );
+    opt(
+        "-K",
+        "--rawsequences",
+        crate::t!("cmdline-opt_rawsequences"),
+    );
+    opt("-L", "--nonewlines", crate::t!("cmdline-opt_nonewlines"));
+    opt("-M", "--trimblanks", crate::t!("cmdline-opt_trimblanks"));
+    opt("-N", "--noconvert", crate::t!("cmdline-opt_noconvert"));
+    opt("-O", "--bookstyle", crate::t!("cmdline-opt_bookstyle"));
     if !ISSET(RESTRICTED) {
-        print_opt("-P", "--positionlog", "Save & restore position of the cursor");
+        opt("-P", "--positionlog", crate::t!("cmdline-opt_positionlog"));
     }
-    print_opt("-Q <regex>", "--quotestr=<regex>", "Regular expression to match quoting");
+    opt(
+        &crate::t!("cmdline-short_quotestr"),
+        &crate::t!("cmdline-long_quotestr"),
+        crate::t!("cmdline-opt_quotestr"),
+    );
     if !ISSET(RESTRICTED) {
-        print_opt("-R", "--restricted", "Restrict access to the filesystem");
+        opt("-R", "--restricted", crate::t!("cmdline-opt_restricted"));
     }
-    print_opt("-S", "--softwrap", "Display overlong lines on multiple rows");
-    print_opt("-T <number>", "--tabsize=<number>", "Make a tab this number of columns wide");
-    print_opt("-U", "--quickblank", "Wipe status bar upon next keystroke");
-    print_opt("-V", "--version", "Print version information and exit");
-    print_opt("-W", "--wordbounds", "Detect word boundaries more accurately");
-    print_opt("-X <string>", "--wordchars=<string>", "Which other characters are word parts");
-    print_opt("-Y <name>", "--syntax=<name>", "Syntax definition to use for coloring");
-    print_opt("-Z", "--zap", "Let Bsp and Del erase a marked region");
-    print_opt("-a", "--atblanks", "When soft-wrapping, do it at whitespace");
-    print_opt("-b", "--breaklonglines", "Automatically hard-wrap overlong lines");
-    print_opt("-c", "--constantshow", "Constantly show cursor position");
-    print_opt("-d", "--rebinddelete", "Fix Backspace/Delete confusion problem");
-    print_opt("-e", "--emptyline", "Keep the line below the title bar empty");
-    print_opt("-f <file>", "--rcfile=<file>", "Use only this file for configuring nax");
-    print_opt("-g", "--showcursor", "Show cursor in file browser & help text");
-    print_opt("-h", "--help", "Show this help text and exit");
-    print_opt("-i", "--autoindent", "Automatically indent new lines");
-    print_opt("-j", "--jumpyscrolling", "Scroll per half-screen, not per line");
-    print_opt("-k", "--cutfromcursor", "Cut from cursor to end of line");
-    print_opt("-l", "--linenumbers", "Show line numbers in front of the text");
-    print_opt("-m", "--mouse", "Enable the use of the mouse");
-    print_opt("-n", "--noread", "Do not read the file (only write it)");
-    print_opt("-o <dir>", "--operatingdir=<dir>", "Set operating directory");
-    print_opt("-p", "--preserve", "Preserve XON (^Q) and XOFF (^S) keys");
-    print_opt("-q", "--indicator", "Show a position+portion indicator");
-    print_opt("-r <number>", "--fill=<number>", "Set width for hard-wrap and justify");
+    opt("-S", "--softwrap", crate::t!("cmdline-opt_softwrap"));
+    opt(
+        &crate::t!("cmdline-short_tabsize"),
+        &crate::t!("cmdline-long_tabsize"),
+        crate::t!("cmdline-opt_tabsize"),
+    );
+    opt("-U", "--quickblank", crate::t!("cmdline-opt_quickblank"));
+    opt("-V", "--version", crate::t!("cmdline-opt_version"));
+    opt("-W", "--wordbounds", crate::t!("cmdline-opt_wordbounds"));
+    opt(
+        &crate::t!("cmdline-short_wordchars"),
+        &crate::t!("cmdline-long_wordchars"),
+        crate::t!("cmdline-opt_wordchars"),
+    );
+    opt(
+        &crate::t!("cmdline-short_syntax"),
+        &crate::t!("cmdline-long_syntax"),
+        crate::t!("cmdline-opt_syntax"),
+    );
+    opt("-Z", "--zap", crate::t!("cmdline-opt_zap"));
+    opt("-a", "--atblanks", crate::t!("cmdline-opt_atblanks"));
+    opt(
+        "-b",
+        "--breaklonglines",
+        crate::t!("cmdline-opt_breaklonglines"),
+    );
+    opt(
+        "-c",
+        "--constantshow",
+        crate::t!("cmdline-opt_constantshow"),
+    );
+    opt(
+        "-d",
+        "--rebinddelete",
+        crate::t!("cmdline-opt_rebinddelete"),
+    );
+    opt("-e", "--emptyline", crate::t!("cmdline-opt_emptyline"));
+    opt(
+        &crate::t!("cmdline-short_rcfile"),
+        &crate::t!("cmdline-long_rcfile"),
+        crate::t!("cmdline-opt_rcfile"),
+    );
+    opt("-g", "--showcursor", crate::t!("cmdline-opt_showcursor"));
+    opt("-h", "--help", crate::t!("cmdline-opt_help"));
+    opt("-i", "--autoindent", crate::t!("cmdline-opt_autoindent"));
+    opt(
+        "-j",
+        "--jumpyscrolling",
+        crate::t!("cmdline-opt_jumpyscrolling"),
+    );
+    opt(
+        "-k",
+        "--cutfromcursor",
+        crate::t!("cmdline-opt_cutfromcursor"),
+    );
+    opt("-l", "--linenumbers", crate::t!("cmdline-opt_linenumbers"));
+    opt("-m", "--mouse", crate::t!("cmdline-opt_mouse"));
+    opt("-n", "--noread", crate::t!("cmdline-opt_noread"));
+    opt(
+        &crate::t!("cmdline-short_operatingdir"),
+        &crate::t!("cmdline-long_operatingdir"),
+        crate::t!("cmdline-opt_operatingdir"),
+    );
+    opt("-p", "--preserve", crate::t!("cmdline-opt_preserve"));
+    opt("-q", "--indicator", crate::t!("cmdline-opt_indicator"));
+    opt(
+        &crate::t!("cmdline-short_fill"),
+        &crate::t!("cmdline-long_fill"),
+        crate::t!("cmdline-opt_fill"),
+    );
     if !ISSET(RESTRICTED) {
-        print_opt("-s <program>", "--speller=<program>", "Use this alternative spell checker");
+        opt(
+            &crate::t!("cmdline-short_speller"),
+            &crate::t!("cmdline-long_speller"),
+            crate::t!("cmdline-opt_speller"),
+        );
     }
-    print_opt("-t", "--saveonexit", "Save changes on exit, don't prompt");
-    print_opt("-u", "--unix", "Save a file by default in Unix format");
-    print_opt("-v", "--view", "View mode (read-only)");
-    print_opt("-w", "--nowrap", "Don't hard-wrap long lines [default]");
-    print_opt("-x", "--nohelp", "Don't show the two help lines");
-    print_opt("-y", "--afterends", "Make Ctrl+Right stop at word ends");
-    print_opt("-z", "--listsyntaxes", "List the names of available syntaxes");
-    print_opt("-@", "--colonparsing", "Accept 'filename:linenumber' notation");
-    print_opt("-%", "--stateflags", "Show some states on the title bar");
-    print_opt("-_", "--minibar", "Show a feedback bar at the bottom");
-    print_opt("-0", "--zero", "Hide all bars, use whole terminal");
-    print_opt("-1", "--solosidescroll", "Scroll only the current line sideways");
-    print_opt("-/", "--modernbindings", "Use better-known key bindings");
+    opt("-t", "--saveonexit", crate::t!("cmdline-opt_saveonexit"));
+    opt("-u", "--unix", crate::t!("cmdline-opt_unix"));
+    opt("-v", "--view", crate::t!("cmdline-opt_view"));
+    opt("-w", "--nowrap", crate::t!("cmdline-opt_nowrap"));
+    opt("-x", "--nohelp", crate::t!("cmdline-opt_nohelp"));
+    opt("-y", "--afterends", crate::t!("cmdline-opt_afterends"));
+    opt(
+        "-z",
+        "--listsyntaxes",
+        crate::t!("cmdline-opt_listsyntaxes"),
+    );
+    opt(
+        "-@",
+        "--colonparsing",
+        crate::t!("cmdline-opt_colonparsing"),
+    );
+    opt("-%", "--stateflags", crate::t!("cmdline-opt_stateflags"));
+    opt("-_", "--minibar", crate::t!("cmdline-opt_minibar"));
+    opt("-0", "--zero", crate::t!("cmdline-opt_zero"));
+    opt(
+        "-1",
+        "--solosidescroll",
+        crate::t!("cmdline-opt_solosidescroll"),
+    );
+    opt(
+        "-/",
+        "--modernbindings",
+        crate::t!("cmdline-opt_modernbindings"),
+    );
 }
 
 // ======================== rcfile 辅助（对应 global.c / rcfile.c） ========================

@@ -254,6 +254,94 @@ rcfile-could_not_find = 无法找到要扩展的语法“{name}”
 # ---------- command line（对应 nano.c 的 usage / list_syntax_names） ----------
 cmdline-available_syntaxes = 可用的语法：
 cmdline-type_help = 输入“{arg} -h”以获取所有可用选项的列表。
+#
+# -h 说明文本：译文逐字取自 nano/po/zh_CN.po（src/nano.c usage() 各 msgid 的
+# msgstr），与 en-US.ftl 的键一一对应；仅把程序名 nano 换成本移植的 nax。
+cmdline-usage = 用法: nax [选项] [[+行[,列]] 文件名]...
+cmdline-cursor_hint = 如需启动时将游标置放在文件的特定行上，请在文件名前使用“+”符号加上行号以
+cmdline-cursor_hint_cont = 进行指定。如需同时指定特定列，可以在其后添加半角逗号和列号。
+cmdline-stdin_hint = 当文件名为“-”时，nax 从标准输入读取数据。
+cmdline-header_short = 选项
+cmdline-header_long = 长选项
+cmdline-header_meaning = 意义
+cmdline-short_backupdir = -C <目录>
+cmdline-long_backupdir = --backupdir=<目录>
+cmdline-short_guidestripe = -J <数字>
+cmdline-long_guidestripe = --guidestripe=<数字>
+cmdline-short_quotestr = -Q <正则表达式>
+cmdline-long_quotestr = --quotestr=<正则表达式>
+cmdline-short_tabsize = -T <数字>
+cmdline-long_tabsize = --tabsize=<数字>
+cmdline-short_wordchars = -X <字符串>
+cmdline-long_wordchars = --wordchars=<字符串>
+cmdline-short_syntax = -Y <名称>
+cmdline-long_syntax = --syntax=<名称>
+cmdline-short_rcfile = -f <文件>
+cmdline-long_rcfile = --rcfile=<文件>
+cmdline-short_operatingdir = -o <目录>
+cmdline-long_operatingdir = --operatingdir=<目录>
+cmdline-short_fill = -r <数字>
+cmdline-long_fill = --fill=<数字>
+cmdline-short_speller = -s <程序>
+cmdline-long_speller = --speller=<程序>
+cmdline-opt_smarthome = 启用智能 HOME 键
+cmdline-opt_backup = 储存既有文件的备份
+cmdline-opt_backupdir = 用以储存独一备份文件的目录
+cmdline-opt_boldtext = 用粗体替代颜色反转
+cmdline-opt_tabstospaces = 将已输入的制表符转换为空白
+cmdline-opt_newbuffer = 默认从文件读入到一个新的缓冲区
+cmdline-opt_locking = 使用（vim 风格）锁文件
+cmdline-opt_historylog = 保存并重新加载搜索/替换字符串
+cmdline-opt_ignorercfiles = 不要参考 nanorc 文件
+cmdline-opt_guidestripe = 在此栏显示一个导引条
+cmdline-opt_rawsequences = 修正数字键区按键混淆问题
+cmdline-opt_nonewlines = 不要自动添加换行符
+cmdline-opt_trimblanks = 强制折行时移除末尾空白
+cmdline-opt_noconvert = 不要从 DOS 格式转换文件
+cmdline-opt_bookstyle = 以空白字符起始表示新的段落
+cmdline-opt_positionlog = 保存和恢复光标位置
+cmdline-opt_quotestr = 匹配引用的正则表达式
+cmdline-opt_restricted = 限制对文件系统的访问
+cmdline-opt_softwrap = 以多行显示过长的行
+cmdline-opt_tabsize = 令制表符宽度为指定行数
+cmdline-opt_quickblank = 在下一次按键后清除状态栏内容
+cmdline-opt_version = 显示版本信息并离开
+cmdline-opt_wordbounds = 更正确地侦测单字边界
+cmdline-opt_wordchars = 指定哪些其它特殊字符也是单词的一部分
+cmdline-opt_syntax = 用于加亮的语法定义
+cmdline-opt_zap = 让退格键和删除键清除选中的区域
+cmdline-opt_atblanks = 软折行时在空白处进行
+cmdline-opt_breaklonglines = 对过长的行自动强制换行
+cmdline-opt_constantshow = 持续显示游标位置
+cmdline-opt_rebinddelete = 修正退格键/删除键混淆问题
+cmdline-opt_emptyline = 保持标题栏下面的行一直为空
+cmdline-opt_rcfile = 只使用这个文件配置 nax
+cmdline-opt_showcursor = 在文件浏览器和帮助文本中显示游标
+cmdline-opt_help = 显示本帮助文本并退出
+cmdline-opt_autoindent = 自动缩进新行
+cmdline-opt_jumpyscrolling = 按半屏幕滚动文本，不按行
+cmdline-opt_cutfromcursor = 从游标剪切至行尾
+cmdline-opt_linenumbers = 在文本之前显示行号
+cmdline-opt_mouse = 启用鼠标功能
+cmdline-opt_noread = 不要读取文件（仅写入）
+cmdline-opt_operatingdir = 设定操作目录
+cmdline-opt_preserve = 保留XON (^Q) 和XOFF (^S) 按键
+cmdline-opt_indicator = 显示位置+部分指示器
+cmdline-opt_fill = 设置强制换行宽度并进行重排
+cmdline-opt_speller = 使用此替代的拼写检查程序
+cmdline-opt_saveonexit = 退出时自动保存修改，不要提示
+cmdline-opt_unix = 默认将文件保存为 Unix 格式
+cmdline-opt_view = 查看（只读）模式
+cmdline-opt_nowrap = 不要为过长行强制折行 [默认]
+cmdline-opt_nohelp = 不要显示辅助区
+cmdline-opt_afterends = 使 Ctrl+Right 在单词末尾处停止
+cmdline-opt_listsyntaxes = 列出可用语法的名称
+cmdline-opt_colonparsing = 接受“文件名:行号”表示法
+cmdline-opt_stateflags = 在标题栏显示某些状态
+cmdline-opt_minibar = 在底部显示一个反馈条
+cmdline-opt_zero = 隐藏所有横栏，使用整个终端
+cmdline-opt_solosidescroll = 仅左右滚动当前行
+cmdline-opt_modernbindings = 使用更加知名的按键绑定
 
 # ---------- history（历史记录/注册表） ----------
 history-error_reading = 读取 {name} 出错：{err}
